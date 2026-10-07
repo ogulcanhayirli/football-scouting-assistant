@@ -115,7 +115,9 @@ def sync_dir(
                 tmp.replace(path)
             result.transferred.append(key)
 
-    log.info("%s (%s -> s3://%s/%s)", result.summary(), local_dir, bucket, prefix)
+    remote_url = f"s3://{bucket}/{prefix}"
+    source, target = (local_dir, remote_url) if direction == "up" else (remote_url, local_dir)
+    log.info("%s (%s -> %s)", result.summary(), source, target)
     return result
 
 

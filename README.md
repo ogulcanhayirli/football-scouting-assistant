@@ -18,6 +18,8 @@ that is reported even when it wins.
 | Repository skeleton, CI, data contracts | Done |
 | Quota aware, resumable backfill | Done, tested against a mocked API |
 | Free tier proof run (one league, one season) | Done: EPL 2023 took 51 requests and 1,074 rows passed the contract; the second run made 0 requests |
+| Full historical backfill | Done: all 31 past seasons (EPL 2010 to 2025, Süper Lig 2011 to 2025) complete, 1,178 requests |
+| Private S3 copy of the data | Done: `scout sync up` stored 2,387 files; a second run copies nothing |
 | Feasibility check and `FEASIBILITY.md` | Script done and tested offline; real run next |
 | Models, similarity search, agent, AWS stack | Not started |
 
