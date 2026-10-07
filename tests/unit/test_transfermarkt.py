@@ -1,3 +1,4 @@
+import gzip
 import shutil
 from pathlib import Path
 
@@ -75,3 +76,22 @@ def test_download_snapshot_is_idempotent(tmp_path):
     assert route.call_count == 1
     assert (tmp_path / "transfermarkt" / "players.csv.gz").read_bytes() == b"gzbytes"
     assert (tmp_path / "transfermarkt" / "players.csv.gz.meta.json").is_file()
+
+
+def test_transfers_keep_free_moves_and_blank_fees_apart(tmp_path):
+    csv = (
+        "player_id,transfer_date,transfer_season,from_club_id,to_club_id,transfer_fee\n"
+        "1,2023-07-01,23/24,10,20,15000000.0\n"
+        "2,2023-07-02,23/24,10,20,0.0\n"
+        "3,2023-07-03,23/24,10,20,\n"
+    )
+    (tmp_path / "transfers.csv.gz").write_bytes(gzip.compress(csv.encode()))
+    transfers = TransfermarktValuationProvider(tmp_path).transfers()
+    assert transfers["transfer_fee_eur"].tolist()[:2] == [15_000_000, 0]
+    assert pd.isna(transfers["transfer_fee_eur"].iloc[2])
+    assert str(transfers["transfer_date"].dtype).startswith("datetime64")
+
+
+def test_players_and_valuations_unscoped(provider, epl):
+    assert 910201 in provider.players(None)["source_player_id"].tolist()  # La Liga only
+    assert len(provider.valuations(None)) > len(provider.valuations([epl]))

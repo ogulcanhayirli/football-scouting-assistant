@@ -47,6 +47,13 @@ REQUIRED_COLUMNS: dict[str, set[str]] = {
         "current_club_id",
         "player_club_domestic_competition_id",
     },
+    "transfers.csv.gz": {
+        "player_id",
+        "transfer_date",
+        "from_club_id",
+        "to_club_id",
+        "transfer_fee",
+    },
     "appearances.csv.gz": {
         "player_id",
         "player_club_id",
@@ -133,10 +140,12 @@ class TransfermarktValuationProvider:
         )
         return grouped
 
-    def players(self, leagues: list[LeagueConfig]) -> pd.DataFrame:
-        ids = self.league_appearances(leagues)["source_player_id"].unique()
+    def players(self, leagues: list[LeagueConfig] | None) -> pd.DataFrame:
+        """Players who appeared in ``leagues``, or every player when ``leagues`` is None."""
         players = self._read("players.csv.gz")
-        players = players[players["player_id"].isin(ids)]
+        if leagues is not None:
+            ids = self.league_appearances(leagues)["source_player_id"].unique()
+            players = players[players["player_id"].isin(ids)]
         out = pd.DataFrame(
             {
                 "source": SOURCE,
@@ -154,10 +163,12 @@ class TransfermarktValuationProvider:
         )
         return out.reset_index(drop=True)
 
-    def valuations(self, leagues: list[LeagueConfig]) -> pd.DataFrame:
-        ids = self.league_appearances(leagues)["source_player_id"].unique()
+    def valuations(self, leagues: list[LeagueConfig] | None) -> pd.DataFrame:
+        """Valuations of players who appeared in ``leagues``, or of everyone when None."""
         vals = self._read("player_valuations.csv.gz")
-        vals = vals[vals["player_id"].isin(ids)]
+        if leagues is not None:
+            ids = self.league_appearances(leagues)["source_player_id"].unique()
+            vals = vals[vals["player_id"].isin(ids)]
         out = pd.DataFrame(
             {
                 "source": SOURCE,
@@ -171,3 +182,17 @@ class TransfermarktValuationProvider:
             }
         )
         return out.sort_values(["source_player_id", "valuation_date"]).reset_index(drop=True)
+
+    def transfers(self) -> pd.DataFrame:
+        """Transfers with a known fee. A fee of 0 is a free move or a loan, so it is kept
+        as 0; a blank fee is unknown and becomes missing."""
+        raw = self._read("transfers.csv.gz")
+        return pd.DataFrame(
+            {
+                "source_player_id": raw["player_id"].astype("Int64"),
+                "transfer_date": pd.to_datetime(raw["transfer_date"], errors="coerce"),
+                "from_club_id": pd.to_numeric(raw["from_club_id"], errors="coerce").astype("Int64"),
+                "to_club_id": pd.to_numeric(raw["to_club_id"], errors="coerce").astype("Int64"),
+                "transfer_fee_eur": pd.to_numeric(raw["transfer_fee"], errors="coerce"),
+            }
+        )

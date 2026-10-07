@@ -58,6 +58,7 @@ class TransfermarktConfig(BaseModel):
             "player_valuations.csv.gz",
             "appearances.csv.gz",
             "clubs.csv.gz",
+            "transfers.csv.gz",
         ]
     )
 
