@@ -65,7 +65,8 @@ src/scout/
   matching.py               player matching between sources
   feasibility.py            analysis functions used by scripts/feasibility.py
   backfill/                 runner and coverage report
-  cli.py                    `scout backfill | coverage | transfermarkt`
+  sync.py                   copy data/raw and data/processed to or from S3
+  cli.py                    `scout backfill | coverage | transfermarkt | sync`
 configs/                    backfill.free.yaml, backfill.pro.yaml
 scripts/feasibility.py      feasibility check on the free tier
 tests/unit, tests/contracts, tests/fixtures (synthetic sample)
@@ -90,6 +91,10 @@ uv run python scripts/feasibility.py --config configs/backfill.free.yaml --max-r
 
 # Full historical backfill during the Pro month
 uv run scout --config configs/backfill.pro.yaml backfill
+
+# Copy the data to the private bucket in $SCOUT_S3_BUCKET, or restore it
+# into a fresh checkout. Files already on the other side are skipped.
+uv run scout sync up                # or: sync down, --dry-run, --only raw
 ```
 
 The backfill writes `reports/coverage_report.md` and `.json`, logs to
@@ -152,7 +157,21 @@ abbreviated and long legal names, and club similarity breaks ties. Turkish
 letters are mapped explicitly before transliteration. Every non match carries
 a reason, and precision is checked by hand on a sample, not only the match rate.
 
-**D7 (proposed). Season end (30 June) as the main feature date.** Season level
+**D7. Data lives in a private S3 bucket, never in git.** `scout sync up`
+copies `data/raw` and `data/processed` to `raw/` and `processed/` in the
+bucket; `scout sync down` restores them, so a new machine or session needs no
+API requests. A file is skipped when size and MD5 match the S3 ETag. The sync
+never deletes, the IAM user has no delete permission, and bucket versioning
+keeps old copies. *Would change if* the bucket used SSE-KMS, where the ETag
+is not the MD5 and every file would be copied each time.
+
+**D8. Impossible values become missing, not guessed.** The API sometimes
+sends negative counts (EPL 2015 has `lineups: -1` for Matt Jarvis, player
+20439). The adapter stores any negative stat as missing and logs a warning
+naming the player; the raw cache keeps the original response, so the choice
+can be revisited without new requests.
+
+**D9 (proposed). Season end (30 June) as the main feature date.** Season level
 totals are then enough and cost far fewer requests than match level stats. To
 be confirmed with the feasibility results.
 

@@ -73,6 +73,28 @@ def cmd_transfermarkt(settings: Settings, args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_sync(settings: Settings, args: argparse.Namespace) -> int:
+    import os
+
+    from scout.sync import sync_data
+
+    bucket = args.bucket or os.environ.get("SCOUT_S3_BUCKET")
+    if not bucket:
+        logging.getLogger(__name__).error("Set SCOUT_S3_BUCKET or pass --bucket")
+        return 1
+    import boto3  # optional extra: uv sync --extra aws
+
+    folders = {"raw": settings.paths.raw_dir, "processed": settings.paths.processed_dir}
+    if args.only:
+        folders = {name: folders[name] for name in args.only}
+    results = sync_data(
+        boto3.client("s3"), bucket, folders, args.direction, args.prefix, args.dry_run
+    )
+    for name, result in results.items():
+        print(f"{name}: {result.summary()}{' (dry run)' if args.dry_run else ''}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="scout")
     parser.add_argument("--config", type=Path, default=Path("configs/backfill.free.yaml"))
@@ -88,6 +110,14 @@ def main(argv: list[str] | None = None) -> int:
 
     tm = sub.add_parser("transfermarkt", help="Download the transfermarkt-datasets snapshot")
     tm.set_defaults(func=cmd_transfermarkt)
+
+    sync = sub.add_parser("sync", help="Copy data/raw and data/processed to or from S3")
+    sync.add_argument("direction", choices=["up", "down"])
+    sync.add_argument("--bucket", help="Defaults to $SCOUT_S3_BUCKET")
+    sync.add_argument("--prefix", default="", help="Key prefix inside the bucket")
+    sync.add_argument("--only", action="append", choices=["raw", "processed"])
+    sync.add_argument("--dry-run", action="store_true", help="List what would be copied")
+    sync.set_defaults(func=cmd_sync)
 
     args = parser.parse_args(argv)
     settings = load_settings(args.config)
