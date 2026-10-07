@@ -1,0 +1,449 @@
+{
+ "get": "players",
+ "parameters": {
+  "league": "39",
+  "season": "2023",
+  "page": "1"
+ },
+ "errors": [],
+ "results": 3,
+ "paging": {
+  "current": 1,
+  "total": 2
+ },
+ "response": [
+  {
+   "player": {
+    "id": 900001,
+    "name": "A. Synthetic",
+    "firstname": "Alex",
+    "lastname": "Synthetic",
+    "age": 25,
+    "birth": {
+     "date": "2001-03-14",
+     "place": "Somewhere",
+     "country": "England"
+    },
+    "nationality": "England",
+    "height": "181 cm",
+    "weight": "74 kg",
+    "injured": false,
+    "photo": null
+   },
+   "statistics": [
+    {
+     "team": {
+      "id": 9001,
+      "name": "Test Town",
+      "logo": null
+     },
+     "league": {
+      "id": 39,
+      "name": "L",
+      "country": "C",
+      "logo": null,
+      "flag": null,
+      "season": 2023
+     },
+     "games": {
+      "appearences": 20,
+      "lineups": 18,
+      "minutes": 1620,
+      "number": null,
+      "position": "Defender",
+      "rating": "7.012",
+      "captain": false
+     },
+     "substitutes": {
+      "in": 2,
+      "out": 5,
+      "bench": 4
+     },
+     "shots": {
+      "total": 4,
+      "on": 5
+     },
+     "goals": {
+      "total": 0,
+      "conceded": 0,
+      "assists": 1,
+      "saves": null
+     },
+     "passes": {
+      "total": 800,
+      "key": 15,
+      "accuracy": 84
+     },
+     "tackles": {
+      "total": 45,
+      "blocks": 4,
+      "interceptions": 31
+     },
+     "duels": {
+      "total": 150,
+      "won": 80
+     },
+     "dribbles": {
+      "attempts": 3,
+      "success": 2,
+      "past": null
+     },
+     "fouls": {
+      "drawn": 10,
+      "committed": 12
+     },
+     "cards": {
+      "yellow": 3,
+      "yellowred": 0,
+      "red": 0
+     },
+     "penalty": {
+      "won": null,
+      "commited": null,
+      "scored": 0,
+      "missed": 0,
+      "saved": null
+     }
+    }
+   ]
+  },
+  {
+   "player": {
+    "id": 900002,
+    "name": "B. Placeholder",
+    "firstname": "Ben",
+    "lastname": "Placeholder",
+    "age": 25,
+    "birth": {
+     "date": "1998-11-02",
+     "place": "Somewhere",
+     "country": "Scotland"
+    },
+    "nationality": "Scotland",
+    "height": "176 cm",
+    "weight": "70 kg",
+    "injured": false,
+    "photo": null
+   },
+   "statistics": [
+    {
+     "team": {
+      "id": 9002,
+      "name": "Sample United",
+      "logo": null
+     },
+     "league": {
+      "id": 39,
+      "name": "L",
+      "country": "C",
+      "logo": null,
+      "flag": null,
+      "season": 2023
+     },
+     "games": {
+      "appearences": 20,
+      "lineups": 18,
+      "minutes": 900,
+      "number": null,
+      "position": "Midfielder",
+      "rating": "7.012",
+      "captain": false
+     },
+     "substitutes": {
+      "in": 2,
+      "out": 5,
+      "bench": 4
+     },
+     "shots": {
+      "total": 12,
+      "on": 5
+     },
+     "goals": {
+      "total": 3,
+      "conceded": 0,
+      "assists": 2,
+      "saves": null
+     },
+     "passes": {
+      "total": 640,
+      "key": 28,
+      "accuracy": 84
+     },
+     "tackles": {
+      "total": 30,
+      "blocks": 4,
+      "interceptions": 20
+     },
+     "duels": {
+      "total": 150,
+      "won": 80
+     },
+     "dribbles": {
+      "attempts": 10,
+      "success": 6,
+      "past": null
+     },
+     "fouls": {
+      "drawn": 10,
+      "committed": 12
+     },
+     "cards": {
+      "yellow": 3,
+      "yellowred": 0,
+      "red": 0
+     },
+     "penalty": {
+      "won": null,
+      "commited": null,
+      "scored": 0,
+      "missed": 0,
+      "saved": null
+     }
+    },
+    {
+     "team": {
+      "id": 9003,
+      "name": "Fixture City",
+      "logo": null
+     },
+     "league": {
+      "id": 39,
+      "name": "L",
+      "country": "C",
+      "logo": null,
+      "flag": null,
+      "season": 2023
+     },
+     "games": {
+      "appearences": 8,
+      "lineups": 5,
+      "minutes": 450,
+      "number": null,
+      "position": "Midfielder",
+      "rating": "7.012",
+      "captain": false
+     },
+     "substitutes": {
+      "in": 2,
+      "out": 5,
+      "bench": 4
+     },
+     "shots": {
+      "total": 12,
+      "on": 5
+     },
+     "goals": {
+      "total": 3,
+      "conceded": 0,
+      "assists": 2,
+      "saves": null
+     },
+     "passes": {
+      "total": 300,
+      "key": 9,
+      "accuracy": 84
+     },
+     "tackles": {
+      "total": 30,
+      "blocks": 4,
+      "interceptions": 20
+     },
+     "duels": {
+      "total": 150,
+      "won": 80
+     },
+     "dribbles": {
+      "attempts": 10,
+      "success": 6,
+      "past": null
+     },
+     "fouls": {
+      "drawn": 10,
+      "committed": 12
+     },
+     "cards": {
+      "yellow": 3,
+      "yellowred": 0,
+      "red": 0
+     },
+     "penalty": {
+      "won": null,
+      "commited": null,
+      "scored": 0,
+      "missed": 0,
+      "saved": null
+     }
+    },
+    {
+     "team": {
+      "id": 9003,
+      "name": "Fixture City",
+      "logo": null
+     },
+     "league": {
+      "id": 45,
+      "name": "L",
+      "country": "C",
+      "logo": null,
+      "flag": null,
+      "season": 2023
+     },
+     "games": {
+      "appearences": 1,
+      "lineups": 1,
+      "minutes": 90,
+      "number": null,
+      "position": "Midfielder",
+      "rating": "7.012",
+      "captain": false
+     },
+     "substitutes": {
+      "in": 2,
+      "out": 5,
+      "bench": 4
+     },
+     "shots": {
+      "total": 12,
+      "on": 5
+     },
+     "goals": {
+      "total": 3,
+      "conceded": 0,
+      "assists": 2,
+      "saves": null
+     },
+     "passes": {
+      "total": 800,
+      "key": 15,
+      "accuracy": 84
+     },
+     "tackles": {
+      "total": 30,
+      "blocks": 4,
+      "interceptions": 20
+     },
+     "duels": {
+      "total": 150,
+      "won": 80
+     },
+     "dribbles": {
+      "attempts": 10,
+      "success": 6,
+      "past": null
+     },
+     "fouls": {
+      "drawn": 10,
+      "committed": 12
+     },
+     "cards": {
+      "yellow": 3,
+      "yellowred": 0,
+      "red": 0
+     },
+     "penalty": {
+      "won": null,
+      "commited": null,
+      "scored": 0,
+      "missed": 0,
+      "saved": null
+     }
+    }
+   ]
+  },
+  {
+   "player": {
+    "id": 900003,
+    "name": "C. Mock",
+    "firstname": "Chris",
+    "lastname": "Mock",
+    "age": 25,
+    "birth": {
+     "date": "2004-07-30",
+     "place": "Somewhere",
+     "country": "Wales"
+    },
+    "nationality": "Wales",
+    "height": null,
+    "weight": null,
+    "injured": false,
+    "photo": null
+   },
+   "statistics": [
+    {
+     "team": {
+      "id": 9001,
+      "name": "Test Town",
+      "logo": null
+     },
+     "league": {
+      "id": 39,
+      "name": "L",
+      "country": "C",
+      "logo": null,
+      "flag": null,
+      "season": 2023
+     },
+     "games": {
+      "appearences": 6,
+      "lineups": 2,
+      "minutes": 310,
+      "number": null,
+      "position": "Attacker",
+      "rating": null,
+      "captain": false
+     },
+     "substitutes": {
+      "in": 2,
+      "out": 5,
+      "bench": 4
+     },
+     "shots": {
+      "total": 9,
+      "on": 5
+     },
+     "goals": {
+      "total": 2,
+      "conceded": 0,
+      "assists": 2,
+      "saves": null
+     },
+     "passes": {
+      "total": 800,
+      "key": 15,
+      "accuracy": 84
+     },
+     "tackles": {
+      "total": 30,
+      "blocks": 4,
+      "interceptions": 20
+     },
+     "duels": {
+      "total": 150,
+      "won": 80
+     },
+     "dribbles": {
+      "attempts": 10,
+      "success": 6,
+      "past": null
+     },
+     "fouls": {
+      "drawn": 10,
+      "committed": 12
+     },
+     "cards": {
+      "yellow": 3,
+      "yellowred": 0,
+      "red": 0
+     },
+     "penalty": {
+      "won": null,
+      "commited": null,
+      "scored": 0,
+      "missed": 0,
+      "saved": null
+     }
+    }
+   ]
+  }
+ ]
+}

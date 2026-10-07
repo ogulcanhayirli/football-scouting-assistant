@@ -1,0 +1,206 @@
+{
+ "get": "players",
+ "parameters": {
+  "league": "203",
+  "season": "2023",
+  "page": "1"
+ },
+ "errors": [],
+ "results": 2,
+ "paging": {
+  "current": 1,
+  "total": 1
+ },
+ "response": [
+  {
+   "player": {
+    "id": 900101,
+    "name": "Ç. Şahinoğlu",
+    "firstname": "Çağlar",
+    "lastname": "Şahinoğlu",
+    "age": 25,
+    "birth": {
+     "date": "2002-01-09",
+     "place": "Somewhere",
+     "country": "Türkiye"
+    },
+    "nationality": "Türkiye",
+    "height": "183 cm",
+    "weight": "77 kg",
+    "injured": false,
+    "photo": null
+   },
+   "statistics": [
+    {
+     "team": {
+      "id": 9101,
+      "name": "Örnek Spor",
+      "logo": null
+     },
+     "league": {
+      "id": 203,
+      "name": "L",
+      "country": "C",
+      "logo": null,
+      "flag": null,
+      "season": 2023
+     },
+     "games": {
+      "appearences": 20,
+      "lineups": 18,
+      "minutes": 2700,
+      "number": null,
+      "position": "Goalkeeper",
+      "rating": "7.012",
+      "captain": false
+     },
+     "substitutes": {
+      "in": 2,
+      "out": 5,
+      "bench": 4
+     },
+     "shots": {
+      "total": 0,
+      "on": 5
+     },
+     "goals": {
+      "total": 0,
+      "conceded": 38,
+      "assists": 0,
+      "saves": 95
+     },
+     "passes": {
+      "total": 800,
+      "key": 1,
+      "accuracy": 84
+     },
+     "tackles": {
+      "total": 0,
+      "blocks": 4,
+      "interceptions": 1
+     },
+     "duels": {
+      "total": 150,
+      "won": 80
+     },
+     "dribbles": {
+      "attempts": 0,
+      "success": 0,
+      "past": null
+     },
+     "fouls": {
+      "drawn": 10,
+      "committed": 12
+     },
+     "cards": {
+      "yellow": 3,
+      "yellowred": 0,
+      "red": 0
+     },
+     "penalty": {
+      "won": null,
+      "commited": null,
+      "scored": 0,
+      "missed": 0,
+      "saved": null
+     }
+    }
+   ]
+  },
+  {
+   "player": {
+    "id": 900102,
+    "name": "İ. Yılmazer",
+    "firstname": "İsmail",
+    "lastname": "Yılmazer",
+    "age": 25,
+    "birth": {
+     "date": "1999-05-21",
+     "place": "Somewhere",
+     "country": "Türkiye"
+    },
+    "nationality": "Türkiye",
+    "height": "172 cm",
+    "weight": "68 kg",
+    "injured": false,
+    "photo": null
+   },
+   "statistics": [
+    {
+     "team": {
+      "id": 9102,
+      "name": "Deneme Gücü",
+      "logo": null
+     },
+     "league": {
+      "id": 203,
+      "name": "L",
+      "country": "C",
+      "logo": null,
+      "flag": null,
+      "season": 2023
+     },
+     "games": {
+      "appearences": 20,
+      "lineups": 18,
+      "minutes": 1980,
+      "number": null,
+      "position": "Attacker",
+      "rating": "7.012",
+      "captain": false
+     },
+     "substitutes": {
+      "in": 2,
+      "out": 5,
+      "bench": 4
+     },
+     "shots": {
+      "total": 55,
+      "on": 24
+     },
+     "goals": {
+      "total": 11,
+      "conceded": 0,
+      "assists": 4,
+      "saves": null
+     },
+     "passes": {
+      "total": 800,
+      "key": 15,
+      "accuracy": 84
+     },
+     "tackles": {
+      "total": 30,
+      "blocks": 4,
+      "interceptions": 20
+     },
+     "duels": {
+      "total": 150,
+      "won": 80
+     },
+     "dribbles": {
+      "attempts": 40,
+      "success": 19,
+      "past": null
+     },
+     "fouls": {
+      "drawn": 10,
+      "committed": 12
+     },
+     "cards": {
+      "yellow": 3,
+      "yellowred": 0,
+      "red": 0
+     },
+     "penalty": {
+      "won": null,
+      "commited": null,
+      "scored": 0,
+      "missed": 0,
+      "saved": null
+     }
+    }
+   ]
+  }
+ ]
+}
