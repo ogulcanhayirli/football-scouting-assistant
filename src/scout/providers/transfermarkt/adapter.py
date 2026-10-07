@@ -163,7 +163,9 @@ class TransfermarktValuationProvider:
                 "source": SOURCE,
                 "source_player_id": vals["player_id"].astype("Int64"),
                 "valuation_date": pd.to_datetime(vals["date"], errors="coerce"),
-                "market_value_eur": pd.to_numeric(vals["market_value_in_eur"], errors="coerce"),
+                "market_value_eur": pd.to_numeric(
+                    vals["market_value_in_eur"], errors="coerce"
+                ).astype(float),
                 "club_id": vals["current_club_id"].astype("Int64"),
                 "club_competition_id": vals["player_club_domestic_competition_id"],
             }
