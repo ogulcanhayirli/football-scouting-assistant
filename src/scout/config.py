@@ -48,6 +48,20 @@ class ApiFootballConfig(BaseModel):
     quota: QuotaConfig
 
 
+class TransfermarktConfig(BaseModel):
+    """transfermarkt-datasets snapshot (github.com/dcaribou/transfermarkt-datasets)."""
+
+    base_url: str = "https://pub-e682421888d945d684bcae8890b0ec20.r2.dev/data"
+    files: list[str] = Field(
+        default_factory=lambda: [
+            "players.csv.gz",
+            "player_valuations.csv.gz",
+            "appearances.csv.gz",
+            "clubs.csv.gz",
+        ]
+    )
+
+
 class PathsConfig(BaseModel):
     raw_dir: Path = Path("data/raw")
     processed_dir: Path = Path("data/processed")
@@ -69,6 +83,7 @@ class BackfillConfig(BaseModel):
 
 class Settings(BaseModel):
     api_football: ApiFootballConfig
+    transfermarkt: TransfermarktConfig = TransfermarktConfig()
     leagues: list[LeagueConfig]
     paths: PathsConfig = PathsConfig()
     backfill: BackfillConfig = BackfillConfig()
