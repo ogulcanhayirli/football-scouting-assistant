@@ -10,7 +10,12 @@ from scout.providers.api_football import (
     QuotaExceededError,
     parse_players_page,
 )
-from scout.providers.api_football.adapter import COLUMNS, parse_seasons, rows_to_frame
+from scout.providers.api_football.adapter import (
+    COLUMNS,
+    _parse_cm_kg,
+    parse_seasons,
+    rows_to_frame,
+)
 from scout.providers.api_football.client import classify_errors
 from scout.ratelimit import QuotaGuard
 from scout.storage import LocalRawStore
@@ -69,6 +74,11 @@ def test_parse_maps_forward_to_attacker(load_fixture, epl):
     positions = {r["position"] for r in parse_players_page(payload, epl, 2023)}
     assert "Forward" not in positions
     assert "Attacker" in positions
+
+
+@pytest.mark.parametrize("value", [None, "", " "])
+def test_parse_cm_kg_blank(value):
+    assert _parse_cm_kg(value) is None
 
 
 def test_rows_to_frame_types(load_fixture, epl):

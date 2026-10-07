@@ -85,10 +85,11 @@ POSITION_ALIASES = {"Forward": "Attacker"}
 
 
 def _parse_cm_kg(value: Any) -> float | None:
-    if value in (None, ""):
+    parts = str(value).split() if value is not None else []
+    if not parts:
         return None
     try:
-        return float(str(value).split()[0])
+        return float(parts[0])
     except ValueError:
         return None
 
