@@ -148,8 +148,34 @@ def rows_to_frame(rows: list[dict]) -> pd.DataFrame:
     for column in ["source_player_id", "team_id", "league_id", "season"]:
         frame[column] = pd.to_numeric(frame[column], errors="coerce").astype("Int64")
     frame["captain"] = frame["captain"].astype("boolean")
+    _drop_negative_counts(frame)
     frame["birth_date"] = pd.to_datetime(frame["birth_date"], errors="coerce")
     return frame
+
+
+def _drop_negative_counts(frame: pd.DataFrame) -> None:
+    """Replace impossible negative stats with missing values, in place.
+
+    The API occasionally sends values such as ``lineups: -1`` (EPL 2015,
+    player 20439). A negative count can't be true, and guessing a fix would
+    invent data, so the value becomes missing and a warning names it. The raw
+    cache keeps the original response.
+    """
+    for column in NUMERIC_STATS:
+        negative = frame[column] < 0
+        if not negative.any():
+            continue
+        for idx in frame.index[negative.fillna(False)]:
+            log.warning(
+                "Negative %s=%s for player %s (%s) in %s %s; stored as missing",
+                column,
+                frame.at[idx, column],
+                frame.at[idx, "source_player_id"],
+                frame.at[idx, "player_name"],
+                frame.at[idx, "league_key"],
+                frame.at[idx, "season"],
+            )
+        frame.loc[negative.fillna(False), column] = pd.NA
 
 
 def parse_seasons(payload: dict[str, Any], league: LeagueConfig) -> list[SeasonInfo]:

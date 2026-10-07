@@ -1,7 +1,12 @@
+import copy
+import logging
+
 import httpx
+import pandas as pd
 import pytest
 import respx
 
+from scout.contracts import PLAYER_SEASON_STATS, validate
 from scout.providers.api_football import (
     ApiFootballClient,
     ApiFootballStatsProvider,
@@ -89,6 +94,26 @@ def test_rows_to_frame_types(load_fixture, epl):
     assert str(frame["rating"].dtype) == "Float64"  # "7.012" strings become numbers
     assert frame["rating"].isna().sum() == 1
     assert frame["height_cm"].isna().sum() == 1
+
+
+def test_rows_to_frame_turns_negative_counts_into_missing(load_fixture, epl, caplog):
+    # EPL 2015 sends lineups: -1 for player 20439; the contract rejects it.
+    payload = load_fixture("api_football/players_epl_2023_p1.json")
+    stat = payload["response"][0]["statistics"][0]
+    stat["games"]["lineups"] = -1
+    original = copy.deepcopy(payload)
+    rows = parse_players_page(payload, epl, 2023)
+    target = rows[0]["source_player_id"]
+
+    with caplog.at_level(logging.WARNING, logger="scout.providers.api_football.adapter"):
+        frame = rows_to_frame(rows)
+
+    row = frame[frame["source_player_id"] == target].iloc[0]
+    assert pd.isna(row["lineups"])
+    assert row["minutes"] == stat["games"]["minutes"]  # other stats are untouched
+    assert payload == original  # the raw payload is never rewritten
+    assert any("lineups" in m and str(target) in m for m in caplog.messages)
+    validate(PLAYER_SEASON_STATS, frame)
 
 
 def test_parse_seasons(load_fixture, epl):
