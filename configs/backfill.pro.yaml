@@ -1,0 +1,22 @@
+# Pro plan (one month): 7,500 requests per day. Per minute limit per the
+# API Football pricing page; lower it here if the dashboard shows otherwise.
+api_football:
+  plan: pro
+  quota:
+    daily_limit: 7500
+    per_minute_limit: 300
+    safety_margin: 100
+
+leagues:
+  - key: epl
+    name: Premier League
+    api_football_id: 39
+    transfermarkt_id: GB1
+  - key: super_lig
+    name: Süper Lig
+    api_football_id: 203
+    transfermarkt_id: TR1
+
+backfill:
+  seasons: all
+  endpoints: [players]

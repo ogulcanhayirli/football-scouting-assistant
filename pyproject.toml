@@ -5,10 +5,24 @@ description = "Football scouting assistant: fair value, value growth and similar
 readme = "README.md"
 authors = [{ name = "Ogulcan Hayirli" }]
 requires-python = ">=3.12,<3.13"
-dependencies = []
+dependencies = [
+    "httpx>=0.28.1",
+    "pandas>=3.0.6",
+    "pandera[pandas]>=0.34.1",
+    "pyarrow>=25.0.1",
+    "pydantic>=2.13.5",
+    "pyyaml>=6.0.3",
+    "rapidfuzz>=3.14.6",
+    "unidecode>=1.4.0",
+]
 
 [project.scripts]
 scout = "scout.cli:main"
+
+[project.optional-dependencies]
+aws = [
+    "boto3>=1.43.108",
+]
 
 [build-system]
 requires = ["uv_build>=0.11.32,<0.12.0"]
@@ -28,4 +42,11 @@ addopts = "-ra --strict-markers"
 markers = [
     "contract: data contract tests on the committed sample",
     "live: tests that call real external APIs (never run in CI)",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "respx>=0.23.1",
+    "ruff>=0.16.10",
 ]

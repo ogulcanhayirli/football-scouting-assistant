@@ -1,0 +1,22 @@
+# Free tier: 100 requests per day, 10 per minute, limited seasons.
+api_football:
+  plan: free
+  quota:
+    daily_limit: 100
+    per_minute_limit: 10
+    safety_margin: 5
+
+leagues:
+  - key: epl
+    name: Premier League
+    api_football_id: 39
+    transfermarkt_id: GB1
+  - key: super_lig
+    name: Süper Lig
+    api_football_id: 203
+    transfermarkt_id: TR1
+
+backfill:
+  # The free tier only serves a few seasons; the proof run uses one.
+  seasons: [2023]
+  endpoints: [players]
