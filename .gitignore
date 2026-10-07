@@ -21,6 +21,8 @@ build/
 # Only the small sample under tests/fixtures is committed.
 data/
 !data/.gitkeep
+# Coverage reports are regenerated on every backfill run.
+reports/
 
 # AWS CDK
 cdk.out/
