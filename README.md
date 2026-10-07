@@ -1,0 +1,161 @@
+# Football Scouting Assistant
+
+A scouting assistant for the English Premier League and the Turkish Süper Lig,
+built to run on AWS for 10 to 20 USD a month. It will estimate what a player is
+worth from performance data, flag players whose market value sits below that
+estimate, predict how values will move over the next two to three years, find
+similar players across the two leagues, and answer scouting questions in
+English and Turkish through a Bedrock agent whose numbers all come from tools.
+
+The emphasis is on engineering quality and honest evaluation: strict point in
+time features, a backtest that decides between models, and a simple baseline
+that is reported even when it wins.
+
+## Status
+
+| Part | State |
+|---|---|
+| Repository skeleton, CI, data contracts | Done |
+| Quota aware, resumable backfill | Done, tested against a mocked API |
+| Free tier proof run (one league, one season) | Waiting for network access to API Football and an API key |
+| Feasibility check and `FEASIBILITY.md` | Script done and tested offline; real run waiting on the same access |
+| Models, similarity search, agent, AWS stack | Not started |
+
+## Architecture
+
+Current scope (this repository today):
+
+```
+ API Football v3 ──► ApiFootballClient ──► raw cache (JSON, byte for byte, + metadata)
+   (QuotaGuard: per minute window,              │
+    daily budget, server headers)               ▼
+                                         ApiFootballStatsProvider ──┐
+                                                                    ├─► pandera contracts ─► Parquet
+ transfermarkt-datasets ──► snapshot CSVs ──► TransfermarktValuationProvider ┘
+                                                                    │
+                                                    matching (DOB block + fuzzy names + club)
+```
+
+Planned AWS shape (serverless, no always on cost):
+
+```
+ CloudFront ─► API Gateway (per user rate limits) ─► Lambda: models, similarity, filters
+                                                  └► Lambda: Bedrock agent (tools = the above)
+ S3: raw cache, Parquet, model artifacts, embeddings    DynamoDB: player profiles, usage
+ EventBridge schedule ─► Lambda: free tier update of the current season
+ AWS Budgets alarm, everything in AWS CDK (Python)
+```
+
+Deliberately excluded to stay inside the budget: SageMaker real time endpoints,
+OpenSearch Serverless, NAT Gateways and RDS. Models are served inside Lambda and
+similarity search runs on embeddings loaded from S3.
+
+## Layout
+
+```
+src/scout/
+  config.py                 YAML settings validated with pydantic
+  secrets.py                API key from the environment, then SSM Parameter Store
+  ratelimit.py              QuotaGuard: per minute window and persisted daily budget
+  storage.py                RawStore interface and local implementation
+  providers/base.py         StatsProvider and ValuationProvider interfaces
+  providers/api_football/   HTTP client and adapter
+  providers/transfermarkt/  snapshot downloader and adapter
+  contracts/                pandera schemas for the canonical tables
+  matching.py               player matching between sources
+  feasibility.py            analysis functions used by scripts/feasibility.py
+  backfill/                 runner and coverage report
+  cli.py                    `scout backfill | coverage | transfermarkt`
+configs/                    backfill.free.yaml, backfill.pro.yaml
+scripts/feasibility.py      feasibility check on the free tier
+tests/unit, tests/contracts, tests/fixtures (synthetic sample)
+```
+
+## Running it
+
+```bash
+uv sync --all-extras
+cp .env.example .env              # then set API_FOOTBALL_KEY; .env is gitignored
+set -a; source .env; set +a
+
+uv run pytest                     # unit and contract tests, no network
+uv run ruff check . && uv run ruff format --check .
+
+# Proof run on the free tier: one league, one season. Run it twice; the
+# second run makes zero requests.
+uv run scout --config configs/backfill.free.yaml backfill --league epl --season 2023
+
+# Feasibility check, capped at 40 new requests
+uv run python scripts/feasibility.py --config configs/backfill.free.yaml --max-requests 40
+
+# Full historical backfill during the Pro month
+uv run scout --config configs/backfill.pro.yaml backfill
+```
+
+The backfill writes `reports/coverage_report.md` and `.json`, logs to
+`data/state/scout.log`, and stores Parquet under
+`data/processed/player_season_stats/league=<key>/season=<year>.parquet`.
+
+## Data sources and attribution
+
+* **API Football** (api-football.com) supplies player season statistics. Used
+  under the account holder's subscription. Raw responses stay in a private cache
+  and are not redistributed.
+* **transfermarkt-datasets** by dcaribou
+  (github.com/dcaribou/transfermarkt-datasets) supplies players, appearances and
+  market value history, derived from Transfermarkt (transfermarkt.com). The
+  project states no license, so it is used here for non commercial purposes only
+  and credited here. The snapshot ends in July 2026, and its last valuation
+  is dated 2026-06-12.
+* No site is scraped. No club logos or badges are stored or shown, and the
+  `logo` and `photo` URLs in API responses are dropped by the adapter.
+
+This is a non commercial portfolio project.
+
+## Decisions
+
+Each entry records the choice, the reason, and what would change it.
+
+**D1. Download history in one Pro month, then return to the free tier.**
+Historical seasons never change, so they only need downloading once. One month
+of the Pro plan (19 USD, 7,500 requests a day) covers every past season for
+both leagues with room to spare; the free tier (100 a day) then keeps the
+current season up to date. The backfill takes its limits from config, so
+switching plans is a config change. *Would change if* the feasibility estimate
+showed the backfill needs more than about half of a Pro month, for example if
+match level stats turn out to be necessary.
+
+**D2. The raw cache is the resume state.** A request is skipped when its cache
+file exists. The body is written last through an atomic rename, so a crash can
+never leave a half written entry. This gives resumability and idempotency
+without a separate database, and processed data can always be rebuilt from the
+cache without spending requests.
+
+**D3. Refusals are errors, not data.** API Football reports plan limits, quota
+exhaustion and bad keys as HTTP 200 with an `errors` field. The client
+classifies those and never caches them, so a refused season can't be stored as
+an empty season.
+
+**D4. Count before sending, and only let the server tighten the budget.** The
+quota guard counts a request before it goes out and persists the daily count,
+so a crash can only overcount. Remaining quota headers from the server can
+lower our budget but never raise it.
+
+**D5. Adapters plus contracts at the boundary.** Each source has one adapter
+that emits canonical tables, and pandera contracts check them (types, ranges,
+uniqueness, and facts like shots on target never exceeding shots). Adding a
+source such as Sportmonks means one new adapter that passes the same contracts.
+
+**D6. Match players on exact date of birth first, then fuzzy names.** Date of
+birth removes almost all wrong candidates, token set name scoring handles
+abbreviated and long legal names, and club similarity breaks ties. Turkish
+letters are mapped explicitly before transliteration. Every non match carries
+a reason, and precision is checked by hand on a sample, not only the match rate.
+
+**D7 (proposed). Season end (30 June) as the main feature date.** Season level
+totals are then enough and cost far fewer requests than match level stats. To
+be confirmed with the feasibility results.
+
+**Open: AWS region.** Needs Amazon Nova Lite and Claude Haiku 4.5 in Bedrock.
+eu-central-1 and eu-west-1 are the candidates; availability will be checked in
+the current AWS documentation before anything is deployed.
