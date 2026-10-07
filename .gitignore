@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+dist/
+build/
+
+# Secrets: never commit keys
+.env
+.env.*
+!.env.example
+*.pem
+
+# Data: raw cache and processed outputs live outside git.
+# Only the small sample under tests/fixtures is committed.
+data/
+!data/.gitkeep
+
+# AWS CDK
+cdk.out/
+.cdk.staging/
+
+# Editors and OS
+.idea/
+.vscode/
+.DS_Store
+
+# Notebooks
+.ipynb_checkpoints/
