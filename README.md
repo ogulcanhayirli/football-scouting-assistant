@@ -17,8 +17,8 @@ that is reported even when it wins.
 |---|---|
 | Repository skeleton, CI, data contracts | Done |
 | Quota aware, resumable backfill | Done, tested against a mocked API |
-| Free tier proof run (one league, one season) | Waiting for network access to API Football and an API key |
-| Feasibility check and `FEASIBILITY.md` | Script done and tested offline; real run waiting on the same access |
+| Free tier proof run (one league, one season) | Done: EPL 2023 took 51 requests and 1,074 rows passed the contract; the second run made 0 requests |
+| Feasibility check and `FEASIBILITY.md` | Script done and tested offline; real run next |
 | Models, similarity search, agent, AWS stack | Not started |
 
 ## Architecture

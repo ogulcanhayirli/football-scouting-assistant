@@ -60,6 +60,17 @@ def test_parse_keeps_turkish_characters(load_fixture, super_lig):
     assert names == ["Ç. Şahinoğlu", "İ. Yılmazer"]
 
 
+def test_parse_maps_forward_to_attacker(load_fixture, epl):
+    payload = load_fixture("api_football/players_epl_2023_p1.json")
+    for item in payload["response"]:
+        for stat in item["statistics"]:
+            if stat["games"]["position"] == "Attacker":
+                stat["games"]["position"] = "Forward"
+    positions = {r["position"] for r in parse_players_page(payload, epl, 2023)}
+    assert "Forward" not in positions
+    assert "Attacker" in positions
+
+
 def test_rows_to_frame_types(load_fixture, epl):
     rows = parse_players_page(load_fixture("api_football/players_epl_2023_p1.json"), epl, 2023)
     frame = rows_to_frame(rows)

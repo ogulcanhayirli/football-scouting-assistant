@@ -79,6 +79,10 @@ ID_COLUMNS = [
 ]
 COLUMNS = ID_COLUMNS + list(STAT_FIELDS)
 
+# The API labels most forwards "Attacker" but some entries "Forward" (seen in
+# EPL 2023). Map them to one label so positions form four groups.
+POSITION_ALIASES = {"Forward": "Attacker"}
+
 
 def _parse_cm_kg(value: Any) -> float | None:
     if value in (None, ""):
@@ -131,6 +135,7 @@ def parse_players_page(payload: dict[str, Any], league: LeagueConfig, season: in
             }
             for column, (group, field) in STAT_FIELDS.items():
                 row[column] = (stat.get(group) or {}).get(field)
+            row["position"] = POSITION_ALIASES.get(row["position"], row["position"])
             rows.append(row)
     return rows
 
