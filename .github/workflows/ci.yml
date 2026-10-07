@@ -1,0 +1,104 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  UV_FROZEN: "1" # fail if uv.lock is out of date with pyproject.toml
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+          enable-cache: true
+      - run: uv sync --all-extras
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+
+  unit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+          enable-cache: true
+      - run: uv sync --all-extras
+      # Live tests call real APIs and are never run in CI.
+      - run: uv run pytest -m "not contract and not live"
+
+  data-contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+          enable-cache: true
+      - run: uv sync --all-extras
+      - run: uv run pytest -m contract
+
+  # Later stages. Each is kept as a commented, documented placeholder so the
+  # pipeline shape is visible now and the gates are added as the project grows.
+
+  # cdk-synth-diff:
+  #   # Synthesises the AWS CDK app (Python) and posts `cdk diff` against the
+  #   # staging account, so infrastructure changes are reviewed in the PR.
+  #   needs: [lint, unit-tests]
+  #   runs-on: ubuntu-latest
+  #   permissions: { contents: read, id-token: write, pull-requests: write }
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - uses: aws-actions/configure-aws-credentials@v4
+  #       with:
+  #         role-to-assume: ${{ vars.AWS_READONLY_ROLE_ARN }}
+  #         aws-region: ${{ vars.AWS_REGION }}
+  #     - run: npx aws-cdk@2 synth && npx aws-cdk@2 diff
+
+  # model-gate:
+  #   # Champion challenger gate: retrain the candidate on the frozen backtest
+  #   # split and fail the PR if it does not beat the current champion (and the
+  #   # linear baseline) on the agreed metrics, for example MAE on log value and
+  #   # precision at k of gem flags that later rose in value.
+  #   needs: [unit-tests, data-contracts]
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - run: uv run python -m scout.models.gate --champion s3://... --report gate.md
+
+  # llm-eval-gate:
+  #   # Runs the agent on a fixed set of scouting questions and fails if any
+  #   # number in a generated report is not traceable to a tool result, or if
+  #   # answer quality drops below the stored baseline. Bedrock calls are
+  #   # capped per run to stay inside the budget.
+  #   needs: [unit-tests]
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - run: uv run python -m scout.agent.eval --max-calls 50
+
+  # deploy-staging:
+  #   # On merge to main: assume a deploy role through GitHub OIDC (no long
+  #   # lived AWS keys in GitHub) and run `cdk deploy` for the staging stack.
+  #   if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+  #   needs: [cdk-synth-diff, model-gate, llm-eval-gate]
+  #   runs-on: ubuntu-latest
+  #   environment: staging
+  #   permissions: { contents: read, id-token: write }
+  #   steps:
+  #     - uses: aws-actions/configure-aws-credentials@v4
+  #       with:
+  #         role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+  #         aws-region: ${{ vars.AWS_REGION }}
+  #     - run: npx aws-cdk@2 deploy --require-approval never
