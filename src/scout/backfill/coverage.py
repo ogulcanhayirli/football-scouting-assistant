@@ -26,7 +26,7 @@ from scout.providers.api_football.client import SOURCE
 from scout.storage import RawStore
 
 MIN_MINUTES = 450  # five full matches; below this per 90 rates are mostly noise
-REPORTED_FIELDS = ["rating", *NUMERIC_STATS]
+REPORTED_FIELDS = list(NUMERIC_STATS)
 
 
 def _completeness(frame: pd.DataFrame) -> dict[str, float]:

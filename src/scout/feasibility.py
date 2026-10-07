@@ -8,7 +8,7 @@ import pandas as pd
 
 from scout.providers.api_football.adapter import NUMERIC_STATS
 
-STAT_FIELDS = ["rating", *NUMERIC_STATS]
+STAT_FIELDS = list(NUMERIC_STATS)
 VALUE_STALENESS_DAYS = 365  # a valuation older than this does not describe "now"
 
 
