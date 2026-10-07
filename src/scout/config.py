@@ -78,7 +78,11 @@ class BackfillConfig(BaseModel):
 
     seasons: list[int] | Literal["all"] = "all"
     endpoints: list[Literal["players"]] = Field(default_factory=lambda: ["players"])
-    stop_on_plan_error: bool = True
+    stop_on_plan_error: bool = Field(
+        default=False,
+        description="Stop on a plan error instead of skipping the season. "
+        "Off for the free tier, where old seasons are expected to be refused.",
+    )
 
 
 class Settings(BaseModel):
