@@ -20,7 +20,7 @@ that is reported even when it wins.
 | Free tier proof run (one league, one season) | Done: EPL 2023 took 51 requests and 1,074 rows passed the contract; the second run made 0 requests |
 | Full historical backfill | Done: all 31 past seasons (EPL 2010 to 2025, Süper Lig 2011 to 2025) complete, 1,178 requests |
 | Private S3 copy of the data | Done: `scout sync up` stored 2,387 files; a second run copies nothing |
-| Feasibility check and `FEASIBILITY.md` | Script done and tested offline; real run next |
+| Feasibility check and `FEASIBILITY.md` | Done: go. Full features from 2015, basic from 2010; 88% of players linked to Transfermarkt, precision 179 of 179 on a hand check |
 | Models, similarity search, agent, AWS stack | Not started |
 
 ## Architecture
@@ -70,7 +70,8 @@ src/scout/
   sync.py                   copy data/raw and data/processed to or from S3
   cli.py                    `scout backfill | coverage | transfermarkt | sync`
 configs/                    backfill.free.yaml, backfill.pro.yaml
-scripts/feasibility.py      feasibility check on the free tier
+scripts/feasibility.py      feasibility check (free tier sample, or every backfilled season)
+FEASIBILITY.md              results of the feasibility check and the decisions they support
 tests/unit, tests/contracts, tests/fixtures (synthetic sample)
 ```
 
@@ -91,6 +92,10 @@ uv run scout --config configs/backfill.free.yaml backfill --league epl --season 
 # Feasibility check, capped at 40 new requests
 uv run python scripts/feasibility.py --config configs/backfill.free.yaml --max-requests 40
 
+# Feasibility on every backfilled season (after the backfill and
+# `scout transfermarkt`); spends no requests when the cache is complete
+uv run python scripts/feasibility.py --config configs/backfill.pro.yaml --no-download --from-processed
+
 # Full historical backfill during the Pro month
 uv run scout --config configs/backfill.pro.yaml backfill
 
@@ -109,8 +114,8 @@ The backfill writes `reports/coverage_report.md` and `.json`, logs to
   under the account holder's subscription. Raw responses stay in a private cache
   and are not redistributed.
 * **transfermarkt-datasets** by dcaribou
-  (github.com/dcaribou/transfermarkt-datasets) supplies players, appearances and
-  market value history, derived from Transfermarkt (transfermarkt.com). The
+  (github.com/dcaribou/transfermarkt-datasets) supplies players, appearances,
+  market value history and transfer fees, derived from Transfermarkt (transfermarkt.com). The
   project states no license, so it is used here for non commercial purposes only
   and credited here. The snapshot ends in July 2026, and its last valuation
   is dated 2026-06-12.
@@ -156,8 +161,11 @@ source such as Sportmonks means one new adapter that passes the same contracts.
 **D6. Match players on exact date of birth first, then fuzzy names.** Date of
 birth removes almost all wrong candidates, token set name scoring handles
 abbreviated and long legal names, and club similarity breaks ties. Turkish
-letters are mapped explicitly before transliteration. Every non match carries
-a reason, and precision is checked by hand on a sample, not only the match rate.
+letters are mapped explicitly before transliteration. When no name scores
+high enough, a single candidate with the same surname and first initial is
+accepted, which handles nicknames ("Zachary" and "Zak"). Every non match
+carries a reason, and precision is checked by hand on a sample, not only the
+match rate.
 
 **D7. Data lives in a private S3 bucket, never in git.** `scout sync up`
 copies `data/raw` and `data/processed` to `raw/` and `processed/` in the
@@ -173,9 +181,20 @@ sends negative counts (EPL 2015 has `lineups: -1` for Matt Jarvis, player
 naming the player; the raw cache keeps the original response, so the choice
 can be revisited without new requests.
 
-**D9 (proposed). Season end (30 June) as the main feature date.** Season level
-totals are then enough and cost far fewer requests than match level stats. To
-be confirmed with the feasibility results.
+**D9. Season end (30 June) as the main feature date.** Season level totals
+are then enough and cost far fewer requests than match level stats.
+Confirmed by the feasibility check: 99% of regular players from 2015 on have
+a market value at that date. *Would change if* features at other dates (for
+example before the January window) became a requirement; match level stats
+would then cost about 10,700 requests.
+
+**D10. Two feature tiers instead of imputation.** Rating, shots, passes,
+duels and dribbles only exist from 2015, so models use full features from
+2015 and basic ones (minutes, goals, appearances, cards) back to 2010, and the
+backtest compares the two. Blank counts are read as 0 when the stat is
+recorded that season, because the API leaves zeros blank (see
+`FEASIBILITY.md`). *Would change if* a source with older detailed stats were
+added.
 
 **Open: AWS region.** Needs Amazon Nova Lite and Claude Haiku 4.5 in Bedrock.
 eu-central-1 and eu-west-1 are the candidates; availability will be checked in
