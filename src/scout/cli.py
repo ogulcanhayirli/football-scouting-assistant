@@ -140,7 +140,12 @@ def cmd_featurestore(settings: Settings, args: argparse.Namespace) -> int:
     )
     if args.action == "ingest":
         records = to_records(features if args.limit is None else features.head(args.limit))
-        client = analyst_session(region, INGEST_ROLE).client("sagemaker-featurestore-runtime")
+        from botocore.config import Config
+
+        client = analyst_session(region, INGEST_ROLE).client(
+            "sagemaker-featurestore-runtime",
+            config=Config(max_pool_connections=args.workers + 2),
+        )
         written, errors = ingest(client, records, workers=args.workers)
         log.info("Put %d of %d records into %s", written, len(records), FEATURE_GROUP)
         for error in errors[:10]:

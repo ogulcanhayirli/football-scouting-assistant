@@ -27,6 +27,6 @@ feature_store = ScoutFeatureStoreStack(
     env=cdk.Environment(account=os.environ["CDK_DEFAULT_ACCOUNT"], region=region),
     description="Football scouting assistant: SageMaker Feature Store, offline store only",
 )
-feature_store.add_dependency(data)  # it extends the scout-analyst role from ScoutData
+feature_store.add_stack_dependency(data)  # it extends the scout-analyst role from ScoutData
 cdk.Tags.of(app).add("project", "football-scouting-assistant")
 app.synth()
