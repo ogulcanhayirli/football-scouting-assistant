@@ -25,7 +25,9 @@ that is reported even when it wins.
 | Point in time feature and label tables (`FEATURES.md`) | Done: 16,264 player seasons, 87 feature columns, contracts check the point in time rule |
 | Glue and Athena over the features (`infra/`, CDK) | Deployed to eu-central-1 (stack `ScoutData`); `scout athena "SQL"` queries it |
 | SageMaker Feature Store (`ScoutFeatureStore` stack) | Deployed: 16,264 records, offline store (Iceberg); its point in time answers match our tables exactly |
-| Models, similarity search, agent, rest of the AWS stack | Not started |
+| Expanding window backtest, baselines, first LightGBM (`MODELS.md`) | Done: fair value clearly beats the baseline; growth does not yet |
+| Automatic model tuning in SageMaker | Next |
+| Similarity search, agent, rest of the AWS stack | Not started |
 
 ## Architecture
 
@@ -75,11 +77,13 @@ src/scout/
   sync.py                   copy data/raw and data/processed to or from S3
   athena.py                 run SQL on the feature tables as the scout-analyst role
   featurestore.py           Feature Store ingestion and the point in time comparison
+  models/                   targets, expanding window backtest, baselines, LightGBM
   cli.py                    `scout backfill | coverage | transfermarkt | sync`
 configs/                    backfill.free.yaml, backfill.pro.yaml
 scripts/feasibility.py      feasibility check (free tier sample, or every backfilled season)
 FEASIBILITY.md              results of the feasibility check and the decisions they support
 FEATURES.md                 data dictionary of the feature and label tables
+MODELS.md                   targets, the backtest design and its results
 tests/unit, tests/contracts, tests/fixtures (synthetic sample)
 infra/                      AWS CDK app (own uv environment): Glue, Athena, query role
 docs/AWS_SETUP.md           one time account setup that lets the session deploy, narrowly
@@ -121,6 +125,9 @@ cd infra && CDK_DEFAULT_ACCOUNT=<account id> npx aws-cdk@2 deploy ScoutData && c
 # Load the features into SageMaker Feature Store, then check its point in time view
 uv run scout featurestore ingest
 uv run scout featurestore pit --as-of 2023-01-01
+
+# Expanding window backtest of the baselines and LightGBM, all targets
+uv run scout backtest
 
 # Query the feature tables in Athena, as the read only scout-analyst role
 uv run scout athena "SELECT player_name, goals_per90 FROM player_season_features
@@ -262,3 +269,11 @@ for every player as of 2023-01-01 (4,426 rows) and 2020-07-15 (3,318 rows,
 inside the COVID season, where the 2019/20 rows must not show yet). *Would
 change if* the API needed online lookups; the group would then get an online
 store, and Feature Store would become the serving path.
+
+**D16. Expanding window backtest, never random folds.** Each season is
+predicted by a model trained on earlier seasons only, with a gap as long as
+the label horizon, training rows purged when their label was observed after
+the test date, and a check on the actual dates before every fold. Random k
+fold would let a model see a player's later seasons and later price levels.
+The simple baseline is reported next to every model. *Would change if* never:
+this is the rule the project's honesty rests on.

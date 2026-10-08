@@ -167,6 +167,22 @@ def cmd_featurestore(settings: Settings, args: argparse.Namespace) -> int:
     return 0 if report["identical"] else 3
 
 
+def cmd_backtest(settings: Settings, args: argparse.Namespace) -> int:
+    from scout.models.run import run_all
+    from scout.models.targets import TARGETS
+
+    names = list(TARGETS) if args.target == "all" else [args.target]
+    summary = run_all(settings, names)
+    for name, models in summary.items():
+        print(f"\n{name}")
+        for model, m in models.items():
+            print(
+                f"  {model:13s} mae_log {m['mae_log']:.3f}  median_ape {m['median_ape']:.1%}"
+                f"  spearman {m['spearman']:.3f}  rows {m['rows']}"
+            )
+    return 0
+
+
 def cmd_sync(settings: Settings, args: argparse.Namespace) -> int:
     import os
 
@@ -229,6 +245,12 @@ def main(argv: list[str] | None = None) -> int:
     fs_pit = fs_sub.add_parser("pit", help="Compare a point in time query with our tables")
     fs_pit.add_argument("--as-of", required=True, help="Date, for example 2023-01-01")
     fs.set_defaults(func=cmd_featurestore)
+
+    bt = sub.add_parser("backtest", help="Expanding window backtest of the models")
+    bt.add_argument(
+        "--target", choices=["all", "fair_value", "growth_24m", "growth_36m"], default="all"
+    )
+    bt.set_defaults(func=cmd_backtest)
 
     sync = sub.add_parser("sync", help="Copy data/raw and data/processed to or from S3")
     sync.add_argument("direction", choices=["up", "down"])
