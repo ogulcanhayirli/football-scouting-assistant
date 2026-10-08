@@ -54,8 +54,10 @@ REQUIRED_COLUMNS: dict[str, set[str]] = {
         "to_club_id",
         "transfer_fee",
     },
+    "games.csv.gz": {"game_id", "competition_id", "season", "date"},
     "appearances.csv.gz": {
         "player_id",
+        "game_id",
         "player_club_id",
         "date",
         "competition_id",
@@ -126,12 +128,28 @@ class TransfermarktValuationProvider:
             self._cache[name] = frame
         return self._cache[name]
 
+    def _game_seasons(self, apps: pd.DataFrame) -> pd.Series:
+        """Season of each appearance, from the dataset's games table when present.
+
+        A 1 July cut off is wrong for 2019/20: the COVID restart ran into late
+        July 2020, and 111 EPL and Süper Lig matches would land in 2020/21. The
+        date rule is only the fallback for games the table does not list.
+        """
+        by_date = season_of(apps["date"])
+        if not (self.data_dir / "games.csv.gz").is_file():
+            log.warning("games.csv.gz missing; seasons fall back to a 1 July cut off")
+            return by_date
+        games = self._read("games.csv.gz")
+        seasons = games.set_index("game_id")["season"]
+        from_games = apps["game_id"].map(seasons).astype("Int64")
+        return from_games.fillna(by_date)
+
     def league_appearances(self, leagues: list[LeagueConfig]) -> pd.DataFrame:
         """Minutes per player, club, league and season, from match appearances."""
         codes = {lg.transfermarkt_id: lg.key for lg in leagues}
         apps = self._read("appearances.csv.gz")
         apps = apps[apps["competition_id"].isin(codes)].copy()
-        apps["season"] = season_of(apps["date"])
+        apps["season"] = self._game_seasons(apps)
         apps["league_key"] = apps["competition_id"].map(codes)
         grouped = (
             apps.groupby(["player_id", "player_club_id", "league_key", "season"], as_index=False)

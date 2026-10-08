@@ -87,8 +87,8 @@ months season 2021):
 
 | | EPL | Süper Lig |
 |---|---|---|
-| Player seasons with a +24 month label | 5,341 | 4,984 |
-| Player seasons with a +36 month label | 4,597 | 4,087 |
+| Player seasons with a +24 month label | 5,267 | 4,934 |
+| Player seasons with a +36 month label | 4,546 | 4,064 |
 
 These counts are on the Transfermarkt side, before linking to stats. At the
 overall match rate of 88%, that leaves about 9,000 rows with stats for the
@@ -160,6 +160,32 @@ are within 5% in 99.3% (EPL) and 91.6% (Süper Lig).
 So per match data adds form and features at any date from 2015, but nothing
 for 2010 to 2014: the basic feature tier for those seasons stays season level.
 
+### Which minutes to trust (checked 2026-10-08)
+
+For regular players from 2015, the match data and the season endpoint
+disagree on minutes by more than 5% in 0.7% of EPL player seasons but 8.4% of
+Süper Lig ones. Transfermarkt's match by match minutes settle it. Of the
+4,183 Süper Lig player seasons found in all three sources:
+
+| Within 5% of Transfermarkt | Season endpoint | Match data |
+|---|---|---|
+| All seasons 2015 to 2025 | 90.2% | 97.2% |
+| 2019/20 | 66.3% | 97.4% |
+| 2021/22 | 78.9% | 99.0% |
+
+Where the two API sources disagree (402 player seasons), Transfermarkt sides
+with the match data 355 times and with the season endpoint 62 times. The
+season endpoint undercounts, most of all in 2019/20, where it misses the
+matches played after the COVID restart. **From 2015, minutes and
+appearances come from the match data; the season endpoint is only used for
+2010 to 2014.**
+
+This check also found a bug on our side: Transfermarkt appearances were put
+in seasons by a 1 July cut off, which moved 111 matches of the 2019/20
+restart (66 EPL, 45 Süper Lig, all in July 2020) into 2020/21. Seasons now
+come from the dataset's `games` table. The fix lowered the growth label
+counts above slightly and changed nothing else in this document.
+
 ## 6. Decisions this supports
 
 1. **Feature date 30 June (D9 in the README): confirmed.** Season totals give
@@ -171,6 +197,7 @@ for 2010 to 2014: the basic feature tier for those seasons stays season level.
 3. **Blank counts become 0** in feature building, under the rule in section 1.
 4. **League is always a feature**, and undervaluation is judged within a league.
 5. **Backtest by league and season**, with Süper Lig 2024 flagged.
+6. **Minutes from match data from 2015** (section 5).
 
 ## Open questions
 

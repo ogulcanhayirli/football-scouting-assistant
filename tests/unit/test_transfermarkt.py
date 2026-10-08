@@ -95,3 +95,20 @@ def test_transfers_keep_free_moves_and_blank_fees_apart(tmp_path):
 def test_players_and_valuations_unscoped(provider, epl):
     assert 910201 in provider.players(None)["source_player_id"].tolist()  # La Liga only
     assert len(provider.valuations(None)) > len(provider.valuations([epl]))
+
+
+def test_seasons_come_from_the_games_table(tmp_path, epl):
+    # The 2019/20 restart ran into July 2020; a date cut off would say 2020.
+    shutil.copytree(FIXTURES, tmp_path, dirs_exist_ok=True)
+    apps = (
+        "appearance_id,game_id,player_id,player_club_id,player_current_club_id,date,"
+        "player_name,competition_id,yellow_cards,red_cards,goals,assists,minutes_played\n"
+        "a1,77,910001,9901,9901,2020-07-26,Alex Synthetic,GB1,0,0,0,0,90\n"
+        "a2,78,910001,9901,9901,2020-09-12,Alex Synthetic,GB1,0,0,0,0,90\n"
+        "a3,79,910001,9901,9901,2021-02-01,Alex Synthetic,GB1,0,0,0,0,90\n"
+    )
+    games = "game_id,competition_id,season,date\n77,GB1,2019,2020-07-26\n78,GB1,2020,2020-09-12\n"
+    (tmp_path / "appearances.csv.gz").write_bytes(gzip.compress(apps.encode()))
+    (tmp_path / "games.csv.gz").write_bytes(gzip.compress(games.encode()))
+    result = TransfermarktValuationProvider(tmp_path).league_appearances([epl])
+    assert result.set_index("season")["matches"].to_dict() == {2019: 1, 2020: 2}  # 79: by date

@@ -209,6 +209,13 @@ repaired in the adapter and logged, never in the raw cache. *Would change
 if* a later need showed the season level data was enough, in which case the
 match tables simply go unused.
 
+**D12. From 2015, playing time comes from the match data.** The season
+endpoint undercounts Süper Lig minutes (90% within 5% of Transfermarkt,
+against 97% for summed match minutes), worst in 2019/20 after the COVID
+restart. Season totals are used only where no match data exists (2010 to
+2014). *Would change if* a later API correction made the season endpoint
+agree again.
+
 **Open: AWS region.** Needs Amazon Nova Lite and Claude Haiku 4.5 in Bedrock.
 eu-central-1 and eu-west-1 are the candidates; availability will be checked in
 the current AWS documentation before anything is deployed.
