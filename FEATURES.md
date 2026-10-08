@@ -6,12 +6,15 @@ and the Transfermarkt snapshot. It spends no API requests. Output under
 
 | Table | Path | Rows |
 |---|---|---|
-| Features | `player_season_features/league=<key>/season=<year>.parquet` | 16,264 |
-| Labels | `player_season_labels/league=<key>/season=<year>.parquet` | 16,264 |
+| Features | `player_season_features/league=<key>/season=<year>/data.parquet` | 16,264 |
+| Labels | `player_season_labels/league=<key>/season=<year>/data.parquet` | 16,264 |
 | Links | `player_links.parquet` (API Football id to Transfermarkt id) | 7,189 |
 
 One row per league, season and player with minutes in that league season.
-Key: `league_key`, `season`, `source_player_id`. A player who moved within a
+Key: `league_key`, `season`, `source_player_id`. The `season` value lives in
+the folder name, not in the file (Athena's rule for partition keys), so read
+the tables with `scout.features.pipeline.read_feature_table`, which restores
+it. A player who moved within a
 league has one row; a player who played in both leagues in one season has a
 row in each.
 

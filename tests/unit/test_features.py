@@ -4,7 +4,15 @@ import pandera.errors
 import pytest
 
 from scout.contracts import PLAYER_SEASON_FEATURES, PLAYER_SEASON_LABELS, validate
-from scout.features import Inputs, build_features, build_links, feature_dates, labels, value_asof
+from scout.features import (
+    Inputs,
+    build_features,
+    build_links,
+    feature_dates,
+    labels,
+    read_feature_table,
+    value_asof,
+)
 from scout.features.build import (
     available_minutes,
     fill_recorded_zeros,
@@ -321,3 +329,19 @@ def test_build_links_drops_players_linked_differently_per_league(monkeypatch):
     monkeypatch.setattr("scout.features.pipeline.match_players", fake_match)
     links = build_links(stats, pd.DataFrame())
     assert links["af_player_id"].tolist() == [2]
+
+
+def test_partitioned_write_round_trips(tmp_path):
+    from scout.features.pipeline import _write_partitioned
+
+    features, _ = build_features(_inputs())
+    _write_partitioned(features, tmp_path / "t")
+    files = sorted(p.relative_to(tmp_path).as_posix() for p in tmp_path.rglob("*.parquet"))
+    assert files == [
+        "t/league=epl/season=2014/data.parquet",
+        "t/league=epl/season=2023/data.parquet",
+    ]
+    assert "season" not in pd.read_parquet(tmp_path / files[0]).columns
+    back = read_feature_table(tmp_path / "t")
+    assert sorted(back["season"].tolist()) == sorted(features["season"].tolist())
+    assert str(back["feature_date"].dtype) == "datetime64[ms]"

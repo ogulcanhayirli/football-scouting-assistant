@@ -51,6 +51,22 @@ jobs:
       - run: uv sync --all-extras
       - run: uv run pytest -m contract
 
+  infra-tests:
+    # The CDK app has its own environment (infra/pyproject.toml), so its
+    # dependencies never change the versions the data code runs on.
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infra
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+          enable-cache: true
+      - run: uv sync --group dev
+      - run: uv run pytest
+
   # Later stages. Each is kept as a commented, documented placeholder so the
   # pipeline shape is visible now and the gates are added as the project grows.
 

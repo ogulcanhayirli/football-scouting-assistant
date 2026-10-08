@@ -4,8 +4,8 @@ Outputs, under ``data/processed/features/``, partitioned like the other
 tables so Glue and Athena can read them later:
 
 * ``player_links.parquet``: API Football id to Transfermarkt id
-* ``player_season_features/league=<key>/season=<year>.parquet``
-* ``player_season_labels/league=<key>/season=<year>.parquet``
+* ``player_season_features/league=<key>/season=<year>/data.parquet``
+* ``player_season_labels/league=<key>/season=<year>/data.parquet``
 
 Building spends no API requests; it reads only the cache and Parquet.
 """
@@ -76,14 +76,40 @@ def load_inputs(settings: Settings) -> Inputs:
     return Inputs(season_stats, match_stats, links, tm_players, valuations, TM_DATA_END)
 
 
+PARTITION_FILE = "data.parquet"
+
+
 def _write_partitioned(frame: pd.DataFrame, root: Path) -> int:
+    """One folder per partition (``league=epl/season=2023/data.parquet``), the
+    Hive layout Glue and Athena expect. The partition values live in the folder
+    names, so ``season`` is dropped from the file: Athena does not allow a
+    column and a partition key with the same name. Timestamps are written in
+    milliseconds, which Athena reads; it can't read nanosecond timestamps."""
     count = 0
     for (league, season), part in frame.groupby(["league_key", "season"]):
-        path = root / f"league={league}" / f"season={int(season)}.parquet"
-        path.parent.mkdir(parents=True, exist_ok=True)
-        part.to_parquet(path, index=False)
+        folder = root / f"league={league}" / f"season={int(season)}"
+        folder.mkdir(parents=True, exist_ok=True)
+        part.drop(columns="season").to_parquet(
+            folder / PARTITION_FILE,
+            index=False,
+            coerce_timestamps="ms",
+            allow_truncated_timestamps=True,
+        )
         count += 1
     return count
+
+
+def read_feature_table(root: Path) -> pd.DataFrame:
+    """Read a partitioned feature table back, restoring ``season`` from the folders."""
+    parts = []
+    for path in sorted(root.glob(f"league=*/season=*/{PARTITION_FILE}")):
+        season = int(path.parent.name.split("=", 1)[1])
+        parts.append(pd.read_parquet(path).assign(season=season))
+    if not parts:
+        return pd.DataFrame()
+    frame = pd.concat(parts, ignore_index=True)
+    frame["season"] = frame["season"].astype("Int64")
+    return frame
 
 
 def run_features(settings: Settings) -> tuple[pd.DataFrame, pd.DataFrame]:

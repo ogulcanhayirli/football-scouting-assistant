@@ -23,7 +23,8 @@ that is reported even when it wins.
 | Private S3 copy of the data | Done: `scout sync up` stored 2,387 files; a second run copies nothing |
 | Feasibility check and `FEASIBILITY.md` | Done: go. Full features from 2015, basic from 2010; 88% of players linked to Transfermarkt, precision 179 of 179 on a hand check |
 | Point in time feature and label tables (`FEATURES.md`) | Done: 16,264 player seasons, 87 feature columns, contracts check the point in time rule |
-| Glue and Athena over the features, then SageMaker Feature Store | Next, in eu-central-1 |
+| Glue and Athena over the features (`infra/`, CDK) | Written and tested; `cdk diff` reviewed; deploy waits on one policy update |
+| SageMaker Feature Store | After Athena |
 | Models, similarity search, agent, rest of the AWS stack | Not started |
 
 ## Architecture
@@ -78,6 +79,8 @@ scripts/feasibility.py      feasibility check (free tier sample, or every backfi
 FEASIBILITY.md              results of the feasibility check and the decisions they support
 FEATURES.md                 data dictionary of the feature and label tables
 tests/unit, tests/contracts, tests/fixtures (synthetic sample)
+infra/                      AWS CDK app (own uv environment): Glue, Athena, query role
+docs/AWS_SETUP.md           one time account setup that lets the session deploy, narrowly
 ```
 
 ## Running it

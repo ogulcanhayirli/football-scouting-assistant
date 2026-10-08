@@ -315,8 +315,10 @@ def profile_features(inputs: Inputs, rows: pd.DataFrame) -> pd.DataFrame:
     out = out.merge(
         inputs.links, left_on="source_player_id", right_on="af_player_id", how="left"
     ).drop(columns="af_player_id")
-    if "rule" in out:
-        out = out.rename(columns={"rule": "link_rule"})  # which matching rule linked him
+    # Which matching rule linked him; always present so the schema is stable.
+    out = out.rename(columns={"rule": "link_rule"})
+    if "link_rule" not in out:
+        out["link_rule"] = pd.Series(pd.NA, index=out.index, dtype="string")
     out = out.join(tm, on="tm_player_id")
     birth = out["af_birth_date"].fillna(out["tm_birth_date"])
     out["age"] = (out["feature_date"] - birth).dt.days / 365.25
@@ -419,6 +421,7 @@ FIRST_COLUMNS = [
     "season",
     "source_player_id",
     "tm_player_id",
+    "link_rule",
     "player_name",
     "feature_date",
     "tier",
@@ -440,4 +443,5 @@ def _order(frame: pd.DataFrame) -> pd.DataFrame:
     for column in ("source_player_id", "tm_player_id", "team_id", "season"):
         frame[column] = frame[column].astype("Int64")
     frame["regular"] = frame["regular"].astype(bool)
+    frame["link_rule"] = frame["link_rule"].astype("string")
     return frame.sort_values(["league_key", "season", "source_player_id"]).reset_index(drop=True)

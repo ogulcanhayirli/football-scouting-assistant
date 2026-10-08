@@ -55,6 +55,12 @@ cat > scout-cfn-exec.json <<EOF
       "Resource": "arn:aws:iam::${ACCOUNT}:role/scout-*"
     },
     {
+      "Sid": "BootstrapVersionCheck",
+      "Effect": "Allow",
+      "Action": "ssm:GetParameters",
+      "Resource": "arn:aws:ssm:eu-central-1:${ACCOUNT}:parameter/cdk-bootstrap/hnb659fds/version"
+    },
+    {
       "Sid": "FeatureStore",
       "Effect": "Allow",
       "Action": [
@@ -69,6 +75,18 @@ cat > scout-cfn-exec.json <<EOF
 EOF
 
 aws iam create-policy --policy-name scout-cfn-exec --policy-document file://scout-cfn-exec.json
+```
+
+`BootstrapVersionCheck` is needed because every CDK template reads the
+bootstrap version from SSM while CloudFormation runs it as the execution role.
+
+To change the policy later, write the new JSON to the same file and add it as
+the default version (a policy keeps at most five versions):
+
+```bash
+aws iam create-policy-version \
+  --policy-arn "arn:aws:iam::${ACCOUNT}:policy/scout-cfn-exec" \
+  --policy-document file://scout-cfn-exec.json --set-as-default
 ```
 
 ## 2. Bootstrap CDK in eu-central-1 with that policy
