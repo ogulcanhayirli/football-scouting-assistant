@@ -36,6 +36,23 @@ Join the labels on `league`, `season` and `source_player_id`. From the
 command line: `uv run scout athena "<SQL>"`, which runs as the read only
 `scout-analyst` role in the `scout` workgroup (1 GB scan limit per query).
 
+## SageMaker Feature Store
+
+The `ScoutFeatureStore` stack holds the same rows in the feature group
+`scout-player-season-features` (offline store only, Iceberg):
+
+| Feature Store field | Here |
+|---|---|
+| record identifier `record_id` | `<league_key>#<source_player_id>`, for example `epl#1100` |
+| event time `event_time` | the feature date, ISO 8601 |
+| features | `season` plus every column above; booleans as 0 or 1, timestamps as ISO strings |
+
+`uv run scout featurestore ingest` puts every row (writing a row again adds a
+version, which point in time queries ignore). `uv run scout featurestore pit
+--as-of <date>` asks the offline store for every player as of a date and
+compares the answer with our tables. The offline store fills in batches, so
+new records show up after about 5 to 15 minutes.
+
 ## The point in time rule
 
 Every row describes a player **as of its `feature_date`** and uses nothing

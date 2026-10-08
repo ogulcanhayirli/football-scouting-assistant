@@ -24,7 +24,7 @@ that is reported even when it wins.
 | Feasibility check and `FEASIBILITY.md` | Done: go. Full features from 2015, basic from 2010; 88% of players linked to Transfermarkt, precision 179 of 179 on a hand check |
 | Point in time feature and label tables (`FEATURES.md`) | Done: 16,264 player seasons, 87 feature columns, contracts check the point in time rule |
 | Glue and Athena over the features (`infra/`, CDK) | Deployed to eu-central-1 (stack `ScoutData`); `scout athena "SQL"` queries it |
-| SageMaker Feature Store | After Athena |
+| SageMaker Feature Store (`ScoutFeatureStore` stack) | Deployed: 16,264 records, offline store (Iceberg); its point in time answers match our tables exactly |
 | Models, similarity search, agent, rest of the AWS stack | Not started |
 
 ## Architecture
@@ -74,6 +74,7 @@ src/scout/
   features/                 point in time feature and label tables
   sync.py                   copy data/raw and data/processed to or from S3
   athena.py                 run SQL on the feature tables as the scout-analyst role
+  featurestore.py           Feature Store ingestion and the point in time comparison
   cli.py                    `scout backfill | coverage | transfermarkt | sync`
 configs/                    backfill.free.yaml, backfill.pro.yaml
 scripts/feasibility.py      feasibility check (free tier sample, or every backfilled season)
@@ -116,6 +117,10 @@ uv run scout --config configs/backfill.ultra.yaml features
 
 # Deploy the Glue catalog and Athena workgroup (see docs/AWS_SETUP.md first)
 cd infra && CDK_DEFAULT_ACCOUNT=<account id> npx aws-cdk@2 deploy ScoutData && cd ..
+
+# Load the features into SageMaker Feature Store, then check its point in time view
+uv run scout featurestore ingest
+uv run scout featurestore pit --as-of 2023-01-01
 
 # Query the feature tables in Athena, as the read only scout-analyst role
 uv run scout athena "SELECT player_name, goals_per90 FROM player_season_features
@@ -248,3 +253,12 @@ Athena. SageMaker Feature Store comes after, as a feature group over the same
 table, to compare its point in time queries with ours. Point in time
 correctness lives in our code either way. *Would change if* the API needed
 low latency lookups that DynamoDB could not serve.
+
+**D15. Feature Store as a mirror, not the source of truth.** The Parquet
+tables stay the source for training; the feature group holds the same rows,
+keyed by league and player with the feature date as event time, offline
+store only. Its point in time answers were checked against ours: identical
+for every player as of 2023-01-01 (4,426 rows) and 2020-07-15 (3,318 rows,
+inside the COVID season, where the 2019/20 rows must not show yet). *Would
+change if* the API needed online lookups; the group would then get an online
+store, and Feature Store would become the serving path.
