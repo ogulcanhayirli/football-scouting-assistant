@@ -22,7 +22,9 @@ that is reported even when it wins.
 | Match level player stats | Done: EPL and Süper Lig 2015 to 2025, 275,003 player match rows, 7,898 requests on the Ultra plan |
 | Private S3 copy of the data | Done: `scout sync up` stored 2,387 files; a second run copies nothing |
 | Feasibility check and `FEASIBILITY.md` | Done: go. Full features from 2015, basic from 2010; 88% of players linked to Transfermarkt, precision 179 of 179 on a hand check |
-| Models, similarity search, agent, AWS stack | Not started |
+| Point in time feature and label tables (`FEATURES.md`) | Done: 16,264 player seasons, 87 feature columns, contracts check the point in time rule |
+| Glue and Athena over the features, then SageMaker Feature Store | Next, in eu-central-1 |
+| Models, similarity search, agent, rest of the AWS stack | Not started |
 
 ## Architecture
 
@@ -68,11 +70,13 @@ src/scout/
   matching.py               player matching between sources
   feasibility.py            analysis functions used by scripts/feasibility.py
   backfill/                 season and match runners, coverage reports
+  features/                 point in time feature and label tables
   sync.py                   copy data/raw and data/processed to or from S3
   cli.py                    `scout backfill | coverage | transfermarkt | sync`
 configs/                    backfill.free.yaml, backfill.pro.yaml
 scripts/feasibility.py      feasibility check (free tier sample, or every backfilled season)
 FEASIBILITY.md              results of the feasibility check and the decisions they support
+FEATURES.md                 data dictionary of the feature and label tables
 tests/unit, tests/contracts, tests/fixtures (synthetic sample)
 ```
 
@@ -102,6 +106,9 @@ uv run scout --config configs/backfill.pro.yaml backfill
 
 # Per match player stats (one request per match), for seasons that have them
 uv run scout --config configs/backfill.ultra.yaml backfill --level match
+
+# Point in time feature and label tables (needs the Transfermarkt snapshot)
+uv run scout --config configs/backfill.ultra.yaml features
 
 # Copy the data to the private bucket in $SCOUT_S3_BUCKET, or restore it
 # into a fresh checkout. Files already on the other side are skipped.
@@ -188,7 +195,9 @@ can be revisited without new requests.
 **D9. Season end (30 June) as the main feature date.** Season level totals
 are then enough and cost far fewer requests than match level stats.
 Confirmed by the feasibility check: 99% of regular players from 2015 on have
-a market value at that date. *Would change if* features at other dates (for
+a market value at that date. When a season runs past 30 June (2019/20 ended
+on 26 July 2020), the feature date is the day after its last match instead,
+so no row ever uses a match from after its feature date. *Would change if* features at other dates (for
 example before the January window) became a requirement; match level stats
 would then cost about 10,700 requests.
 
@@ -216,6 +225,14 @@ restart. Season totals are used only where no match data exists (2010 to
 2014). *Would change if* a later API correction made the season endpoint
 agree again.
 
-**Open: AWS region.** Needs Amazon Nova Lite and Claude Haiku 4.5 in Bedrock.
-eu-central-1 and eu-west-1 are the candidates; availability will be checked in
-the current AWS documentation before anything is deployed.
+**D13. AWS region eu-central-1 (Frankfurt).** Chosen by the account owner.
+Bedrock model availability (Amazon Nova Lite, Claude Haiku 4.5) is checked in
+the current AWS documentation before the agent is deployed; the data and
+feature stack does not depend on it.
+
+**D14. Data lake first, Feature Store second.** Features are Parquet on S3,
+partitioned by league and season, catalogued in Glue and queried with
+Athena. SageMaker Feature Store comes after, as a feature group over the same
+table, to compare its point in time queries with ours. Point in time
+correctness lives in our code either way. *Would change if* the API needed
+low latency lookups that DynamoDB could not serve.

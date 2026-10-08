@@ -177,6 +177,8 @@ class TransfermarktValuationProvider:
                 "nationality": players["country_of_citizenship"],
                 "current_club_id": players["current_club_id"].astype("Int64"),
                 "current_club_name": players["current_club_name"],
+                "foot": players.get("foot"),
+                "height_cm": pd.to_numeric(players.get("height_in_cm"), errors="coerce"),
             }
         )
         return out.reset_index(drop=True)

@@ -122,6 +122,73 @@ PLAYER_MATCH_STATS = DataFrameSchema(
 )
 
 
+def _on_or_before(column: str, limit: str) -> Check:
+    """Point in time rule: ``column`` (a date the row used) is not after ``limit``."""
+
+    def check(df: pd.DataFrame) -> pd.Series:
+        return df[column].isna() | (df[column] <= df[limit])
+
+    return Check(check, name=f"{column}_le_{limit}", error=f"{column} after {limit}: leak")
+
+
+def _after(column: str, start: str) -> Check:
+    def check(df: pd.DataFrame) -> pd.Series:
+        return df[column].isna() | (df[column] > df[start])
+
+    return Check(check, name=f"{column}_after_{start}", error=f"{column} not after {start}")
+
+
+_rate = {"nullable": True, "checks": Check.in_range(0, 1)}
+_per90 = {"nullable": True, "checks": Check.ge(0)}
+
+PLAYER_SEASON_FEATURES = DataFrameSchema(
+    {
+        "league_key": Column(str, Check.isin(["epl", "super_lig"])),
+        "season": Column("Int64", Check.in_range(2000, 2100)),
+        "source_player_id": Column("Int64", Check.gt(0)),
+        "tm_player_id": Column("Int64", nullable=True),
+        "feature_date": Column("datetime64[ns]"),
+        "tier": Column(str, Check.isin(["match", "season"])),
+        "regular": Column(bool),
+        "age": Column(float, Check.in_range(14, 46), nullable=True),
+        "minutes": Column("Float64", Check.in_range(0, MAX_SEASON_MINUTES)),
+        "minutes_share": Column(float, **_rate),
+        "goals_per90": Column("Float64", **_per90),
+        "shots_total_per90": Column("Float64", **_per90),
+        "passes_key_per90": Column("Float64", **_per90),
+        "rating": Column("Float64", Check.in_range(0, 10), nullable=True),
+        "shot_accuracy": Column("Float64", **_rate),
+        "pass_accuracy": Column("Float64", **_rate),
+        "duel_win_rate": Column("Float64", **_rate),
+        "dribble_success_rate": Column("Float64", **_rate),
+        "market_value": Column(float, Check.gt(0), nullable=True),
+    },
+    checks=[
+        _on_or_before("last_match_date", "feature_date"),
+        _on_or_before("value_date", "feature_date"),
+    ],
+    unique=["league_key", "season", "source_player_id"],
+    strict=False,
+    name="player_season_features",
+)
+
+PLAYER_SEASON_LABELS = DataFrameSchema(
+    {
+        "league_key": Column(str),
+        "season": Column("Int64"),
+        "source_player_id": Column("Int64", Check.gt(0)),
+        "feature_date": Column("datetime64[ns]"),
+        "value_now": Column(float, Check.gt(0), nullable=True),
+        "value_24m": Column(float, Check.gt(0), nullable=True),
+        "value_36m": Column(float, Check.gt(0), nullable=True),
+    },
+    checks=[_after("value_24m_date", "feature_date"), _after("value_36m_date", "feature_date")],
+    unique=["league_key", "season", "source_player_id"],
+    strict=False,
+    name="player_season_labels",
+)
+
+
 def validate(schema: DataFrameSchema, frame: pd.DataFrame) -> pd.DataFrame:
     """Validate lazily so one run reports every violation, not just the first."""
     return schema.validate(frame, lazy=True)
@@ -130,6 +197,8 @@ def validate(schema: DataFrameSchema, frame: pd.DataFrame) -> pd.DataFrame:
 __all__ = [
     "PLAYERS",
     "PLAYER_MATCH_STATS",
+    "PLAYER_SEASON_FEATURES",
+    "PLAYER_SEASON_LABELS",
     "PLAYER_SEASON_STATS",
     "VALUATIONS",
     "pa",

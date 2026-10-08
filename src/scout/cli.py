@@ -87,6 +87,13 @@ def cmd_transfermarkt(settings: Settings, args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_features(settings: Settings, args: argparse.Namespace) -> int:
+    from scout.features import run_features
+
+    run_features(settings)
+    return 0
+
+
 def cmd_sync(settings: Settings, args: argparse.Namespace) -> int:
     import os
 
@@ -132,6 +139,9 @@ def main(argv: list[str] | None = None) -> int:
 
     tm = sub.add_parser("transfermarkt", help="Download the transfermarkt-datasets snapshot")
     tm.set_defaults(func=cmd_transfermarkt)
+
+    features = sub.add_parser("features", help="Build point in time feature and label tables")
+    features.set_defaults(func=cmd_features)
 
     sync = sub.add_parser("sync", help="Copy data/raw and data/processed to or from S3")
     sync.add_argument("direction", choices=["up", "down"])
