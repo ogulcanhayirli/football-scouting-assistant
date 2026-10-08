@@ -9,7 +9,7 @@ from scout.secrets import MissingSecretError, get_secret
 CONFIGS = Path(__file__).parents[2] / "configs"
 
 
-@pytest.mark.parametrize("name", ["backfill.free.yaml", "backfill.pro.yaml"])
+@pytest.mark.parametrize("name", ["backfill.free.yaml", "backfill.pro.yaml", "backfill.ultra.yaml"])
 def test_committed_configs_load(name):
     settings = load_settings(CONFIGS / name)
     assert {lg.key for lg in settings.leagues} == {"epl", "super_lig"}
