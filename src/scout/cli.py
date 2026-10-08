@@ -94,6 +94,26 @@ def cmd_features(settings: Settings, args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_athena(settings: Settings, args: argparse.Namespace) -> int:
+    import os
+
+    from scout.athena import AthenaQueryError, analyst_session, run_query
+
+    region = args.region or os.environ.get("AWS_DEFAULT_REGION", "eu-central-1")
+    client = analyst_session(region).client("athena")
+    try:
+        frame, stats = run_query(client, args.sql)
+    except AthenaQueryError as exc:
+        logging.getLogger(__name__).error("%s", exc)
+        return 1
+    print(frame.to_markdown(index=False) if not frame.empty else "(no rows)")
+    print(
+        f"\n{len(frame)} rows, {stats['scanned_bytes'] / 1e6:.2f} MB scanned, "
+        f"{stats['runtime_ms']} ms"
+    )
+    return 0
+
+
 def cmd_sync(settings: Settings, args: argparse.Namespace) -> int:
     import os
 
@@ -142,6 +162,11 @@ def main(argv: list[str] | None = None) -> int:
 
     features = sub.add_parser("features", help="Build point in time feature and label tables")
     features.set_defaults(func=cmd_features)
+
+    athena_cmd = sub.add_parser("athena", help="Run a SQL query on the feature tables")
+    athena_cmd.add_argument("sql", help="Query, for example SELECT * FROM player_season_features")
+    athena_cmd.add_argument("--region", help="Defaults to $AWS_DEFAULT_REGION")
+    athena_cmd.set_defaults(func=cmd_athena)
 
     sync = sub.add_parser("sync", help="Copy data/raw and data/processed to or from S3")
     sync.add_argument("direction", choices=["up", "down"])

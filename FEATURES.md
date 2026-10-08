@@ -18,6 +18,24 @@ it. A player who moved within a
 league has one row; a player who played in both leagues in one season has a
 row in each.
 
+## Querying in Athena
+
+The `ScoutData` stack (`infra/`) registers both tables in the Glue database
+`scout`. In Athena the partition keys are `league` and `season`; filter on
+them, and a query reads only those folders:
+
+```sql
+SELECT player_name, team_name, goals_per90, market_value
+FROM player_season_features
+WHERE league = 'super_lig' AND season = 2024 AND regular
+ORDER BY goals_per90 DESC
+LIMIT 10;
+```
+
+Join the labels on `league`, `season` and `source_player_id`. From the
+command line: `uv run scout athena "<SQL>"`, which runs as the read only
+`scout-analyst` role in the `scout` workgroup (1 GB scan limit per query).
+
 ## The point in time rule
 
 Every row describes a player **as of its `feature_date`** and uses nothing

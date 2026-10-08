@@ -23,7 +23,7 @@ that is reported even when it wins.
 | Private S3 copy of the data | Done: `scout sync up` stored 2,387 files; a second run copies nothing |
 | Feasibility check and `FEASIBILITY.md` | Done: go. Full features from 2015, basic from 2010; 88% of players linked to Transfermarkt, precision 179 of 179 on a hand check |
 | Point in time feature and label tables (`FEATURES.md`) | Done: 16,264 player seasons, 87 feature columns, contracts check the point in time rule |
-| Glue and Athena over the features (`infra/`, CDK) | Written and tested; `cdk diff` reviewed; deploy waits on one policy update |
+| Glue and Athena over the features (`infra/`, CDK) | Deployed to eu-central-1 (stack `ScoutData`); `scout athena "SQL"` queries it |
 | SageMaker Feature Store | After Athena |
 | Models, similarity search, agent, rest of the AWS stack | Not started |
 
@@ -73,6 +73,7 @@ src/scout/
   backfill/                 season and match runners, coverage reports
   features/                 point in time feature and label tables
   sync.py                   copy data/raw and data/processed to or from S3
+  athena.py                 run SQL on the feature tables as the scout-analyst role
   cli.py                    `scout backfill | coverage | transfermarkt | sync`
 configs/                    backfill.free.yaml, backfill.pro.yaml
 scripts/feasibility.py      feasibility check (free tier sample, or every backfilled season)
@@ -112,6 +113,14 @@ uv run scout --config configs/backfill.ultra.yaml backfill --level match
 
 # Point in time feature and label tables (needs the Transfermarkt snapshot)
 uv run scout --config configs/backfill.ultra.yaml features
+
+# Deploy the Glue catalog and Athena workgroup (see docs/AWS_SETUP.md first)
+cd infra && CDK_DEFAULT_ACCOUNT=<account id> npx aws-cdk@2 deploy ScoutData && cd ..
+
+# Query the feature tables in Athena, as the read only scout-analyst role
+uv run scout athena "SELECT player_name, goals_per90 FROM player_season_features
+                     WHERE league = 'epl' AND season = 2024 AND regular
+                     ORDER BY goals_per90 DESC LIMIT 10"
 
 # Copy the data to the private bucket in $SCOUT_S3_BUCKET, or restore it
 # into a fresh checkout. Files already on the other side are skipped.
