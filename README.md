@@ -105,7 +105,7 @@ uv run scout --config configs/backfill.ultra.yaml backfill --level match
 
 # Copy the data to the private bucket in $SCOUT_S3_BUCKET, or restore it
 # into a fresh checkout. Files already on the other side are skipped.
-uv run scout sync up                # or: sync down, --dry-run, --only raw
+uv run scout sync up                # or: sync down, --dry-run, --only raw, --workers 16
 ```
 
 The backfill writes `reports/coverage_report.md` and `.json`, logs to

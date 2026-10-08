@@ -82,6 +82,21 @@ def test_upload_then_second_run_skips_everything(data):
     assert len(s3.puts) == 4
 
 
+def test_parallel_transfers_match_sequential(data, tmp_path):
+    for i in range(30):
+        _write(data["raw"] / "api_football" / "fixtures" / f"f{i}.json", f'{{"i": {i}}}'.encode())
+    s3 = FakeS3(page_size=7)
+    up = sync_dir(s3, BUCKET, data["raw"], "raw", "up", workers=6)
+    assert len(up.transferred) == 33
+    assert up.transferred == sorted(up.transferred)
+    target = tmp_path / "copy"
+    down = sync_dir(s3, BUCKET, target, "raw", "down", workers=6)
+    assert len(down.transferred) == 33
+    for src in data["raw"].rglob("*.json"):
+        assert (target / src.relative_to(data["raw"])).read_bytes() == src.read_bytes()
+    assert sync_dir(s3, BUCKET, data["raw"], "raw", "up", workers=6).transferred == []
+
+
 def test_upload_sends_only_new_and_changed_files(data):
     s3 = FakeS3()
     sync_data(s3, BUCKET, data, "up")
@@ -170,7 +185,7 @@ def _config(tmp_path, **paths):
 def test_cli_sync_uses_bucket_from_environment(data, tmp_path, monkeypatch, capsys):
     boto3 = pytest.importorskip("boto3")
     s3 = FakeS3()
-    monkeypatch.setattr(boto3, "client", lambda service: s3)
+    monkeypatch.setattr(boto3, "client", lambda service, **kwargs: s3)
     monkeypatch.setenv("SCOUT_S3_BUCKET", BUCKET)
     config = _config(tmp_path, raw_dir=data["raw"], processed_dir=data["processed"])
     assert cli.main(["--config", str(config), "sync", "up", "--only", "raw"]) == 0

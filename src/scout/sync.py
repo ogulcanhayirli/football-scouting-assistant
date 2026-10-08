@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
@@ -80,12 +81,18 @@ def sync_dir(
     prefix: str,
     direction: Direction,
     dry_run: bool = False,
+    workers: int = 1,
 ) -> SyncResult:
-    """Copy one folder in one direction, skipping files that are already there."""
+    """Copy one folder in one direction, skipping files that are already there.
+
+    With ``workers`` above 1, transfers run in a thread pool; boto3 clients are
+    safe to share between threads. The result lists keys in sorted order either way.
+    """
     if prefix and not prefix.endswith("/"):
         prefix += "/"
     remote = list_remote(client, bucket, prefix)
     result = SyncResult(direction)
+    todo: list[tuple[str, Path]] = []
 
     if direction == "up":
         files = sorted(p for p in local_dir.rglob("*") if p.is_file()) if local_dir.exists() else []
@@ -96,10 +103,7 @@ def sync_dir(
                 continue
             if path.stat().st_size > SINGLE_PART_LIMIT:
                 raise ValueError(f"{path} is too large for a single part upload")
-            if not dry_run:
-                with path.open("rb") as body:
-                    client.put_object(Bucket=bucket, Key=key, Body=body)
-            result.transferred.append(key)
+            todo.append((key, path))
     else:
         for key, (size, etag) in sorted(remote.items()):
             if key.endswith("/"):
@@ -108,12 +112,28 @@ def sync_dir(
             if _same(path, size, etag):
                 result.skipped.append(key)
                 continue
-            if not dry_run:
-                path.parent.mkdir(parents=True, exist_ok=True)
-                tmp = path.with_name(path.name + ".part")
-                client.download_file(bucket, key, str(tmp))
-                tmp.replace(path)
-            result.transferred.append(key)
+            todo.append((key, path))
+
+    def transfer(item: tuple[str, Path]) -> str:
+        key, path = item
+        if direction == "up":
+            with path.open("rb") as body:
+                client.put_object(Bucket=bucket, Key=key, Body=body)
+        else:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = path.with_name(path.name + ".part")
+            client.download_file(bucket, key, str(tmp))
+            tmp.replace(path)
+        return key
+
+    if not dry_run and todo:
+        if workers > 1:
+            with ThreadPoolExecutor(max_workers=workers) as pool:
+                list(pool.map(transfer, todo))  # list() surfaces the first error
+        else:
+            for item in todo:
+                transfer(item)
+    result.transferred = [key for key, _ in todo]
 
     remote_url = f"s3://{bucket}/{prefix}"
     source, target = (local_dir, remote_url) if direction == "up" else (remote_url, local_dir)
@@ -128,11 +148,12 @@ def sync_data(
     direction: Direction,
     prefix: str = "",
     dry_run: bool = False,
+    workers: int = 1,
 ) -> dict[str, SyncResult]:
     """Sync several named folders, for example ``{"raw": data/raw}``."""
     if prefix and not prefix.endswith("/"):
         prefix += "/"
     return {
-        name: sync_dir(client, bucket, local, f"{prefix}{name}/", direction, dry_run)
+        name: sync_dir(client, bucket, local, f"{prefix}{name}/", direction, dry_run, workers)
         for name, local in folders.items()
     }

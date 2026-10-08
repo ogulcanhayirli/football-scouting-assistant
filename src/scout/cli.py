@@ -97,12 +97,14 @@ def cmd_sync(settings: Settings, args: argparse.Namespace) -> int:
         logging.getLogger(__name__).error("Set SCOUT_S3_BUCKET or pass --bucket")
         return 1
     import boto3  # optional extra: uv sync --extra aws
+    from botocore.config import Config
 
     folders = {"raw": settings.paths.raw_dir, "processed": settings.paths.processed_dir}
     if args.only:
         folders = {name: folders[name] for name in args.only}
+    client = boto3.client("s3", config=Config(max_pool_connections=args.workers + 2))
     results = sync_data(
-        boto3.client("s3"), bucket, folders, args.direction, args.prefix, args.dry_run
+        client, bucket, folders, args.direction, args.prefix, args.dry_run, args.workers
     )
     for name, result in results.items():
         print(f"{name}: {result.summary()}{' (dry run)' if args.dry_run else ''}")
@@ -137,6 +139,7 @@ def main(argv: list[str] | None = None) -> int:
     sync.add_argument("--prefix", default="", help="Key prefix inside the bucket")
     sync.add_argument("--only", action="append", choices=["raw", "processed"])
     sync.add_argument("--dry-run", action="store_true", help="List what would be copied")
+    sync.add_argument("--workers", type=int, default=8, help="Parallel transfers (default 8)")
     sync.set_defaults(func=cmd_sync)
 
     args = parser.parse_args(argv)
