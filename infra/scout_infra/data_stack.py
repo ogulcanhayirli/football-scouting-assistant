@@ -29,6 +29,8 @@ from aws_cdk import aws_iam as iam
 from aws_cdk import aws_s3 as s3
 from constructs import Construct
 
+from scout_infra.boundary import apply_boundary
+
 SCHEMA_DIR = Path(__file__).parent / "schemas"
 DATABASE = "scout"
 WORKGROUP = "scout"
@@ -227,6 +229,8 @@ class ScoutDataStack(cdk.Stack):
                 resources=[results.bucket_arn, results.arn_for_objects("*")],
             )
         )
+
+        apply_boundary(self)
 
         cdk.CfnOutput(self, "AnalystRoleArn", value=analyst.role_arn)
         cdk.CfnOutput(self, "WorkGroupName", value=workgroup.name)

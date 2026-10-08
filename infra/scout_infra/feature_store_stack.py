@@ -28,6 +28,8 @@ from aws_cdk import aws_s3 as s3
 from aws_cdk import aws_sagemaker as sagemaker
 from constructs import Construct
 
+from scout_infra.boundary import apply_boundary
+
 SCHEMA_DIR = Path(__file__).parent / "schemas"
 FEATURE_GROUP = "scout-player-season-features"
 RECORD_ID = "record_id"
@@ -194,6 +196,8 @@ class ScoutFeatureStoreStack(cdk.Stack):
                 ),
             ],
         )
+
+        apply_boundary(self)
 
         cdk.CfnOutput(self, "FeatureGroupName", value=FEATURE_GROUP)
         cdk.CfnOutput(self, "IngestRoleArn", value=ingest.role_arn)

@@ -132,6 +132,119 @@ The second statement lets the session assume roles the stacks create, such
 as the role that runs Athena queries. Those roles still need to trust the
 user, and their trust policies are written in the CDK code.
 
+## 5. A permissions boundary on every project role
+
+Steps 1 to 3 let deployments create roles named `scout-*` with **any**
+policy inside, and the session may assume `scout-*` roles. So a stack could
+in principle create a `scout-*` role with administrator rights. This step
+closes that: `scout-boundary` is the most any `scout-*` role can ever do,
+whatever its own policies say, and deployments may only create or change
+roles that carry it. It covers what the deployed roles need today plus
+SageMaker training and tuning, and contains no IAM rights except passing the
+training role to SageMaker.
+
+```bash
+ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
+BUCKET=football-scout-data-ogulcanhayirli   # the data bucket
+R=eu-central-1
+
+cat > scout-boundary.json <<EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {"Sid": "ProjectBuckets", "Effect": "Allow", "Action": "s3:*",
+     "Resource": ["arn:aws:s3:::scout-*", "arn:aws:s3:::scout-*/*"]},
+    {"Sid": "ReadDataBucket", "Effect": "Allow",
+     "Action": ["s3:GetObject", "s3:ListBucket", "s3:GetBucketLocation"],
+     "Resource": ["arn:aws:s3:::${BUCKET}", "arn:aws:s3:::${BUCKET}/processed/*"]},
+    {"Sid": "Catalog", "Effect": "Allow",
+     "Action": ["glue:GetDatabase", "glue:GetDatabases", "glue:GetTable", "glue:GetTables",
+                "glue:GetPartition", "glue:GetPartitions", "glue:BatchGetPartition",
+                "glue:UpdateTable"],
+     "Resource": ["arn:aws:glue:${R}:${ACCOUNT}:catalog",
+                  "arn:aws:glue:${R}:${ACCOUNT}:database/scout",
+                  "arn:aws:glue:${R}:${ACCOUNT}:table/scout/*",
+                  "arn:aws:glue:${R}:${ACCOUNT}:database/sagemaker_featurestore",
+                  "arn:aws:glue:${R}:${ACCOUNT}:table/sagemaker_featurestore/*"]},
+    {"Sid": "Athena", "Effect": "Allow", "Action": "athena:*",
+     "Resource": "arn:aws:athena:${R}:${ACCOUNT}:workgroup/scout"},
+    {"Sid": "SageMaker", "Effect": "Allow",
+     "Action": ["sagemaker:PutRecord", "sagemaker:DescribeFeatureGroup",
+                "sagemaker:CreateTrainingJob", "sagemaker:DescribeTrainingJob",
+                "sagemaker:StopTrainingJob", "sagemaker:ListTrainingJobs",
+                "sagemaker:CreateHyperParameterTuningJob",
+                "sagemaker:DescribeHyperParameterTuningJob",
+                "sagemaker:StopHyperParameterTuningJob",
+                "sagemaker:ListHyperParameterTuningJobs",
+                "sagemaker:ListTrainingJobsForHyperParameterTuningJob",
+                "sagemaker:AddTags", "sagemaker:ListTags"],
+     "Resource": "*"},
+    {"Sid": "PassTrainingRole", "Effect": "Allow", "Action": "iam:PassRole",
+     "Resource": "arn:aws:iam::${ACCOUNT}:role/scout-sagemaker-training",
+     "Condition": {"StringEquals": {"iam:PassedToService": "sagemaker.amazonaws.com"}}},
+    {"Sid": "TrainingLogs", "Effect": "Allow",
+     "Action": ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents",
+                "logs:DescribeLogStreams", "logs:GetLogEvents", "logs:FilterLogEvents"],
+     "Resource": "arn:aws:logs:${R}:${ACCOUNT}:log-group:/aws/sagemaker/*"},
+    {"Sid": "TrainingMetrics", "Effect": "Allow", "Action": "cloudwatch:PutMetricData",
+     "Resource": "*"},
+    {"Sid": "PullAwsTrainingImages", "Effect": "Allow",
+     "Action": ["ecr:GetAuthorizationToken", "ecr:BatchGetImage",
+                "ecr:GetDownloadUrlForLayer", "ecr:BatchCheckLayerAvailability"],
+     "Resource": "*"}
+  ]
+}
+EOF
+
+aws iam create-policy --policy-name scout-boundary --policy-document file://scout-boundary.json
+```
+
+Then a new version of the deployment policy: the role actions that change
+what a role may do now require the boundary.
+
+```bash
+BOUNDARY="arn:aws:iam::${ACCOUNT}:policy/scout-boundary"
+
+cat > scout-cfn-exec.json <<EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {"Sid": "Catalog", "Effect": "Allow", "Action": ["glue:*", "athena:*"], "Resource": "*"},
+    {"Sid": "ProjectBuckets", "Effect": "Allow", "Action": "s3:*",
+     "Resource": ["arn:aws:s3:::scout-*", "arn:aws:s3:::scout-*/*"]},
+    {"Sid": "ProjectRolesWithBoundary", "Effect": "Allow",
+     "Action": ["iam:CreateRole", "iam:PutRolePolicy", "iam:DeleteRolePolicy",
+                "iam:AttachRolePolicy", "iam:DetachRolePolicy",
+                "iam:PutRolePermissionsBoundary"],
+     "Resource": "arn:aws:iam::${ACCOUNT}:role/scout-*",
+     "Condition": {"StringEquals": {"iam:PermissionsBoundary": "${BOUNDARY}"}}},
+    {"Sid": "ProjectRolesOther", "Effect": "Allow",
+     "Action": ["iam:GetRole", "iam:DeleteRole", "iam:UpdateRole", "iam:TagRole",
+                "iam:UntagRole", "iam:UpdateAssumeRolePolicy", "iam:GetRolePolicy",
+                "iam:PassRole"],
+     "Resource": "arn:aws:iam::${ACCOUNT}:role/scout-*"},
+    {"Sid": "BootstrapVersionCheck", "Effect": "Allow", "Action": "ssm:GetParameters",
+     "Resource": "arn:aws:ssm:${R}:${ACCOUNT}:parameter/cdk-bootstrap/hnb659fds/version"},
+    {"Sid": "FeatureStore", "Effect": "Allow",
+     "Action": ["sagemaker:CreateFeatureGroup", "sagemaker:DeleteFeatureGroup",
+                "sagemaker:DescribeFeatureGroup", "sagemaker:UpdateFeatureGroup",
+                "sagemaker:AddTags", "sagemaker:DeleteTags", "sagemaker:ListTags"],
+     "Resource": "*"}
+  ]
+}
+EOF
+
+aws iam create-policy-version \
+  --policy-arn "arn:aws:iam::${ACCOUNT}:policy/scout-cfn-exec" \
+  --policy-document file://scout-cfn-exec.json --set-as-default
+```
+
+Why it holds: removing a boundary (`iam:DeleteRolePermissionsBoundary`) is
+not allowed at all, setting one is only allowed to `scout-boundary`, and
+deployments can't edit the boundary policy itself, because they have no
+rights on IAM policies. The CDK app attaches the boundary to every role it
+creates; the existing roles get it on their next deploy.
+
 ## 4. Recommended: a budget alarm
 
 Billing, then Budgets, then Create budget: a monthly cost budget of 20 USD

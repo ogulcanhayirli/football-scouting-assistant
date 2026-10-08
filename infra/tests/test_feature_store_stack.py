@@ -117,3 +117,11 @@ def test_analyst_gets_read_only_access_to_the_offline_store(template):
         "AWS::IAM::Policy",
         {"PolicyName": "scout-read-offline-store", "Roles": ["scout-analyst"]},
     )
+
+
+def test_every_role_carries_the_permissions_boundary(template):
+    roles = template.find_resources("AWS::IAM::Role")
+    assert roles
+    for role in roles.values():
+        boundary = role["Properties"]["PermissionsBoundary"]
+        assert "policy/scout-boundary" in str(boundary)

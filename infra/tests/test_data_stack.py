@@ -161,3 +161,11 @@ def test_analyst_can_read_features_but_never_write_or_delete_data(template):
     assert data_writes == []
     for s in statements:
         assert s["Resource"] != "*", s["Sid"]
+
+
+def test_every_role_carries_the_permissions_boundary(template):
+    roles = template.find_resources("AWS::IAM::Role")
+    assert roles
+    for role in roles.values():
+        boundary = role["Properties"]["PermissionsBoundary"]
+        assert "policy/scout-boundary" in str(boundary)
