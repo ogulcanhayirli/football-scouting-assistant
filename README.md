@@ -19,6 +19,7 @@ that is reported even when it wins.
 | Quota aware, resumable backfill | Done, tested against a mocked API |
 | Free tier proof run (one league, one season) | Done: EPL 2023 took 51 requests and 1,074 rows passed the contract; the second run made 0 requests |
 | Full historical backfill | Done: all 31 past seasons (EPL 2010 to 2025, Süper Lig 2011 to 2025) complete, 1,178 requests |
+| Match level player stats | Done: EPL and Süper Lig 2015 to 2025, 275,003 player match rows, 7,898 requests on the Ultra plan |
 | Private S3 copy of the data | Done: `scout sync up` stored 2,387 files; a second run copies nothing |
 | Feasibility check and `FEASIBILITY.md` | Done: go. Full features from 2015, basic from 2010; 88% of players linked to Transfermarkt, precision 179 of 179 on a hand check |
 | Models, similarity search, agent, AWS stack | Not started |
@@ -61,12 +62,12 @@ src/scout/
   ratelimit.py              QuotaGuard: per minute window and persisted daily budget
   storage.py                RawStore interface and local implementation
   providers/base.py         StatsProvider and ValuationProvider interfaces
-  providers/api_football/   HTTP client and adapter
+  providers/api_football/   HTTP client, season adapter, match adapter
   providers/transfermarkt/  snapshot downloader and adapter
   contracts/                pandera schemas for the canonical tables
   matching.py               player matching between sources
   feasibility.py            analysis functions used by scripts/feasibility.py
-  backfill/                 runner and coverage report
+  backfill/                 season and match runners, coverage reports
   sync.py                   copy data/raw and data/processed to or from S3
   cli.py                    `scout backfill | coverage | transfermarkt | sync`
 configs/                    backfill.free.yaml, backfill.pro.yaml
@@ -98,6 +99,9 @@ uv run python scripts/feasibility.py --config configs/backfill.pro.yaml --no-dow
 
 # Full historical backfill during the Pro month
 uv run scout --config configs/backfill.pro.yaml backfill
+
+# Per match player stats (one request per match), for seasons that have them
+uv run scout --config configs/backfill.ultra.yaml backfill --level match
 
 # Copy the data to the private bucket in $SCOUT_S3_BUCKET, or restore it
 # into a fresh checkout. Files already on the other side are skipped.
@@ -195,6 +199,15 @@ backtest compares the two. Blank counts are read as 0 when the stat is
 recorded that season, because the API leaves zeros blank (see
 `FEASIBILITY.md`). *Would change if* a source with older detailed stats were
 added.
+
+**D11. Fetch match level stats once, while the Ultra plan lasts.** They
+cost 7,898 requests (a day on Ultra, 79 days on the free tier) and allow
+features at any date and recent form from 2015. A season is probed with five
+matches before it is fetched, because the API's coverage flag is wrong for
+EPL 2014. Source errors (missing ids, two players sharing an id) are
+repaired in the adapter and logged, never in the raw cache. *Would change
+if* a later need showed the season level data was enough, in which case the
+match tables simply go unused.
 
 **Open: AWS region.** Needs Amazon Nova Lite and Claude Haiku 4.5 in Bedrock.
 eu-central-1 and eu-west-1 are the candidates; availability will be checked in

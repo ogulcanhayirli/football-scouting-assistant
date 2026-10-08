@@ -120,10 +120,39 @@ def test_negative_match_counts_become_missing(epl, caplog):
 
 
 def test_contract_rejects_more_goals_than_the_team_scored(epl):
-    payload = players_payload([player(10, "Alex Synthetic", goals=3)], [])
+    payload = players_payload([player(10, "Alex Synthetic", goals=1)], [])
     frame = match_rows_to_frame(parse_fixture_players(fixture(99, score=(2, 1)), payload, epl))
+    frame.loc[0, "goals"] = 3  # what the adapter repairs, the contract must still catch
     with pytest.raises(pandera.errors.SchemaErrors, match="goals must not exceed team_goals"):
         validate(PLAYER_MATCH_STATS, frame)
+
+
+def test_adapter_repairs_source_errors(epl, caplog):
+    # Seen in real data: a player without an id, two brothers sharing one id,
+    # a goal credited in a match the team lost 0-1, and position "SUB".
+    home = [
+        player(10, "Halil Pehlivan"),
+        player(10, "Yasin Pehlivan", minutes=42),
+        player(0, "No Id"),
+        player(12, "Sokol Scorer", goals=1),
+        player(13, "Odd Position", position="SUB"),
+    ]
+    other_match = players_payload([player(10, "Halil Pehlivan")], [])
+    rows = parse_fixture_players(fixture(99, score=(0, 1)), players_payload(home, []), epl)
+    rows += parse_fixture_players(fixture(98), other_match, epl)
+    with caplog.at_level(logging.WARNING):
+        frame = match_rows_to_frame(rows)
+    validate(PLAYER_MATCH_STATS, frame)
+    match = frame[frame["fixture_id"] == 99].set_index("player_name")
+    assert "No Id" not in match.index
+    assert "Yasin Pehlivan" not in match.index  # Halil carries id 10 most often
+    assert match.loc["Halil Pehlivan", "minutes"] == 90
+    assert pd.isna(match.loc["Sokol Scorer", "goals"])
+    assert pd.isna(match.loc["Odd Position", "position"])
+    text = " ".join(caplog.messages)
+    assert "no player id" in text
+    assert "shares id 10" in text
+    assert "exceed the team" in text
 
 
 def test_parse_seasons_reads_match_coverage(load_fixture, epl):

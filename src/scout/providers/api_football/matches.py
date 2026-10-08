@@ -161,7 +161,71 @@ def match_rows_to_frame(rows: list[dict]) -> pd.DataFrame:
         frame[column] = frame[column].astype("boolean")
     frame["kickoff"] = pd.to_datetime(frame["kickoff"], utc=True, errors="coerce").dt.as_unit("ns")
     _drop_negative_counts(frame, MATCH_NUMERIC_STATS)
-    return frame
+    return _fix_source_errors(frame)
+
+
+def _fix_source_errors(frame: pd.DataFrame) -> pd.DataFrame:
+    """Repair errors in the source that would otherwise fail the contract.
+
+    Each case was seen in real responses; each is logged, and the raw cache
+    keeps the original:
+
+    * a player without an id (sent as 0 or null) can't be linked to anyone,
+      so the row is dropped;
+    * two players with the same id in one match (brothers, usually, such as
+      Halil İbrahim and Yasin Pehlivan): the row whose name the id carries most
+      often in this frame is kept, the other dropped;
+    * a player credited with more goals than the team scored: the goal count
+      becomes missing, because either number could be the wrong one;
+    * position "SUB" (not a position) becomes missing.
+    """
+    no_id = frame["source_player_id"].isna() | (frame["source_player_id"] <= 0)
+    for _, row in frame[no_id].iterrows():
+        log.warning(
+            "Dropping %s (%s) in fixture %s: no player id",
+            row["player_name"],
+            row["team_name"],
+            row["fixture_id"],
+        )
+    frame = frame[~no_id]
+
+    dup = frame.duplicated(["fixture_id", "source_player_id"], keep=False)
+    if dup.any():
+        usual = frame.groupby("source_player_id")["player_name"].agg(
+            lambda names: names.value_counts().index[0]
+        )
+        clash = frame[dup]
+        keep = clash["player_name"] == clash["source_player_id"].map(usual)
+        # Ties (same name twice) keep the row with the most minutes.
+        kept = (
+            clash[keep]
+            .sort_values("minutes", ascending=False, na_position="last")
+            .drop_duplicates(["fixture_id", "source_player_id"])
+        )
+        for _, row in clash.drop(kept.index).iterrows():
+            log.warning(
+                "Dropping %s in fixture %s: shares id %s with %s",
+                row["player_name"],
+                row["fixture_id"],
+                row["source_player_id"],
+                usual[row["source_player_id"]],
+            )
+        frame = frame[~dup | frame.index.isin(kept.index)]
+
+    frame = frame.copy()
+    too_many = frame["goals"].notna() & frame["team_goals"].notna()
+    too_many &= frame["goals"] > frame["team_goals"]
+    for idx in frame.index[too_many.fillna(False)]:
+        log.warning(
+            "Goals=%s for %s exceed the team's %s in fixture %s; stored as missing",
+            frame.at[idx, "goals"],
+            frame.at[idx, "player_name"],
+            frame.at[idx, "team_goals"],
+            frame.at[idx, "fixture_id"],
+        )
+    frame.loc[too_many.fillna(False), "goals"] = pd.NA
+    frame.loc[frame["position"] == "SUB", "position"] = None
+    return frame.reset_index(drop=True)
 
 
 class ApiFootballMatchProvider:

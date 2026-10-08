@@ -135,14 +135,30 @@ What this means:
 The full season level backfill took 1,178 requests (610 EPL, 566 Süper Lig,
 plus season lists), about 38 pages per season.
 
-Match level stats (`/fixtures/players`, one request per match) would cost
-about 10,700 requests for all 31 seasons: 6,096 for the EPL and 4,605 for the
-Süper Lig. On the Ultra plan (75,000 a day, until 2026-11-07) that fits in a
-single day. They are **not needed** for the first models, which use the 30
-June feature date, but they would allow features at any date (for example
-form before the January window) and per 90 rates from the 2010 to 2014
-seasons. Deciding before the Ultra plan ends is cheap; after it ends it costs
-about 107 days of the free tier.
+**Match level stats: fetched on 2026-10-08.** The estimate above (about
+10,700 requests for 31 seasons) assumed every season had them; it does not.
+The API only has per match player stats from EPL 2014 and Süper Lig 2015, and
+EPL 2014, although flagged as covered, has players for just 3 of its 380
+matches. The download took 7,898 requests (plus 381 for the EPL 2014 test
+run) and produced `player_match_stats` for 23 seasons:
+
+| | EPL | Süper Lig |
+|---|---|---|
+| Seasons | 2015 to 2025 (2014 nearly empty) | 2015 to 2025 |
+| Matches with player data, from 2015 | 4,179 of 4,180 | 3,668 of 3,699 |
+| Player match rows (bench included, EPL 2014 too) | 143,085 | 131,918 |
+
+Süper Lig 2022 lacks player data for 28 matches. Source errors were repaired
+in the adapter and logged: 18 rows without a player id dropped, 9 rows where
+two players (brothers, mostly) shared one id in a match, and one goal credited
+in a match the team did not score in.
+
+The match totals agree with the separate season endpoint: for regular
+players from 2015, goals agree exactly in 98.4% of player seasons, and minutes
+are within 5% in 99.3% (EPL) and 91.6% (Süper Lig).
+
+So per match data adds form and features at any date from 2015, but nothing
+for 2010 to 2014: the basic feature tier for those seasons stays season level.
 
 ## 6. Decisions this supports
 
@@ -158,8 +174,7 @@ about 107 days of the free tier.
 
 ## Open questions
 
-* Fetch match level stats while the Ultra plan lasts? About 10,700 requests,
-  one day. Recommended if per match form or January features are wanted later.
+* Fetch match level stats while the Ultra plan lasts? Done, see section 5.
 * Positions come from the API's four groups only. Transfermarkt's
   `sub_position` (for example Centre Back, Left Winger) is available for
   matched players and would make similarity search sharper.
