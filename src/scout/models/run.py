@@ -19,11 +19,11 @@ from pathlib import Path
 import pandas as pd
 
 from scout.config import Settings
-from scout.features import read_feature_table
 from scout.fsutil import atomic_write_text
 from scout.models.backtest import run_backtest, summarize
 from scout.models.estimators import models_for
 from scout.models.targets import TARGETS, build_dataset
+from scout.tables import read_feature_table
 
 log = logging.getLogger(__name__)
 

@@ -23,6 +23,7 @@ from scout.features.build import Inputs, build_features
 from scout.fsutil import atomic_write_text
 from scout.matching import match_players
 from scout.providers.transfermarkt import TransfermarktValuationProvider
+from scout.tables import PARTITION_FILE
 
 log = logging.getLogger(__name__)
 
@@ -76,9 +77,6 @@ def load_inputs(settings: Settings) -> Inputs:
     return Inputs(season_stats, match_stats, links, tm_players, valuations, TM_DATA_END)
 
 
-PARTITION_FILE = "data.parquet"
-
-
 def _write_partitioned(frame: pd.DataFrame, root: Path) -> int:
     """One folder per partition (``league=epl/season=2023/data.parquet``), the
     Hive layout Glue and Athena expect. The partition values live in the folder
@@ -97,19 +95,6 @@ def _write_partitioned(frame: pd.DataFrame, root: Path) -> int:
         )
         count += 1
     return count
-
-
-def read_feature_table(root: Path) -> pd.DataFrame:
-    """Read a partitioned feature table back, restoring ``season`` from the folders."""
-    parts = []
-    for path in sorted(root.glob(f"league=*/season=*/{PARTITION_FILE}")):
-        season = int(path.parent.name.split("=", 1)[1])
-        parts.append(pd.read_parquet(path).assign(season=season))
-    if not parts:
-        return pd.DataFrame()
-    frame = pd.concat(parts, ignore_index=True)
-    frame["season"] = frame["season"].astype("Int64")
-    return frame
 
 
 def run_features(settings: Settings) -> tuple[pd.DataFrame, pd.DataFrame]:

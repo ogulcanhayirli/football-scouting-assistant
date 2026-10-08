@@ -183,6 +183,83 @@ def cmd_backtest(settings: Settings, args: argparse.Namespace) -> int:
     return 0
 
 
+def _training_context(args: argparse.Namespace) -> dict:
+    import os
+
+    import boto3
+
+    region = os.environ.get("AWS_DEFAULT_REGION", "eu-central-1")
+    account = boto3.client("sts", region_name=region).get_caller_identity()["Account"]
+    return {
+        "account": account,
+        "region": region,
+        "data_bucket": os.environ["SCOUT_S3_BUCKET"],
+        "ml_bucket": f"scout-ml-{account}",
+    }
+
+
+def cmd_train(settings: Settings, args: argparse.Namespace) -> int:
+    import json
+
+    from scout.athena import analyst_session
+    from scout.training import (
+        RUNNER_ROLE,
+        build_source_package,
+        job_name,
+        training_job_request,
+        tuning_job_request,
+        tuning_results,
+        upload_package,
+        wait_for_training,
+        wait_for_tuning,
+    )
+
+    log = logging.getLogger(__name__)
+    ctx = _training_context(args)
+    tuning = args.command == "tune"
+    name = job_name("tune" if tuning else "train", args.target)
+    if args.dry_run:
+        _, digest = build_source_package()
+        code_uri = f"s3://{ctx['ml_bucket']}/code/sourcedir-{digest}.tar.gz"
+    else:
+        session = analyst_session(ctx["region"], RUNNER_ROLE)
+        code_uri = upload_package(session.client("s3"), ctx["ml_bucket"])
+    if tuning:
+        request = tuning_job_request(
+            name, args.target, code_uri, max_jobs=args.max_jobs, max_parallel=args.parallel, **ctx
+        )
+    else:
+        request = training_job_request(name, args.target, code_uri, **ctx)
+    if args.dry_run:
+        print(json.dumps(request, indent=2))
+        return 0
+
+    client = session.client("sagemaker")
+    if not tuning:
+        client.create_training_job(**request)
+        log.info("Started training job %s", name)
+        job = wait_for_training(client, name)
+        print(f"{name}: {job['TrainingJobStatus']} {job.get('FailureReason', '')}")
+        for metric in job.get("FinalMetricDataList", []):
+            print(f"  {metric['MetricName']}: {metric['Value']:.4f}")
+        print(f"  billable seconds: {job.get('BillableTimeInSeconds')}")
+        return 0 if job["TrainingJobStatus"] == "Completed" else 1
+
+    client.create_hyper_parameter_tuning_job(**request)
+    log.info("Started tuning job %s (%d jobs, %d at a time)", name, args.max_jobs, args.parallel)
+    job = wait_for_tuning(client, name)
+    rows = tuning_results(client, name)
+    import pandas as pd
+
+    table = pd.DataFrame(rows)
+    print(f"{name}: {job['HyperParameterTuningJobStatus']}")
+    print(table.to_markdown(index=False))
+    path = settings.paths.reports_dir / f"tuning_{name}.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(f"# Tuning job {name}\n\n" + table.to_markdown(index=False) + "\n")
+    return 0 if job["HyperParameterTuningJobStatus"] == "Completed" else 1
+
+
 def cmd_sync(settings: Settings, args: argparse.Namespace) -> int:
     import os
 
@@ -251,6 +328,20 @@ def main(argv: list[str] | None = None) -> int:
         "--target", choices=["all", "fair_value", "growth_24m", "growth_36m"], default="all"
     )
     bt.set_defaults(func=cmd_backtest)
+
+    for command, help_text in (
+        ("train", "Run the backtest as one SageMaker training job (default settings)"),
+        ("tune", "Automatic model tuning: many training jobs, scored on the backtest"),
+    ):
+        p = sub.add_parser(command, help=help_text)
+        p.add_argument(
+            "--target", choices=["fair_value", "growth_24m", "growth_36m"], default="growth_24m"
+        )
+        p.add_argument("--dry-run", action="store_true", help="Print the request, start nothing")
+        if command == "tune":
+            p.add_argument("--max-jobs", type=int, default=20)
+            p.add_argument("--parallel", type=int, default=2)
+        p.set_defaults(func=cmd_train)
 
     sync = sub.add_parser("sync", help="Copy data/raw and data/processed to or from S3")
     sync.add_argument("direction", choices=["up", "down"])
