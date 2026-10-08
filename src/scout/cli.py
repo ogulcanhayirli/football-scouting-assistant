@@ -51,6 +51,20 @@ def cmd_backfill(settings: Settings, args: argparse.Namespace) -> int:
 
     with build_client(settings) as client:
         provider = ApiFootballStatsProvider(client)
+        if args.level == "match":
+            from scout.backfill.matches import run_match_backfill, write_match_report
+            from scout.providers.api_football.matches import ApiFootballMatchProvider
+
+            result = run_match_backfill(
+                settings,
+                provider,
+                ApiFootballMatchProvider(client),
+                league_keys=args.league,
+                seasons=args.season,
+            )
+            md_path = write_match_report(result, settings.paths.reports_dir)
+            logging.getLogger(__name__).info("Match report: %s", md_path)
+            return 0 if result.complete else 2
         result = run_backfill(settings, provider, league_keys=args.league, seasons=args.season)
         report = build_coverage(settings, client.store, result)
     json_path, md_path = write_coverage_report(report, settings.paths.reports_dir)
@@ -103,6 +117,12 @@ def main(argv: list[str] | None = None) -> int:
     backfill = sub.add_parser("backfill", help="Download player season stats (resumable)")
     backfill.add_argument("--league", action="append", help="League key; repeatable")
     backfill.add_argument("--season", action="append", type=int, help="Season; repeatable")
+    backfill.add_argument(
+        "--level",
+        choices=["season", "match"],
+        default="season",
+        help="season: /players totals (default); match: /fixtures/players per match",
+    )
     backfill.set_defaults(func=cmd_backfill)
 
     coverage = sub.add_parser("coverage", help="Rebuild the coverage report from the cache")

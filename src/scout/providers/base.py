@@ -35,6 +35,7 @@ class SeasonInfo:
     end: date | None
     current: bool
     has_player_stats: bool
+    has_match_player_stats: bool = False  # per match player stats (/fixtures/players)
 
 
 class StatsProvider(Protocol):

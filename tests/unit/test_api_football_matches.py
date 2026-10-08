@@ -1,0 +1,251 @@
+import logging
+from pathlib import Path
+
+import pandas as pd
+import pandera.errors
+import pytest
+import yaml
+
+from scout.backfill.matches import (
+    PROBE_MATCHES,
+    match_parquet_path,
+    run_match_backfill,
+    write_match_report,
+)
+from scout.config import Settings
+from scout.contracts import PLAYER_MATCH_STATS, validate
+from scout.providers.api_football.adapter import parse_seasons
+from scout.providers.api_football.matches import (
+    finished_fixtures,
+    match_rows_to_frame,
+    parse_fixture_players,
+)
+from scout.providers.base import SeasonInfo
+from scout.ratelimit import DailyQuotaExhaustedError
+
+ROOT = Path(__file__).parents[2]
+
+
+def fixture(fid, status="FT", home=(1, "Test Town"), away=(2, "Fixture City"), score=(2, 1)):
+    return {
+        "fixture": {"id": fid, "date": "2024-08-17T14:00:00+00:00", "status": {"short": status}},
+        "league": {"id": 39, "season": 2024, "round": "Regular Season - 1"},
+        "teams": {
+            "home": {"id": home[0], "name": home[1]},
+            "away": {"id": away[0], "name": away[1]},
+        },
+        "goals": {"home": score[0], "away": score[1]},
+    }
+
+
+def player(pid, name, minutes=90, goals=None, passes=(40, 35), position="M", **extra):
+    stats = {
+        "games": {
+            "minutes": minutes,
+            "number": pid % 99,
+            "position": position,
+            "rating": "7.1" if minutes else None,
+            "captain": False,
+            "substitute": minutes is None,
+        },
+        "offsides": None,
+        "shots": {"total": 2, "on": 1},
+        "goals": {"total": goals, "conceded": 0, "assists": None, "saves": None},
+        "passes": {"total": passes[0], "key": 1, "accuracy": str(passes[1])},
+        "tackles": {"total": None, "blocks": None, "interceptions": None},
+        "duels": {"total": 5, "won": 3},
+        "dribbles": {"attempts": None, "success": None, "past": None},
+        "fouls": {"drawn": None, "committed": None},
+        "cards": {"yellow": 0, "red": 0},
+        "penalty": {"won": None, "commited": None, "scored": 0, "missed": 0, "saved": None},
+    }
+    for path, value in extra.items():
+        group, field = path.split("__")
+        stats[group][field] = value
+    return {"player": {"id": pid, "name": name, "photo": "x"}, "statistics": [stats]}
+
+
+def players_payload(home_players, away_players, home=(1, "Test Town"), away=(2, "Fixture City")):
+    return {
+        "errors": [],
+        "response": [
+            {"team": {"id": home[0], "name": home[1]}, "players": home_players},
+            {"team": {"id": away[0], "name": away[1]}, "players": away_players},
+        ],
+    }
+
+
+# Parsing
+
+
+def test_finished_fixtures_drops_unplayed_matches():
+    payload = {"response": [fixture(1), fixture(2, "PST"), fixture(3, "AET"), fixture(4, "AWD")]}
+    assert [f["fixture"]["id"] for f in finished_fixtures(payload)] == [1, 3]
+
+
+def test_parse_maps_sides_opponents_and_accurate_passes(epl):
+    payload = players_payload(
+        [player(10, "Alex Synthetic", goals=2), player(11, "Bench Warmer", minutes=None)],
+        [player(20, "Ben Placeholder", goals=1, position="F")],
+    )
+    frame = match_rows_to_frame(parse_fixture_players(fixture(99), payload, epl))
+    validate(PLAYER_MATCH_STATS, frame)
+    alex = frame[frame["source_player_id"] == 10].iloc[0]
+    assert (alex["team_name"], alex["opponent_name"], bool(alex["is_home"])) == (
+        "Test Town",
+        "Fixture City",
+        True,
+    )
+    assert (alex["team_goals"], alex["opponent_goals"], alex["goals"]) == (2, 1, 2)
+    assert alex["passes_accurate"] == 35  # a count here, not a percentage
+    ben = frame[frame["source_player_id"] == 20].iloc[0]
+    assert (ben["opponent_name"], bool(ben["is_home"]), ben["team_goals"]) == (
+        "Test Town",
+        False,
+        1,
+    )
+    bench = frame[frame["source_player_id"] == 11].iloc[0]
+    assert pd.isna(bench["minutes"])
+    assert bool(bench["substitute"])
+    assert str(frame["kickoff"].dtype) == "datetime64[ns, UTC]"
+
+
+def test_negative_match_counts_become_missing(epl, caplog):
+    payload = players_payload([player(10, "Alex Synthetic", shots__total=-1, shots__on=None)], [])
+    with caplog.at_level(logging.WARNING):
+        frame = match_rows_to_frame(parse_fixture_players(fixture(99), payload, epl))
+    assert pd.isna(frame.loc[0, "shots_total"])
+    assert any("fixture 99" in m for m in caplog.messages)
+    validate(PLAYER_MATCH_STATS, frame)
+
+
+def test_contract_rejects_more_goals_than_the_team_scored(epl):
+    payload = players_payload([player(10, "Alex Synthetic", goals=3)], [])
+    frame = match_rows_to_frame(parse_fixture_players(fixture(99, score=(2, 1)), payload, epl))
+    with pytest.raises(pandera.errors.SchemaErrors, match="goals must not exceed team_goals"):
+        validate(PLAYER_MATCH_STATS, frame)
+
+
+def test_parse_seasons_reads_match_coverage(load_fixture, epl):
+    seasons = parse_seasons(load_fixture("api_football/leagues_39.json"), epl)
+    assert all(isinstance(s.has_match_player_stats, bool) for s in seasons)
+
+
+# Runner
+
+
+class FakeGuard:
+    remaining_today = 1000
+
+
+class FakeClient:
+    def __init__(self):
+        self.requests_made = 0
+        self.guard = FakeGuard()
+
+
+class FakeMatchProvider:
+    """Serves fixtures and player payloads from dicts, counting requests like the cache."""
+
+    def __init__(self, fixtures, payloads, fail_after=None):
+        self.client = FakeClient()
+        self._fixtures, self._payloads = fixtures, payloads
+        self.fetched: list[int] = []
+        self.fail_after = fail_after
+
+    def fixtures(self, league, season):
+        return self._fixtures.get((league.key, season), [])
+
+    def fixture_players(self, fixture_id):
+        if fixture_id not in self.fetched:
+            if self.fail_after is not None and len(self.fetched) >= self.fail_after:
+                raise DailyQuotaExhaustedError("daily budget spent")
+            self.fetched.append(fixture_id)
+            self.client.requests_made += 1
+        return self._payloads.get(fixture_id, {"response": []})
+
+
+class FakeSeasons:
+    def __init__(self, covered):
+        self.covered = covered
+
+    def list_seasons(self, league):
+        return [
+            SeasonInfo(
+                league.key, s, None, None, False, True, s in self.covered.get(league.key, ())
+            )
+            for s in (2013, 2023, 2024)
+        ]
+
+
+@pytest.fixture
+def settings(tmp_path):
+    raw = yaml.safe_load((ROOT / "configs" / "backfill.ultra.yaml").read_text(encoding="utf-8"))
+    raw["paths"] = {
+        k: str(tmp_path / k) for k in ("raw_dir", "processed_dir", "state_dir", "reports_dir")
+    }
+    raw["backfill"]["stop_on_plan_error"] = False
+    return Settings.model_validate(raw)
+
+
+def _season(prefix, n=10):
+    fixtures = [fixture(prefix + i) for i in range(n)]
+    payloads = {
+        prefix + i: players_payload([player(prefix + i, f"P {i}", goals=1)], []) for i in range(n)
+    }
+    return fixtures, payloads
+
+
+def test_match_backfill_fetches_covered_seasons_and_writes_parquet(settings):
+    fx23, pl23 = _season(1000)
+    fx24, pl24 = _season(2000)
+    provider = FakeMatchProvider({("epl", 2023): fx23, ("epl", 2024): fx24}, pl23 | pl24)
+    seasons = FakeSeasons({"epl": {2023, 2024}})  # 2013 not covered: never requested
+    result = run_match_backfill(settings, seasons, provider, league_keys=["epl"])
+    assert result.complete
+    assert [o.status for o in result.outcomes] == ["complete", "complete"]
+    assert provider.client.requests_made == 20
+    frame = pd.read_parquet(match_parquet_path(settings, "epl", 2024))
+    assert len(frame) == 10
+
+    again = FakeMatchProvider({("epl", 2023): fx23, ("epl", 2024): fx24}, pl23 | pl24)
+    again.fetched = list(provider.fetched)  # everything cached
+    rerun = run_match_backfill(settings, seasons, again, league_keys=["epl"])
+    assert rerun.requests_made == 0
+    assert rerun.complete
+
+
+def test_season_without_player_data_costs_only_the_probe(settings):
+    fixtures = [fixture(3000 + i) for i in range(40)]
+    provider = FakeMatchProvider({("epl", 2023): fixtures}, {})
+    result = run_match_backfill(
+        settings, FakeSeasons({"epl": {2023}}), provider, league_keys=["epl"]
+    )
+    assert result.outcomes[0].status == "no_player_data"
+    assert provider.client.requests_made == PROBE_MATCHES
+    assert result.complete
+    assert not match_parquet_path(settings, "epl", 2023).exists()
+
+
+def test_quota_stop_is_resumable(settings):
+    fixtures, payloads = _season(4000, n=12)
+    provider = FakeMatchProvider({("epl", 2023): fixtures}, payloads, fail_after=8)
+    seasons = FakeSeasons({"epl": {2023}})
+    first = run_match_backfill(settings, seasons, provider, league_keys=["epl"])
+    assert first.stopped_reason.startswith("quota")
+    assert not first.complete
+
+    provider.fail_after = None
+    second = run_match_backfill(settings, seasons, provider, league_keys=["epl"])
+    assert second.complete
+    assert second.requests_made == 4  # only the matches not cached before
+
+
+def test_match_report(settings, tmp_path):
+    fixtures, payloads = _season(5000, n=3)
+    provider = FakeMatchProvider({("epl", 2023): fixtures}, payloads)
+    result = run_match_backfill(
+        settings, FakeSeasons({"epl": {2023}}), provider, league_keys=["epl"]
+    )
+    md = write_match_report(result, tmp_path / "reports")
+    assert "| epl | 2023 | complete | 3/3 | 3 |" in md.read_text()

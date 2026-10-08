@@ -153,7 +153,7 @@ def rows_to_frame(rows: list[dict]) -> pd.DataFrame:
     return frame
 
 
-def _drop_negative_counts(frame: pd.DataFrame) -> None:
+def _drop_negative_counts(frame: pd.DataFrame, columns: list[str] | None = None) -> None:
     """Replace impossible negative stats with missing values, in place.
 
     The API occasionally sends values such as ``lineups: -1`` (EPL 2015,
@@ -161,19 +161,21 @@ def _drop_negative_counts(frame: pd.DataFrame) -> None:
     invent data, so the value becomes missing and a warning names it. The raw
     cache keeps the original response.
     """
-    for column in NUMERIC_STATS:
+    for column in columns or NUMERIC_STATS:
         negative = frame[column] < 0
         if not negative.any():
             continue
         for idx in frame.index[negative.fillna(False)]:
+            where = f" fixture {frame.at[idx, 'fixture_id']}" if "fixture_id" in frame else ""
             log.warning(
-                "Negative %s=%s for player %s (%s) in %s %s; stored as missing",
+                "Negative %s=%s for player %s (%s) in %s %s%s; stored as missing",
                 column,
                 frame.at[idx, column],
                 frame.at[idx, "source_player_id"],
                 frame.at[idx, "player_name"],
                 frame.at[idx, "league_key"],
                 frame.at[idx, "season"],
+                where,
             )
         frame.loc[negative.fillna(False), column] = pd.NA
 
@@ -193,6 +195,7 @@ def parse_seasons(payload: dict[str, Any], league: LeagueConfig) -> list[SeasonI
                     current=bool(s.get("current")),
                     has_player_stats=bool(coverage.get("players"))
                     or bool(fixtures.get("statistics_players")),
+                    has_match_player_stats=bool(fixtures.get("statistics_players")),
                 )
             )
     return sorted(seasons, key=lambda x: x.season)

@@ -1,0 +1,24 @@
+# Ultra plan (until 2026-11-07): 75,000 requests per day, 450 per minute,
+# both read from the x-ratelimit headers the server sends.
+api_football:
+  plan: ultra
+  quota:
+    daily_limit: 75000
+    per_minute_limit: 450
+    safety_margin: 500
+
+leagues:
+  - key: epl
+    name: Premier League
+    api_football_id: 39
+    transfermarkt_id: GB1
+  - key: super_lig
+    name: Süper Lig
+    api_football_id: 203
+    transfermarkt_id: TR1
+
+backfill:
+  seasons: all
+  endpoints: [players]
+  # On Ultra every season should be served; a refusal means something is wrong.
+  stop_on_plan_error: true

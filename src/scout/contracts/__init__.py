@@ -7,10 +7,11 @@ schema fails at the boundary instead of silently skewing a model.
 """
 
 from scout.contracts.schemas import (
+    PLAYER_MATCH_STATS,
     PLAYER_SEASON_STATS,
     PLAYERS,
     VALUATIONS,
     validate,
 )
 
-__all__ = ["PLAYERS", "PLAYER_SEASON_STATS", "VALUATIONS", "validate"]
+__all__ = ["PLAYERS", "PLAYER_MATCH_STATS", "PLAYER_SEASON_STATS", "VALUATIONS", "validate"]

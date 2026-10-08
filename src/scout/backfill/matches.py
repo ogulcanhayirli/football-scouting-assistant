@@ -1,0 +1,230 @@
+"""Quota aware, resumable backfill of per match player stats.
+
+Per league and season: one ``/fixtures`` request lists the matches, then one
+``/fixtures/players`` request per finished match. As in the season backfill,
+the raw cache is the resume state, so a stopped run continues where it left
+off, and a season is written to Parquet only when every match is cached and
+the contract passes.
+
+Only seasons the API flags with ``statistics_players`` coverage are fetched:
+for older seasons the endpoint returns nothing, and asking would waste quota.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+from pathlib import Path
+
+import pandera.errors
+
+from scout.backfill.runner import BackfillResult, SeasonOutcome
+from scout.config import LeagueConfig, Settings
+from scout.contracts import PLAYER_MATCH_STATS, validate
+from scout.fsutil import atomic_write_text
+from scout.providers.api_football import (
+    ApiFootballStatsProvider,
+    PlanRestrictionError,
+    QuotaExceededError,
+)
+from scout.providers.api_football.matches import (
+    ApiFootballMatchProvider,
+    match_rows_to_frame,
+    parse_fixture_players,
+)
+from scout.ratelimit import DailyQuotaExhaustedError
+
+log = logging.getLogger(__name__)
+
+
+def match_parquet_path(settings: Settings, league_key: str, season: int) -> Path:
+    return (
+        settings.paths.processed_dir
+        / "player_match_stats"
+        / f"league={league_key}"
+        / f"season={season}.parquet"
+    )
+
+
+def match_target_seasons(
+    seasons_provider: ApiFootballStatsProvider, league: LeagueConfig, settings: Settings
+) -> list[int]:
+    """Finished seasons with per match player stats, or the configured list."""
+    wanted = settings.backfill.seasons
+    listed = seasons_provider.list_seasons(league)
+    covered = {s.season for s in listed if s.has_match_player_stats and not s.current}
+    if wanted == "all":
+        return sorted(covered)
+    skipped = sorted(set(wanted) - covered)
+    if skipped:
+        log.info("%s: no per match player stats for seasons %s; skipped", league.key, skipped)
+    return [s for s in wanted if s in covered]
+
+
+PROBE_MATCHES = 5
+
+
+def _season_has_player_data(provider: ApiFootballMatchProvider, fixtures: list[dict]) -> bool:
+    """Fetch a few matches spread over the season before committing to all of them.
+
+    The coverage flag is not reliable: EPL 2014 is flagged as covered, yet 377
+    of its 380 matches return no players. Probed responses are cached, so the
+    full pass reuses them.
+    """
+    if not fixtures:
+        return False
+    step = max(len(fixtures) // PROBE_MATCHES, 1)
+    sample = fixtures[::step][:PROBE_MATCHES]
+    return any(provider.fixture_players(f["fixture"]["id"]).get("response") for f in sample)
+
+
+def _backfill_match_season(
+    provider: ApiFootballMatchProvider,
+    league: LeagueConfig,
+    season: int,
+    settings: Settings,
+) -> SeasonOutcome:
+    outcome = SeasonOutcome(league.key, season, status="partial")
+    fixtures = provider.fixtures(league, season)
+    outcome.pages_total = len(fixtures)
+    if not _season_has_player_data(provider, fixtures):
+        outcome.status = "no_player_data"
+        outcome.detail = f"none of {PROBE_MATCHES} probed matches has player data; skipped"
+        log.warning("%s %s: %s", league.key, season, outcome.detail)
+        return outcome
+    rows: list[dict] = []
+    empty = 0
+    for fixture in fixtures:
+        payload = provider.fixture_players(fixture["fixture"]["id"])
+        outcome.pages_cached += 1
+        parsed = parse_fixture_players(fixture, payload, league)
+        empty += not parsed
+        rows.extend(parsed)
+        if outcome.pages_cached % 50 == 0 or outcome.pages_cached == outcome.pages_total:
+            log.info(
+                "%s %s: match %d/%d, quota left today %d",
+                league.key,
+                season,
+                outcome.pages_cached,
+                outcome.pages_total,
+                provider.client.guard.remaining_today,
+            )
+
+    frame = match_rows_to_frame(rows)
+    outcome.rows = len(frame)
+    outcome.detail = f"{empty} matches without player data" if empty else ""
+    try:
+        validate(PLAYER_MATCH_STATS, frame)
+    except pandera.errors.SchemaErrors as exc:
+        outcome.status = "contract_failed"
+        outcome.detail = f"{len(exc.failure_cases)} contract violations"
+        log.error("%s %s failed the contract: %s", league.key, season, outcome.detail)
+        log.error("%s", exc.failure_cases.head(20).to_string())
+        return outcome
+
+    path = match_parquet_path(settings, league.key, season)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    frame.to_parquet(path, index=False)
+    outcome.status = "complete"
+    return outcome
+
+
+def run_match_backfill(
+    settings: Settings,
+    seasons_provider: ApiFootballStatsProvider,
+    provider: ApiFootballMatchProvider,
+    *,
+    league_keys: list[str] | None = None,
+    seasons: list[int] | None = None,
+) -> BackfillResult:
+    result = BackfillResult()
+    leagues = [lg for lg in settings.leagues if not league_keys or lg.key in league_keys]
+    client = provider.client
+    start_requests = client.requests_made
+    try:
+        for league in leagues:
+            targets = match_target_seasons(seasons_provider, league, settings)
+            if seasons:
+                targets = [s for s in seasons if s in targets]
+            for season in targets:
+                log.info("%s %s: matches starting", league.key, season)
+                try:
+                    outcome = _backfill_match_season(provider, league, season, settings)
+                except PlanRestrictionError as exc:
+                    outcome = SeasonOutcome(league.key, season, "refused_by_plan", detail=str(exc))
+                    log.warning("%s %s refused by plan: %s", league.key, season, exc)
+                    result.outcomes.append(outcome)
+                    if settings.backfill.stop_on_plan_error:
+                        result.stopped_reason = f"plan: {exc}"
+                        return result
+                    continue
+                except (DailyQuotaExhaustedError, QuotaExceededError):
+                    result.outcomes.append(SeasonOutcome(league.key, season, "partial"))
+                    raise
+                result.outcomes.append(outcome)
+                log.info(
+                    "%s %s: %s, %d matches, %d rows %s",
+                    league.key,
+                    season,
+                    outcome.status,
+                    outcome.pages_total or 0,
+                    outcome.rows,
+                    outcome.detail,
+                )
+    except (DailyQuotaExhaustedError, QuotaExceededError) as exc:
+        result.stopped_reason = f"quota: {exc}"
+        log.warning("Stopping: %s. Run the same command again to resume.", exc)
+    finally:
+        result.requests_made = client.requests_made - start_requests
+        log.info(
+            "Match backfill finished: %d requests made, %d left today, stopped=%s",
+            result.requests_made,
+            client.guard.remaining_today,
+            result.stopped_reason,
+        )
+    return result
+
+
+def write_match_report(result: BackfillResult, reports_dir: Path) -> Path:
+    """A short Markdown and JSON summary of the match backfill."""
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    records = [
+        {
+            "league": o.league_key,
+            "season": o.season,
+            "status": o.status,
+            "matches": f"{o.pages_cached}/{o.pages_total}",
+            "rows": o.rows,
+            "detail": o.detail,
+        }
+        for o in result.outcomes
+    ]
+    lines = [
+        "# Match backfill report",
+        "",
+        f"Requests made this run: {result.requests_made}. "
+        f"Stopped: {result.stopped_reason or 'no'}.",
+        "",
+        "| League | Season | Status | Matches | Rows | Note |",
+        "|---|---|---|---|---|---|",
+        *(
+            f"| {r['league']} | {r['season']} | {r['status']} | {r['matches']} "
+            f"| {r['rows']} | {r['detail']} |"
+            for r in records
+        ),
+        "",
+    ]
+    md = reports_dir / "match_coverage_report.md"
+    atomic_write_text(md, "\n".join(lines))
+    atomic_write_text(
+        reports_dir / "match_coverage_report.json",
+        json.dumps(
+            {
+                "requests_made": result.requests_made,
+                "stopped": result.stopped_reason,
+                "seasons": records,
+            },
+            indent=2,
+        ),
+    )
+    return md

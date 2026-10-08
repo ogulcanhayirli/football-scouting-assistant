@@ -37,7 +37,7 @@ log = logging.getLogger(__name__)
 class SeasonOutcome:
     league_key: str
     season: int
-    status: str  # complete | partial | refused_by_plan | contract_failed
+    status: str  # complete | partial | refused_by_plan | contract_failed | no_player_data
     pages_total: int | None = None
     pages_cached: int = 0
     rows: int = 0
@@ -53,7 +53,7 @@ class BackfillResult:
     @property
     def complete(self) -> bool:
         return self.stopped_reason is None and all(
-            o.status in {"complete", "refused_by_plan"} for o in self.outcomes
+            o.status in {"complete", "refused_by_plan", "no_player_data"} for o in self.outcomes
         )
 
 
