@@ -39,7 +39,20 @@ TABLES = {
     "player_season_features": "One row per player, league and season, as of its feature date",
     "player_season_labels": "Fair value and growth targets for each feature row",
 }
-LEAGUES = ["epl", "super_lig"]
+# Partition values of the league key; must match configs/backfill.ultra.yaml
+# (tests/unit/test_infra_config.py checks it).
+LEAGUES = [
+    "epl",
+    "super_lig",
+    "la_liga",
+    "bundesliga",
+    "serie_a",
+    "ligue_1",
+    "eredivisie",
+    "primeira_liga",
+    "belgian_pro_league",
+    "championship",
+]
 SEASON_RANGE = (2010, 2030)
 BYTES_SCANNED_CUTOFF = 1024**3  # 1 GB per query; the whole feature set is about 6 MB
 

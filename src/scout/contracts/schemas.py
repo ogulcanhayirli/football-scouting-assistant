@@ -143,7 +143,7 @@ _per90 = {"nullable": True, "checks": Check.ge(0)}
 
 PLAYER_SEASON_FEATURES = DataFrameSchema(
     {
-        "league_key": Column(str, Check.isin(["epl", "super_lig"])),
+        "league_key": Column(str, Check.str_matches(r"^[a-z0-9_]+$")),
         "season": Column("Int64", Check.in_range(2000, 2100)),
         "source_player_id": Column("Int64", Check.gt(0)),
         "tm_player_id": Column("Int64", nullable=True),

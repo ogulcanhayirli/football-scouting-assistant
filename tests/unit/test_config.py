@@ -12,8 +12,13 @@ CONFIGS = Path(__file__).parents[2] / "configs"
 @pytest.mark.parametrize("name", ["backfill.free.yaml", "backfill.pro.yaml", "backfill.ultra.yaml"])
 def test_committed_configs_load(name):
     settings = load_settings(CONFIGS / name)
-    assert {lg.key for lg in settings.leagues} == {"epl", "super_lig"}
+    keys = [lg.key for lg in settings.leagues]
+    assert keys[:2] == ["epl", "super_lig"]
+    assert len(keys) == len(set(keys))
+    assert len({lg.api_football_id for lg in settings.leagues}) == len(keys)
     assert settings.league("super_lig").api_football_id == 203
+    if name == "backfill.ultra.yaml":
+        assert len(keys) == 10
 
 
 def test_free_config_matches_free_tier_limits():

@@ -16,6 +16,40 @@ leagues:
     name: Süper Lig
     api_football_id: 203
     transfermarkt_id: TR1
+  # Added for history and for the clubs that buy from mid table: the other top
+  # four, three feeder leagues and the Championship. Ids checked against the API.
+  - key: la_liga
+    name: La Liga
+    api_football_id: 140
+    transfermarkt_id: ES1
+  - key: bundesliga
+    name: Bundesliga
+    api_football_id: 78
+    transfermarkt_id: L1
+  - key: serie_a
+    name: Serie A
+    api_football_id: 135
+    transfermarkt_id: IT1
+  - key: ligue_1
+    name: Ligue 1
+    api_football_id: 61
+    transfermarkt_id: FR1
+  - key: eredivisie
+    name: Eredivisie
+    api_football_id: 88
+    transfermarkt_id: NL1
+  - key: primeira_liga
+    name: Primeira Liga
+    api_football_id: 94
+    transfermarkt_id: PO1
+  - key: belgian_pro_league
+    name: Belgian Pro League
+    api_football_id: 144
+    transfermarkt_id: BE1
+  - key: championship
+    name: Championship
+    api_football_id: 40
+    transfermarkt_id: GB2
 
 backfill:
   seasons: all
