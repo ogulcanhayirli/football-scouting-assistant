@@ -177,7 +177,7 @@ def _fix_source_errors(frame: pd.DataFrame) -> pd.DataFrame:
       often in this frame is kept, the other dropped;
     * a player credited with more goals than the team scored: the goal count
       becomes missing, because either number could be the wrong one;
-    * position "SUB" (not a position) becomes missing.
+    * a position other than G, D, M or F ("SUB", "-") becomes missing.
     """
     no_id = frame["source_player_id"].isna() | (frame["source_player_id"] <= 0)
     for _, row in frame[no_id].iterrows():
@@ -224,7 +224,8 @@ def _fix_source_errors(frame: pd.DataFrame) -> pd.DataFrame:
             frame.at[idx, "fixture_id"],
         )
     frame.loc[too_many.fillna(False), "goals"] = pd.NA
-    frame.loc[frame["position"] == "SUB", "position"] = None
+    unknown = frame["position"].notna() & ~frame["position"].isin(["G", "D", "M", "F"])
+    frame.loc[unknown, "position"] = None  # "SUB" and "-" are placeholders, not positions
     return frame.reset_index(drop=True)
 
 

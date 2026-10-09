@@ -136,6 +136,7 @@ def test_adapter_repairs_source_errors(epl, caplog):
         player(0, "No Id"),
         player(12, "Sokol Scorer", goals=1),
         player(13, "Odd Position", position="SUB"),
+        player(14, "Dash Position", position="-"),
     ]
     other_match = players_payload([player(10, "Halil Pehlivan")], [])
     rows = parse_fixture_players(fixture(99, score=(0, 1)), players_payload(home, []), epl)
@@ -149,6 +150,7 @@ def test_adapter_repairs_source_errors(epl, caplog):
     assert match.loc["Halil Pehlivan", "minutes"] == 90
     assert pd.isna(match.loc["Sokol Scorer", "goals"])
     assert pd.isna(match.loc["Odd Position", "position"])
+    assert pd.isna(match.loc["Dash Position", "position"])
     text = " ".join(caplog.messages)
     assert "no player id" in text
     assert "shares id 10" in text
