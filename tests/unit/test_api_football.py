@@ -251,3 +251,22 @@ def test_provider_walks_all_pages(client, load_fixture, epl):
     # Second call is served fully from cache.
     provider.player_season_stats(epl, 2023)
     assert route.call_count == 2
+
+
+def test_rows_without_team_are_dropped_and_placeholder_birth_dates_cleared(
+    load_fixture, epl, caplog
+):
+    payload = load_fixture("api_football/players_epl_2023_p1.json")
+    payload["response"][0]["statistics"][0]["team"] = {"id": None, "name": None}
+    payload["response"][1]["player"]["birth"]["date"] = "2026-10-09"  # the request date
+    rows = parse_players_page(payload, epl, 2023)
+    no_team_id = rows[0]["source_player_id"]
+    placeholder_id = payload["response"][1]["player"]["id"]
+    with caplog.at_level(logging.WARNING):
+        frame = rows_to_frame(rows)
+    assert no_team_id not in frame["source_player_id"].tolist()
+    placeholder = frame[frame["source_player_id"] == placeholder_id]
+    assert placeholder["birth_date"].isna().all()
+    assert any("no team" in m for m in caplog.messages)
+    assert any("impossible" in m for m in caplog.messages)
+    validate(PLAYER_SEASON_STATS, frame)

@@ -150,6 +150,44 @@ def rows_to_frame(rows: list[dict]) -> pd.DataFrame:
     frame["captain"] = frame["captain"].astype("boolean")
     _drop_negative_counts(frame)
     frame["birth_date"] = pd.to_datetime(frame["birth_date"], errors="coerce")
+    return _fix_season_source_errors(frame)
+
+
+MIN_AGE_YEARS = 14  # no one plays a top flight season younger than this
+
+
+def _fix_season_source_errors(frame: pd.DataFrame) -> pd.DataFrame:
+    """Repair source errors seen in real season responses; each is logged.
+
+    * A row without a team can't be attributed to a club, so it is dropped
+      (Eredivisie 2010, Primeira Liga 2011, Belgian Pro League 2023).
+    * An unknown birth date is sent as the date of the request (seen as
+      2026-10-09 for five players). Any birth date less than 14 years before
+      the season starts is stored as missing; left in, it would also break
+      matching to Transfermarkt, which blocks on birth date.
+    """
+    no_team = frame["team_id"].isna()
+    for _, row in frame[no_team].iterrows():
+        log.warning(
+            "Dropping %s (%s) in %s %s: no team",
+            row["player_name"],
+            row["source_player_id"],
+            row["league_key"],
+            row["season"],
+        )
+    frame = frame[~no_team].reset_index(drop=True)
+    season_start = pd.to_datetime(frame["season"].astype("string") + "-07-01", errors="coerce")
+    too_young = frame["birth_date"] > season_start - pd.DateOffset(years=MIN_AGE_YEARS)
+    for _, row in frame[too_young.fillna(False)].iterrows():
+        log.warning(
+            "Birth date %s for %s (%s) in %s %s is impossible; stored as missing",
+            row["birth_date"].date(),
+            row["player_name"],
+            row["source_player_id"],
+            row["league_key"],
+            row["season"],
+        )
+    frame.loc[too_young.fillna(False), "birth_date"] = pd.NaT
     return frame
 
 
