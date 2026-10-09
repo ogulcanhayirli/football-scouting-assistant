@@ -78,8 +78,14 @@ def make_lightgbm(params: dict | None = None, rounds: int = NUM_BOOST_ROUND, see
     return lightgbm_model
 
 
-def models_for(target_name: str) -> dict:
+def models_for(target_name: str, tuned: dict | None = None) -> dict:
+    """The models to compare. ``tuned`` holds settings found by automatic model
+    tuning (LightGBM parameters plus ``num_boost_round``), added as ``lightgbm_tuned``."""
     models = {"group_median": group_median, "lightgbm": make_lightgbm()}
     if target_name.startswith("growth"):
         models = {"no_change": no_change, **models}
+    if tuned:
+        params = dict(tuned)
+        rounds = int(params.pop("num_boost_round", NUM_BOOST_ROUND))
+        models["lightgbm_tuned"] = make_lightgbm(params, rounds=rounds)
     return models

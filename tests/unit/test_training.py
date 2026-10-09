@@ -146,3 +146,36 @@ def test_train_py_runs_the_backtest_and_prints_the_metric(tmp_path, capsys):
     assert f"backtest_mae_log={summary['metrics']['mae_log']:.6f}" in printed
     assert json.loads((tmp_path / "out" / "summary.json").read_text())["target"] == "growth_24m"
     assert (tmp_path / "out" / "predictions.parquet").is_file()
+
+
+def test_best_parameters_are_typed_for_lightgbm():
+    from scout.training import best_parameters
+
+    class Client:
+        def describe_hyper_parameter_tuning_job(self, **_):
+            return {
+                "BestTrainingJob": {
+                    "TunedHyperParameters": {
+                        "learning_rate": "0.0123",
+                        "num_leaves": "17",
+                        "num_boost_round": '"842"',
+                        "objective": '"huber"',
+                    }
+                }
+            }
+
+    best = best_parameters(Client(), "t")
+    assert best == {
+        "learning_rate": 0.0123,
+        "num_leaves": 17,
+        "num_boost_round": 842,
+        "objective": "huber",
+    }
+
+
+def test_tuned_settings_join_the_comparison():
+    from scout.models.estimators import models_for
+
+    models = models_for("growth_24m", {"num_leaves": 8, "num_boost_round": 50})
+    assert list(models) == ["no_change", "group_median", "lightgbm", "lightgbm_tuned"]
+    assert "lightgbm_tuned" not in models_for("growth_24m")

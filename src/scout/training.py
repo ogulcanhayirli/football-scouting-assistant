@@ -262,3 +262,23 @@ def tuning_results(client: Any, name: str) -> list[dict[str, Any]]:
         if not token:
             break
     return sorted(rows, key=lambda r: (r["mae_log"] is None, r["mae_log"] or 0))
+
+
+INTEGER_PARAMS = {"num_leaves", "min_data_in_leaf", "num_boost_round"}
+
+
+def best_parameters(client: Any, name: str) -> dict[str, Any]:
+    """The tuned settings of the best training job, typed for LightGBM."""
+    job = client.describe_hyper_parameter_tuning_job(HyperParameterTuningJobName=name)
+    tuned = job["BestTrainingJob"]["TunedHyperParameters"]
+    out: dict[str, Any] = {}
+    for key, value in tuned.items():
+        value = value.strip('"')
+        if key in INTEGER_PARAMS:
+            out[key] = int(float(value))
+        else:
+            try:
+                out[key] = float(value)
+            except ValueError:
+                out[key] = value  # categorical, for example the objective
+    return out

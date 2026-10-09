@@ -172,7 +172,18 @@ def cmd_backtest(settings: Settings, args: argparse.Namespace) -> int:
     from scout.models.targets import TARGETS
 
     names = list(TARGETS) if args.target == "all" else [args.target]
-    summary = run_all(settings, names)
+    tuned = None
+    if args.tuning_job:
+        import os
+
+        from scout.athena import analyst_session
+        from scout.training import RUNNER_ROLE, best_parameters
+
+        region = os.environ.get("AWS_DEFAULT_REGION", "eu-central-1")
+        client = analyst_session(region, RUNNER_ROLE).client("sagemaker")
+        tuned = best_parameters(client, args.tuning_job)
+        print(f"Best settings from {args.tuning_job}: {tuned}")
+    summary = run_all(settings, names, tuned)
     for name, models in summary.items():
         print(f"\n{name}")
         for model, m in models.items():
@@ -327,6 +338,7 @@ def main(argv: list[str] | None = None) -> int:
     bt.add_argument(
         "--target", choices=["all", "fair_value", "growth_24m", "growth_36m"], default="all"
     )
+    bt.add_argument("--tuning-job", help="Also run the best settings of this tuning job")
     bt.set_defaults(func=cmd_backtest)
 
     for command, help_text in (

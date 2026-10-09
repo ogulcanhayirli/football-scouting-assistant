@@ -36,11 +36,13 @@ def _table(frame: pd.DataFrame) -> str:
     return shown.to_markdown(index=False)
 
 
-def run_target(features: pd.DataFrame, labels: pd.DataFrame, name: str) -> pd.DataFrame:
+def run_target(
+    features: pd.DataFrame, labels: pd.DataFrame, name: str, tuned: dict | None = None
+) -> pd.DataFrame:
     target = TARGETS[name]
     data, columns = build_dataset(features, labels, target)
     log.info("%s: %d rows, %d feature columns", name, len(data), len(columns))
-    return run_backtest(data, columns, target, models_for(name))
+    return run_backtest(data, columns, target, models_for(name, tuned))
 
 
 def write_report(name: str, predictions: pd.DataFrame, reports: Path) -> dict:
@@ -78,7 +80,7 @@ def write_report(name: str, predictions: pd.DataFrame, reports: Path) -> dict:
     }
 
 
-def run_all(settings: Settings, names: list[str]) -> dict:
+def run_all(settings: Settings, names: list[str], tuned: dict | None = None) -> dict:
     root = settings.paths.processed_dir / "features"
     features = read_feature_table(root / "player_season_features")
     labels = read_feature_table(root / "player_season_labels")
@@ -88,7 +90,7 @@ def run_all(settings: Settings, names: list[str]) -> dict:
     out_dir.mkdir(parents=True, exist_ok=True)
     summary = {}
     for name in names:
-        predictions = run_target(features, labels, name)
+        predictions = run_target(features, labels, name, tuned)
         predictions.to_parquet(out_dir / f"backtest_{name}.parquet", index=False)
         summary[name] = write_report(name, predictions, reports)
     atomic_write_text(reports / "backtest_summary.json", json.dumps(summary, indent=2))
