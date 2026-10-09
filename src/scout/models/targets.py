@@ -35,9 +35,10 @@ NOT_FEATURES = {
     "feature_date",
     "last_match_date",
     "value_date",
+    "prev_feature_date",
     "season",
 }
-CATEGORICAL = ["league_key", "tier", "position", "sub_position", "foot"]
+CATEGORICAL = ["league_key", "tier", "position", "sub_position", "foot", "prev_league"]
 VALUE_COLUMNS = [
     "market_value",
     "market_value_1y_before",

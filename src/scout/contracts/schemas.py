@@ -131,6 +131,13 @@ def _on_or_before(column: str, limit: str) -> Check:
     return Check(check, name=f"{column}_le_{limit}", error=f"{column} after {limit}: leak")
 
 
+def _before(column: str, limit: str) -> Check:
+    def check(df: pd.DataFrame) -> pd.Series:
+        return df[column].isna() | (df[column] < df[limit])
+
+    return Check(check, name=f"{column}_lt_{limit}", error=f"{column} not before {limit}: leak")
+
+
 def _after(column: str, start: str) -> Check:
     def check(df: pd.DataFrame) -> pd.Series:
         return df[column].isna() | (df[column] > df[start])
@@ -166,6 +173,7 @@ PLAYER_SEASON_FEATURES = DataFrameSchema(
     checks=[
         _on_or_before("last_match_date", "feature_date"),
         _on_or_before("value_date", "feature_date"),
+        _before("prev_feature_date", "feature_date"),
     ],
     unique=["league_key", "season", "source_player_id"],
     strict=False,

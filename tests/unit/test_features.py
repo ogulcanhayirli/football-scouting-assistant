@@ -345,3 +345,75 @@ def test_partitioned_write_round_trips(tmp_path):
     back = read_feature_table(tmp_path / "t")
     assert sorted(back["season"].tolist()) == sorted(features["season"].tolist())
     assert str(back["feature_date"].dtype) == "datetime64[ms]"
+
+
+def _hist_rows():
+    return pd.DataFrame(
+        {
+            "league_key": ["eredivisie", "epl", "epl", "epl", "eredivisie"],
+            "season": pd.array([2021, 2022, 2023, 2022, 2022], dtype="Int64"),
+            "source_player_id": pd.array([7, 7, 7, 8, 8], dtype="Int64"),
+            "feature_date": pd.to_datetime(
+                ["2022-06-30", "2023-06-30", "2024-06-30", "2023-06-30", "2023-06-30"]
+            ),
+            "minutes": pd.array([2700.0, 1800.0, 3000.0, 600.0, 900.0], dtype="Float64"),
+            "rating": pd.array([7.4, 6.9, 7.1, 6.5, 7.0], dtype="Float64"),
+            "minutes_share": [0.8, 0.5, 0.9, 0.3, 0.4],
+            "goals": pd.array([12.0, 3.0, 6.0, 0.0, 1.0], dtype="Float64"),
+            "assists": pd.array([5.0, 1.0, 2.0, 0.0, None], dtype="Float64"),
+        }
+    )
+
+
+def test_history_follows_a_player_across_leagues():
+    from scout.features.build import history_features
+
+    out = history_features(_hist_rows()).set_index(["league_key", "season", "source_player_id"])
+    first_epl = out.loc[("epl", 2022, 7)]
+    assert first_epl["prev_league"] == "eredivisie"
+    assert first_epl["prev_minutes"] == 2700
+    assert first_epl["prev_goals_per90"] == pytest.approx(12 / 2700 * 90)
+    assert bool(first_epl["changed_league"])
+    assert first_epl["minutes_change"] == -900
+    assert first_epl["career_seasons"] == 1
+    assert first_epl["prev_feature_date"] < pd.Timestamp("2023-06-30")
+    second = out.loc[("epl", 2023, 7)]
+    assert not bool(second["changed_league"])
+    assert second["career_minutes"] == 2700 + 1800
+    debut = out.loc[("eredivisie", 2021, 7)]
+    assert not bool(debut["has_prev_season"])
+    assert pd.isna(debut["prev_minutes"])
+
+
+def test_history_of_a_two_league_season_sums_both_leagues():
+    from scout.features.build import history_features
+
+    rows = _hist_rows()
+    rows = pd.concat(
+        [rows, rows.iloc[[2]].assign(source_player_id=pd.array([8], dtype="Int64"))],
+        ignore_index=True,
+    )  # player 8 in 2023 after playing for two clubs in 2022
+    out = history_features(rows).set_index(["league_key", "season", "source_player_id"])
+    row = out.loc[("epl", 2023, 8)]
+    assert row["prev_minutes"] == 1500
+    assert row["prev_league"] == "eredivisie"  # more minutes there
+    assert row["prev_rating"] == pytest.approx((6.5 * 600 + 7.0 * 900) / 1500)
+    # Assists are blank for 900 of those minutes: the rate uses the 600 known.
+    assert row["prev_assists_per90"] == 0
+
+
+def test_seasons_without_match_data_fall_back_to_season_totals():
+    inputs = _inputs()
+    late = inputs.season_stats.iloc[[0]].assign(season=2019, league_key="belgian_pro_league")
+    inputs = Inputs(
+        pd.concat([inputs.season_stats, late], ignore_index=True),
+        inputs.match_stats,
+        inputs.links,
+        inputs.tm_players,
+        inputs.valuations,
+        inputs.data_end,
+    )
+    features, _ = build_features(inputs)
+    belgium = features[features["league_key"] == "belgian_pro_league"]
+    assert belgium["tier"].tolist() == ["season"]  # 2019 has no match data, still kept
+    assert features[features["season"] == 2023]["tier"].unique().tolist() == ["match"]

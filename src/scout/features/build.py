@@ -391,6 +391,93 @@ def labels(rows: pd.DataFrame, valuations: pd.DataFrame, data_end: pd.Timestamp)
     return out
 
 
+# History
+
+
+def history_features(rows: pd.DataFrame) -> pd.DataFrame:
+    """The player's previous season and career so far, across every league.
+
+    The previous season's feature date is always before this one's, so this
+    stays point in time; ``prev_feature_date`` is kept so the contract can
+    check it. A player who played in two leagues last season (a January move)
+    is summed over both, and his league is the one with more minutes.
+    """
+    keys = ["league_key", "season", "source_player_id"]
+    r = rows.copy()
+    r["rating_x_min"] = r["rating"] * r["minutes"].where(r["rating"].notna())
+    r["rated_min"] = r["minutes"].where(r["rating"].notna())
+    for column in ("goals", "assists"):
+        r[f"{column}_min"] = r["minutes"].where(r[column].notna())
+    by_player = (
+        r.sort_values("minutes", ascending=False)
+        .groupby(["source_player_id", "season"])
+        .agg(
+            p_minutes=("minutes", "sum"),
+            p_league=("league_key", "first"),
+            p_share=("minutes_share", "max"),
+            p_rating_x=("rating_x_min", "sum"),
+            p_rated=("rated_min", "sum"),
+            p_goals=("goals", "sum"),
+            p_goals_min=("goals_min", "sum"),
+            p_assists=("assists", "sum"),
+            p_assists_min=("assists_min", "sum"),
+            p_date=("feature_date", "max"),
+        )
+        .reset_index()
+        .sort_values(["source_player_id", "season"])
+    )
+    by_player["p_rating"] = by_player["p_rating_x"] / by_player["p_rated"].replace(0, np.nan)
+    by_player["p_goals_per90"] = (
+        by_player["p_goals"] / by_player["p_goals_min"].replace(0, np.nan) * 90
+    )
+    by_player["p_assists_per90"] = (
+        by_player["p_assists"] / by_player["p_assists_min"].replace(0, np.nan) * 90
+    )
+    grouped = by_player.groupby("source_player_id")
+    # Career before this season: seasons and minutes up to the previous one.
+    by_player["career_seasons"] = grouped.cumcount()
+    by_player["career_minutes"] = grouped["p_minutes"].cumsum() - by_player["p_minutes"]
+
+    prev = by_player[
+        [
+            "source_player_id",
+            "season",
+            "p_minutes",
+            "p_league",
+            "p_share",
+            "p_rating",
+            "p_goals_per90",
+            "p_assists_per90",
+            "p_date",
+        ]
+    ].rename(
+        columns={
+            "p_minutes": "prev_minutes",
+            "p_league": "prev_league",
+            "p_share": "prev_minutes_share",
+            "p_rating": "prev_rating",
+            "p_goals_per90": "prev_goals_per90",
+            "p_assists_per90": "prev_assists_per90",
+            "p_date": "prev_feature_date",
+        }
+    )
+    prev["season"] = prev["season"] + 1  # last season's numbers, keyed by this season
+    out = rows[[*keys, "minutes", "rating", "minutes_share"]].merge(
+        prev, on=["source_player_id", "season"], how="left"
+    )
+    out = out.merge(
+        by_player[["source_player_id", "season", "career_seasons", "career_minutes"]],
+        on=["source_player_id", "season"],
+        how="left",
+    )
+    out["has_prev_season"] = out["prev_minutes"].notna()
+    out["minutes_change"] = out["minutes"] - out["prev_minutes"]
+    out["rating_change"] = out["rating"] - out["prev_rating"]
+    out["minutes_share_change"] = out["minutes_share"] - out["prev_minutes_share"]
+    out["changed_league"] = (out["prev_league"].notna()) & (out["prev_league"] != out["league_key"])
+    return out.drop(columns=["minutes", "rating", "minutes_share"])
+
+
 # Assembly
 
 
@@ -401,8 +488,16 @@ def build_features(inputs: Inputs) -> tuple[pd.DataFrame, pd.DataFrame]:
 
     match_part = inputs.match_stats[inputs.match_stats["season"] >= MATCH_TIER_FROM]
     detailed = match_tier_features(match_part, dates).assign(tier="match")
-    early = inputs.season_stats[inputs.season_stats["season"] < MATCH_TIER_FROM]
-    basic = season_tier_features(early).assign(tier="season")
+    # Every league season without match data uses the season totals: all
+    # seasons before 2015, and later ones the API has no match stats for
+    # (the Belgian Pro League until 2019).
+    with_matches = set(zip(detailed["league_key"], detailed["season"].astype(int), strict=True))
+    stats = inputs.season_stats
+    no_matches = [
+        (lg, int(se)) not in with_matches
+        for lg, se in zip(stats["league_key"], stats["season"], strict=True)
+    ]
+    basic = season_tier_features(stats[no_matches]).assign(tier="season")
     rows = pd.concat([detailed, basic], ignore_index=True)
     rows = rows[rows["minutes"].fillna(0) > 0]
     rows = rows.merge(dates, on=["league_key", "season"])
@@ -410,6 +505,8 @@ def build_features(inputs: Inputs) -> tuple[pd.DataFrame, pd.DataFrame]:
     profile = profile_features(inputs, rows)
     rows = rows.merge(profile, on=[*keys, "feature_date"])
     rows["regular"] = rows["minutes"] >= REGULAR_MINUTES
+    rows = rows.reset_index(drop=True)
+    rows = rows.merge(history_features(rows), on=keys, how="left")
     rows = rows.reset_index(drop=True)
     rows = pd.concat([rows, value_features(rows, inputs.valuations)], axis=1)
     label_table = labels(rows, inputs.valuations, inputs.data_end)
@@ -444,4 +541,6 @@ def _order(frame: pd.DataFrame) -> pd.DataFrame:
         frame[column] = frame[column].astype("Int64")
     frame["regular"] = frame["regular"].astype(bool)
     frame["link_rule"] = frame["link_rule"].astype("string")
+    frame["prev_league"] = frame["prev_league"].astype("string")
+    frame["career_seasons"] = frame["career_seasons"].astype("Int64")
     return frame.sort_values(["league_key", "season", "source_player_id"]).reset_index(drop=True)

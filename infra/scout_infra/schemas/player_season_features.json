@@ -324,6 +324,62 @@
   "type": "double"
  },
  {
+  "name": "prev_minutes",
+  "type": "double"
+ },
+ {
+  "name": "prev_league",
+  "type": "string"
+ },
+ {
+  "name": "prev_minutes_share",
+  "type": "double"
+ },
+ {
+  "name": "prev_rating",
+  "type": "double"
+ },
+ {
+  "name": "prev_goals_per90",
+  "type": "double"
+ },
+ {
+  "name": "prev_assists_per90",
+  "type": "double"
+ },
+ {
+  "name": "prev_feature_date",
+  "type": "timestamp"
+ },
+ {
+  "name": "career_seasons",
+  "type": "bigint"
+ },
+ {
+  "name": "career_minutes",
+  "type": "double"
+ },
+ {
+  "name": "has_prev_season",
+  "type": "boolean"
+ },
+ {
+  "name": "minutes_change",
+  "type": "double"
+ },
+ {
+  "name": "rating_change",
+  "type": "double"
+ },
+ {
+  "name": "minutes_share_change",
+  "type": "double"
+ },
+ {
+  "name": "changed_league",
+  "type": "boolean"
+ },
+ {
   "name": "market_value",
   "type": "double"
  },
