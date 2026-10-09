@@ -5,7 +5,7 @@ import pandera.pandas as pa
 from pandera.pandas import Check, Column, DataFrameSchema
 
 from scout.providers.api_football.adapter import NUMERIC_STATS
-from scout.providers.api_football.matches import MATCH_NUMERIC_STATS
+from scout.providers.api_football.matches import MATCH_NUMERIC_STATS, TEAM_NUMERIC
 
 MAX_SEASON_MINUTES = 5000  # 38 league matches of 90 minutes is 3,420; leaves room for stoppage
 RATIO_PAIRS = [
@@ -197,6 +197,34 @@ PLAYER_SEASON_LABELS = DataFrameSchema(
 )
 
 
+TEAM_MATCH_STATS = DataFrameSchema(
+    {
+        "source": Column(str),
+        "fixture_id": Column("Int64", Check.gt(0)),
+        "kickoff": Column("datetime64[ns, UTC]"),
+        "league_key": Column(str),
+        "season": Column("Int64", Check.in_range(2000, 2100)),
+        "team_id": Column("Int64", Check.gt(0)),
+        "opponent_id": Column("Int64", nullable=True),
+        "is_home": Column("boolean", nullable=True),
+        **{c: Column("Float64", **_count) for c in TEAM_NUMERIC if c != "goals_prevented"},
+        "goals_prevented": Column("Float64", nullable=True),
+        "possession": Column("Float64", Check.in_range(0, 100), nullable=True),
+        "pass_accuracy": Column("Float64", Check.in_range(0, 100), nullable=True),
+        "xg": Column("Float64", Check.in_range(0, 15), nullable=True),
+    },
+    checks=[
+        _not_greater("shots_on", "shots_total"),
+        _not_greater("shots_inside_box", "shots_total"),
+        _not_greater("passes_accurate", "passes_total"),
+    ],
+    unique=["fixture_id", "team_id"],
+    strict=False,
+    coerce=False,
+    name="team_match_stats",
+)
+
+
 def validate(schema: DataFrameSchema, frame: pd.DataFrame) -> pd.DataFrame:
     """Validate lazily so one run reports every violation, not just the first."""
     return schema.validate(frame, lazy=True)
@@ -208,6 +236,7 @@ __all__ = [
     "PLAYER_SEASON_FEATURES",
     "PLAYER_SEASON_LABELS",
     "PLAYER_SEASON_STATS",
+    "TEAM_MATCH_STATS",
     "VALUATIONS",
     "pa",
     "validate",

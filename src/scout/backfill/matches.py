@@ -1,4 +1,5 @@
-"""Quota aware, resumable backfill of per match player stats.
+"""Quota aware, resumable backfill of per match stats: player level
+(``/fixtures/players``) or team level (``/fixtures/statistics``).
 
 Per league and season: one ``/fixtures`` request lists the matches, then one
 ``/fixtures/players`` request per finished match. As in the season backfill,
@@ -14,13 +15,15 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 
 import pandera.errors
 
 from scout.backfill.runner import BackfillResult, SeasonOutcome
 from scout.config import LeagueConfig, Settings
-from scout.contracts import PLAYER_MATCH_STATS, validate
+from scout.contracts import PLAYER_MATCH_STATS, TEAM_MATCH_STATS, validate
 from scout.fsutil import atomic_write_text
 from scout.providers.api_football import (
     ApiFootballStatsProvider,
@@ -31,28 +34,66 @@ from scout.providers.api_football.matches import (
     ApiFootballMatchProvider,
     match_rows_to_frame,
     parse_fixture_players,
+    parse_fixture_statistics,
+    team_rows_to_frame,
 )
 from scout.ratelimit import DailyQuotaExhaustedError
 
 log = logging.getLogger(__name__)
 
 
-def match_parquet_path(settings: Settings, league_key: str, season: int) -> Path:
+@dataclass(frozen=True)
+class Level:
+    """One kind of per match download: endpoint, parser, contract and table."""
+
+    name: str
+    table: str
+    fetch: Callable  # (provider, fixture_id) -> payload
+    parse: Callable  # (fixture, payload, league) -> rows
+    to_frame: Callable  # rows -> DataFrame
+    contract: object
+    covered: Callable  # SeasonInfo -> bool, the API's own coverage flag
+
+
+PLAYER_LEVEL = Level(
+    "player",
+    "player_match_stats",
+    lambda provider, fid: provider.fixture_players(fid),
+    parse_fixture_players,
+    match_rows_to_frame,
+    PLAYER_MATCH_STATS,
+    lambda info: info.has_match_player_stats,
+)
+TEAM_LEVEL = Level(
+    "team",
+    "team_match_stats",
+    lambda provider, fid: provider.fixture_statistics(fid),
+    parse_fixture_statistics,
+    team_rows_to_frame,
+    TEAM_MATCH_STATS,
+    lambda info: info.has_match_team_stats,
+)
+LEVELS = {level.name: level for level in (PLAYER_LEVEL, TEAM_LEVEL)}
+
+
+def match_parquet_path(
+    settings: Settings, league_key: str, season: int, table: str = "player_match_stats"
+) -> Path:
     return (
-        settings.paths.processed_dir
-        / "player_match_stats"
-        / f"league={league_key}"
-        / f"season={season}.parquet"
+        settings.paths.processed_dir / table / f"league={league_key}" / f"season={season}.parquet"
     )
 
 
 def match_target_seasons(
-    seasons_provider: ApiFootballStatsProvider, league: LeagueConfig, settings: Settings
+    seasons_provider: ApiFootballStatsProvider,
+    league: LeagueConfig,
+    settings: Settings,
+    level: Level = PLAYER_LEVEL,
 ) -> list[int]:
     """Finished seasons with per match player stats, or the configured list."""
     wanted = settings.backfill.seasons
     listed = seasons_provider.list_seasons(league)
-    covered = {s.season for s in listed if s.has_match_player_stats and not s.current}
+    covered = {s.season for s in listed if level.covered(s) and not s.current}
     if wanted == "all":
         return sorted(covered)
     skipped = sorted(set(wanted) - covered)
@@ -64,7 +105,9 @@ def match_target_seasons(
 PROBE_MATCHES = 5
 
 
-def _season_has_player_data(provider: ApiFootballMatchProvider, fixtures: list[dict]) -> bool:
+def _season_has_player_data(
+    provider: ApiFootballMatchProvider, fixtures: list[dict], level: Level = PLAYER_LEVEL
+) -> bool:
     """Fetch a few matches spread over the season before committing to all of them.
 
     The coverage flag is not reliable: EPL 2014 is flagged as covered, yet 377
@@ -75,7 +118,7 @@ def _season_has_player_data(provider: ApiFootballMatchProvider, fixtures: list[d
         return False
     step = max(len(fixtures) // PROBE_MATCHES, 1)
     sample = fixtures[::step][:PROBE_MATCHES]
-    return any(provider.fixture_players(f["fixture"]["id"]).get("response") for f in sample)
+    return any(level.fetch(provider, f["fixture"]["id"]).get("response") for f in sample)
 
 
 def _backfill_match_season(
@@ -83,11 +126,12 @@ def _backfill_match_season(
     league: LeagueConfig,
     season: int,
     settings: Settings,
+    level: Level = PLAYER_LEVEL,
 ) -> SeasonOutcome:
     outcome = SeasonOutcome(league.key, season, status="partial")
     fixtures = provider.fixtures(league, season)
     outcome.pages_total = len(fixtures)
-    if not _season_has_player_data(provider, fixtures):
+    if not _season_has_player_data(provider, fixtures, level):
         outcome.status = "no_player_data"
         outcome.detail = f"none of {PROBE_MATCHES} probed matches has player data; skipped"
         log.warning("%s %s: %s", league.key, season, outcome.detail)
@@ -95,9 +139,9 @@ def _backfill_match_season(
     rows: list[dict] = []
     empty = 0
     for fixture in fixtures:
-        payload = provider.fixture_players(fixture["fixture"]["id"])
+        payload = level.fetch(provider, fixture["fixture"]["id"])
         outcome.pages_cached += 1
-        parsed = parse_fixture_players(fixture, payload, league)
+        parsed = level.parse(fixture, payload, league)
         empty += not parsed
         rows.extend(parsed)
         if outcome.pages_cached % 50 == 0 or outcome.pages_cached == outcome.pages_total:
@@ -110,11 +154,11 @@ def _backfill_match_season(
                 provider.client.guard.remaining_today,
             )
 
-    frame = match_rows_to_frame(rows)
+    frame = level.to_frame(rows)
     outcome.rows = len(frame)
     outcome.detail = f"{empty} matches without player data" if empty else ""
     try:
-        validate(PLAYER_MATCH_STATS, frame)
+        validate(level.contract, frame)
     except pandera.errors.SchemaErrors as exc:
         outcome.status = "contract_failed"
         outcome.detail = f"{len(exc.failure_cases)} contract violations"
@@ -122,7 +166,7 @@ def _backfill_match_season(
         log.error("%s", exc.failure_cases.head(20).to_string())
         return outcome
 
-    path = match_parquet_path(settings, league.key, season)
+    path = match_parquet_path(settings, league.key, season, level.table)
     path.parent.mkdir(parents=True, exist_ok=True)
     frame.to_parquet(path, index=False)
     outcome.status = "complete"
@@ -136,6 +180,7 @@ def run_match_backfill(
     *,
     league_keys: list[str] | None = None,
     seasons: list[int] | None = None,
+    level: Level = PLAYER_LEVEL,
 ) -> BackfillResult:
     result = BackfillResult()
     leagues = [lg for lg in settings.leagues if not league_keys or lg.key in league_keys]
@@ -143,13 +188,13 @@ def run_match_backfill(
     start_requests = client.requests_made
     try:
         for league in leagues:
-            targets = match_target_seasons(seasons_provider, league, settings)
+            targets = match_target_seasons(seasons_provider, league, settings, level)
             if seasons:
                 targets = [s for s in seasons if s in targets]
             for season in targets:
                 log.info("%s %s: matches starting", league.key, season)
                 try:
-                    outcome = _backfill_match_season(provider, league, season, settings)
+                    outcome = _backfill_match_season(provider, league, season, settings, level)
                 except PlanRestrictionError as exc:
                     outcome = SeasonOutcome(league.key, season, "refused_by_plan", detail=str(exc))
                     log.warning("%s %s refused by plan: %s", league.key, season, exc)
@@ -185,7 +230,7 @@ def run_match_backfill(
     return result
 
 
-def write_match_report(result: BackfillResult, reports_dir: Path) -> Path:
+def write_match_report(result: BackfillResult, reports_dir: Path, level: str = "player") -> Path:
     """A short Markdown and JSON summary of the match backfill."""
     reports_dir.mkdir(parents=True, exist_ok=True)
     records = [
@@ -214,10 +259,11 @@ def write_match_report(result: BackfillResult, reports_dir: Path) -> Path:
         ),
         "",
     ]
-    md = reports_dir / "match_coverage_report.md"
+    stem = "match_coverage_report" if level == "player" else f"match_{level}_coverage_report"
+    md = reports_dir / f"{stem}.md"
     atomic_write_text(md, "\n".join(lines))
     atomic_write_text(
-        reports_dir / "match_coverage_report.json",
+        reports_dir / f"{stem}.json",
         json.dumps(
             {
                 "requests_made": result.requests_made,

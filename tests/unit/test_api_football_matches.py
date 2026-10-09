@@ -278,3 +278,94 @@ def test_match_report(settings, tmp_path):
     )
     md = write_match_report(result, tmp_path / "reports")
     assert "| epl | 2023 | complete | 3/3 | 3 |" in md.read_text()
+
+
+# Team level
+
+
+def team_block(team_id, name, **stats):
+    defaults = {
+        "Shots on Goal": 5,
+        "Shots off Goal": 4,
+        "Total Shots": 12,
+        "Blocked Shots": 3,
+        "Shots insidebox": 8,
+        "Shots outsidebox": 4,
+        "Fouls": 10,
+        "Corner Kicks": 6,
+        "Offsides": 2,
+        "Ball Possession": "58%",
+        "Yellow Cards": 1,
+        "Red Cards": None,
+        "Goalkeeper Saves": 3,
+        "Total passes": 520,
+        "Passes accurate": 460,
+        "Passes %": "88%",
+    }
+    defaults.update(stats)
+    return {
+        "team": {"id": team_id, "name": name},
+        "statistics": [{"type": k, "value": v} for k, v in defaults.items()],
+    }
+
+
+def test_team_statistics_parse_percentages_sides_and_optional_xg(epl):
+    from scout.contracts import TEAM_MATCH_STATS
+    from scout.providers.api_football.matches import parse_fixture_statistics, team_rows_to_frame
+
+    payload = {
+        "response": [
+            team_block(1, "Test Town", expected_goals="1.84"),
+            team_block(2, "Fixture City", **{"Ball Possession": "42%", "Passes %": "79%"}),
+        ]
+    }
+    frame = team_rows_to_frame(parse_fixture_statistics(fixture(99, score=(2, 1)), payload, epl))
+    validate(TEAM_MATCH_STATS, frame)
+    home = frame[frame["team_id"] == 1].iloc[0]
+    away = frame[frame["team_id"] == 2].iloc[0]
+    assert (home["possession"], away["possession"]) == (58, 42)
+    assert (bool(home["is_home"]), home["goals_for"], home["goals_against"]) == (True, 2, 1)
+    assert (bool(away["is_home"]), away["opponent_id"]) == (False, 1)
+    assert home["xg"] == pytest.approx(1.84)
+    assert pd.isna(away["xg"])  # xG only exists from 2023/24
+    assert pd.isna(home["cards_red"])
+
+
+def test_team_contract_rejects_impossible_shots(epl):
+    from scout.contracts import TEAM_MATCH_STATS
+    from scout.providers.api_football.matches import parse_fixture_statistics, team_rows_to_frame
+
+    payload = {"response": [team_block(1, "Test Town", **{"Shots on Goal": 20})]}
+    frame = team_rows_to_frame(parse_fixture_statistics(fixture(99), payload, epl))
+    with pytest.raises(pandera.errors.SchemaErrors, match="shots_on must not exceed"):
+        validate(TEAM_MATCH_STATS, frame)
+
+
+def test_team_level_backfill_writes_its_own_table(settings):
+    from scout.backfill.matches import TEAM_LEVEL
+
+    fixtures = [fixture(6000 + i) for i in range(6)]
+
+    class TeamProvider(FakeMatchProvider):
+        def fixture_statistics(self, fixture_id):
+            return self.fixture_players(fixture_id)
+
+    payloads = {
+        6000 + i: {"response": [team_block(1, "Test Town"), team_block(2, "Fixture City")]}
+        for i in range(6)
+    }
+    provider = TeamProvider({("epl", 2023): fixtures}, payloads)
+
+    class Seasons(FakeSeasons):
+        def list_seasons(self, league):
+            return [
+                SeasonInfo(league.key, 2023, None, None, False, True, False, True),
+            ]
+
+    result = run_match_backfill(
+        settings, Seasons({}), provider, league_keys=["epl"], level=TEAM_LEVEL
+    )
+    assert result.outcomes[0].status == "complete"
+    path = match_parquet_path(settings, "epl", 2023, "team_match_stats")
+    assert len(pd.read_parquet(path)) == 12
+    assert not match_parquet_path(settings, "epl", 2023).exists()  # player table untouched

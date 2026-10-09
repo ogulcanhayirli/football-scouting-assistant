@@ -242,3 +242,128 @@ class ApiFootballMatchProvider:
 
     def fixture_players(self, fixture_id: int) -> dict[str, Any]:
         return self.client.get("fixtures/players", {"fixture": fixture_id}).payload
+
+    def fixture_statistics(self, fixture_id: int) -> dict[str, Any]:
+        return self.client.get("fixtures/statistics", {"fixture": fixture_id}).payload
+
+
+# Team level: /fixtures/statistics, one row per team per match.
+
+# API label -> canonical column. xG ("expected_goals") and "goals_prevented"
+# only exist from 2023/24.
+TEAM_STAT_FIELDS = {
+    "Shots on Goal": "shots_on",
+    "Shots off Goal": "shots_off",
+    "Total Shots": "shots_total",
+    "Blocked Shots": "shots_blocked",
+    "Shots insidebox": "shots_inside_box",
+    "Shots outsidebox": "shots_outside_box",
+    "Fouls": "fouls",
+    "Corner Kicks": "corners",
+    "Offsides": "offsides",
+    "Ball Possession": "possession",
+    "Yellow Cards": "cards_yellow",
+    "Red Cards": "cards_red",
+    "Goalkeeper Saves": "saves",
+    "Total passes": "passes_total",
+    "Passes accurate": "passes_accurate",
+    "Passes %": "pass_accuracy",
+    "expected_goals": "xg",
+    "goals_prevented": "goals_prevented",
+}
+TEAM_NUMERIC = list(TEAM_STAT_FIELDS.values())
+TEAM_COLUMNS = [
+    "source",
+    "fixture_id",
+    "kickoff",
+    "league_key",
+    "league_id",
+    "season",
+    "round",
+    "team_id",
+    "team_name",
+    "opponent_id",
+    "is_home",
+    "goals_for",
+    "goals_against",
+    *TEAM_NUMERIC,
+]
+
+
+def _stat_value(value: Any) -> Any:
+    """Percentages come as "55%"; missing as null."""
+    if isinstance(value, str) and value.endswith("%"):
+        return value[:-1]
+    return value
+
+
+def parse_fixture_statistics(
+    fixture: dict[str, Any], payload: dict[str, Any], league: LeagueConfig
+) -> list[dict]:
+    info = fixture.get("fixture") or {}
+    teams = fixture.get("teams") or {}
+    goals = fixture.get("goals") or {}
+    side = {
+        (teams.get("home") or {}).get("id"): "home",
+        (teams.get("away") or {}).get("id"): "away",
+    }
+    rows = []
+    for block in payload.get("response") or []:
+        team = block.get("team") or {}
+        own = side.get(team.get("id"))
+        other = {"home": "away", "away": "home"}.get(own)
+        row: dict[str, Any] = {
+            "source": SOURCE,
+            "fixture_id": info.get("id"),
+            "kickoff": info.get("date"),
+            "league_key": league.key,
+            "league_id": league.api_football_id,
+            "season": (fixture.get("league") or {}).get("season"),
+            "round": (fixture.get("league") or {}).get("round"),
+            "team_id": team.get("id"),
+            "team_name": team.get("name"),
+            "opponent_id": (teams.get(other) or {}).get("id") if other else None,
+            "is_home": own == "home" if own else None,
+            "goals_for": goals.get(own) if own else None,
+            "goals_against": goals.get(other) if other else None,
+        }
+        values = {s.get("type"): s.get("value") for s in block.get("statistics") or []}
+        for label, column in TEAM_STAT_FIELDS.items():
+            row[column] = _stat_value(values.get(label))
+        rows.append(row)
+    return rows
+
+
+def team_rows_to_frame(rows: list[dict]) -> pd.DataFrame:
+    frame = pd.DataFrame(rows, columns=TEAM_COLUMNS)
+    for column in TEAM_NUMERIC:
+        frame[column] = pd.to_numeric(frame[column], errors="coerce").astype("Float64")
+    for column in [
+        "fixture_id",
+        "league_id",
+        "season",
+        "team_id",
+        "opponent_id",
+        "goals_for",
+        "goals_against",
+    ]:
+        frame[column] = pd.to_numeric(frame[column], errors="coerce").astype("Int64")
+    frame["is_home"] = frame["is_home"].astype("boolean")
+    frame["kickoff"] = pd.to_datetime(frame["kickoff"], utc=True, errors="coerce").dt.as_unit("ns")
+    _drop_negative_counts_team(frame)
+    return frame
+
+
+def _drop_negative_counts_team(frame: pd.DataFrame) -> None:
+    columns = [c for c in TEAM_NUMERIC if c != "goals_prevented"]  # may be negative
+    for column in columns:
+        negative = (frame[column] < 0).fillna(False)
+        for idx in frame.index[negative]:
+            log.warning(
+                "Negative team %s=%s for %s in fixture %s; stored as missing",
+                column,
+                frame.at[idx, column],
+                frame.at[idx, "team_name"],
+                frame.at[idx, "fixture_id"],
+            )
+        frame.loc[negative, column] = pd.NA

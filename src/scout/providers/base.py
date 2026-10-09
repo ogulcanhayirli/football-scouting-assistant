@@ -36,6 +36,7 @@ class SeasonInfo:
     current: bool
     has_player_stats: bool
     has_match_player_stats: bool = False  # per match player stats (/fixtures/players)
+    has_match_team_stats: bool = False  # per match team stats (/fixtures/statistics)
 
 
 class StatsProvider(Protocol):
