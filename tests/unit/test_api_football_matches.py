@@ -489,3 +489,17 @@ def test_injury_backfill_makes_one_request_per_covered_season(settings):
     assert [o.season for o in result.outcomes] == [2020, 2021]  # 2019 has no injury coverage
     assert provider.client.requests_made == 2
     assert match_parquet_path(settings, "epl", 2021, "injuries").exists()
+
+
+def test_inconsistent_shot_split_becomes_missing(epl):
+    from scout.contracts import TEAM_MATCH_STATS
+    from scout.providers.api_football.matches import parse_fixture_statistics, team_rows_to_frame
+
+    payload = {
+        "response": [team_block(1, "Test Town", **{"Shots insidebox": 13, "Shots outsidebox": 0})]
+    }
+    frame = team_rows_to_frame(parse_fixture_statistics(fixture(99), payload, epl))
+    validate(TEAM_MATCH_STATS, frame)
+    assert pd.isna(frame.loc[0, "shots_inside_box"])
+    assert pd.isna(frame.loc[0, "shots_outside_box"])
+    assert frame.loc[0, "shots_total"] == 12

@@ -87,7 +87,7 @@ VALUATIONS = DataFrameSchema(
 )
 
 
-MAX_MATCH_MINUTES = 130  # 120 plus stoppage time in extra time
+MAX_MATCH_MINUTES = 150  # extra time plus long stoppages (World Cup 2022 ran past 130)
 MATCH_RATIO_PAIRS = [
     ("shots_on", "shots_total"),
     ("duels_won", "duels_total"),
