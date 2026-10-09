@@ -225,12 +225,50 @@ TEAM_MATCH_STATS = DataFrameSchema(
 )
 
 
+MATCH_LINEUPS = DataFrameSchema(
+    {
+        "fixture_id": Column("Int64", Check.gt(0)),
+        "kickoff": Column("datetime64[ns, UTC]"),
+        "league_key": Column(str),
+        "season": Column("Int64", Check.in_range(2000, 2100)),
+        "team_id": Column("Int64", Check.gt(0)),
+        "source_player_id": Column("Int64", Check.gt(0)),
+        "position": Column(str, Check.isin(["G", "D", "M", "F"]), nullable=True),
+        "grid_row": Column("Int64", Check.in_range(1, 7), nullable=True),
+        "grid_col": Column("Int64", Check.in_range(1, 7), nullable=True),
+        "starter": Column(bool),
+    },
+    unique=["fixture_id", "team_id", "source_player_id"],
+    strict=False,
+    coerce=False,
+    name="match_lineups",
+)
+
+INJURIES = DataFrameSchema(
+    {
+        "league_key": Column(str),
+        "season": Column("Int64", Check.in_range(2000, 2100)),
+        "fixture_id": Column("Int64", Check.gt(0), nullable=True),
+        "fixture_date": Column("datetime64[ns, UTC]", nullable=True),
+        "source_player_id": Column("Int64", Check.gt(0)),
+        "status": Column(str, nullable=True),
+        "reason": Column(str, nullable=True),
+    },
+    unique=["fixture_id", "source_player_id"],
+    strict=False,
+    coerce=False,
+    name="injuries",
+)
+
+
 def validate(schema: DataFrameSchema, frame: pd.DataFrame) -> pd.DataFrame:
     """Validate lazily so one run reports every violation, not just the first."""
     return schema.validate(frame, lazy=True)
 
 
 __all__ = [
+    "INJURIES",
+    "MATCH_LINEUPS",
     "PLAYERS",
     "PLAYER_MATCH_STATS",
     "PLAYER_SEASON_FEATURES",

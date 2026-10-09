@@ -51,7 +51,20 @@ def cmd_backfill(settings: Settings, args: argparse.Namespace) -> int:
 
     with build_client(settings) as client:
         provider = ApiFootballStatsProvider(client)
-        if args.level in ("match", "team"):
+        if args.level == "injuries":
+            from scout.backfill.matches import run_injury_backfill, write_match_report
+            from scout.providers.api_football.matches import ApiFootballMatchProvider
+
+            result = run_injury_backfill(
+                settings,
+                provider,
+                ApiFootballMatchProvider(client),
+                league_keys=args.league,
+                scope=args.scope,
+            )
+            write_match_report(result, settings.paths.reports_dir, f"injuries_{args.scope}")
+            return 0 if result.complete else 2
+        if args.level in ("match", "team", "lineup"):
             from scout.backfill.matches import LEVELS, run_match_backfill, write_match_report
             from scout.providers.api_football.matches import ApiFootballMatchProvider
 
@@ -61,12 +74,13 @@ def cmd_backfill(settings: Settings, args: argparse.Namespace) -> int:
                 ApiFootballMatchProvider(client),
                 league_keys=args.league,
                 seasons=args.season,
-                level=LEVELS["team" if args.level == "team" else "player"],
+                level=LEVELS["player" if args.level == "match" else args.level],
                 scope=args.scope,
             )
-            md_path = write_match_report(
-                result, settings.paths.reports_dir, "team" if args.level == "team" else "player"
-            )
+            name = "player" if args.level == "match" else args.level
+            if args.scope == "competitions":
+                name = f"{name}_competitions"
+            md_path = write_match_report(result, settings.paths.reports_dir, name)
             logging.getLogger(__name__).info("Match report: %s", md_path)
             return 0 if result.complete else 2
         result = run_backfill(settings, provider, league_keys=args.league, seasons=args.season)
@@ -309,10 +323,11 @@ def main(argv: list[str] | None = None) -> int:
     backfill.add_argument("--season", action="append", type=int, help="Season; repeatable")
     backfill.add_argument(
         "--level",
-        choices=["season", "match", "team"],
+        choices=["season", "match", "team", "lineup", "injuries"],
         default="season",
         help="season: /players totals (default); match: /fixtures/players per match; "
-        "team: /fixtures/statistics per match",
+        "team: /fixtures/statistics per match; lineup: /fixtures/lineups per match; "
+        "injuries: /injuries per league season",
     )
     backfill.add_argument(
         "--scope",

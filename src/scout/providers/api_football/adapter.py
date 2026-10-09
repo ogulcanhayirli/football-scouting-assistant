@@ -235,6 +235,8 @@ def parse_seasons(payload: dict[str, Any], league: LeagueConfig) -> list[SeasonI
                     or bool(fixtures.get("statistics_players")),
                     has_match_player_stats=bool(fixtures.get("statistics_players")),
                     has_match_team_stats=bool(fixtures.get("statistics_fixtures")),
+                    has_lineups=bool(fixtures.get("lineups")),
+                    has_injuries=bool(coverage.get("injuries")),
                 )
             )
     return sorted(seasons, key=lambda x: x.season)

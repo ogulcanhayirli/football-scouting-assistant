@@ -383,3 +383,107 @@ def test_competition_scope_downloads_cups_not_leagues(settings):
     assert [(o.league_key, o.status) for o in result.outcomes] == [("champions_league", "complete")]
     assert match_parquet_path(settings, "champions_league", 2023).exists()
     assert not match_parquet_path(settings, "epl", 2023).exists()
+
+
+# Lineups and injuries
+
+
+def lineup_block(team_id, players, formation="4-2-3-1", subs=()):
+    return {
+        "team": {"id": team_id, "name": f"Team {team_id}"},
+        "coach": {"id": 900 + team_id, "name": f"Coach {team_id}"},
+        "formation": formation,
+        "startXI": [{"player": p} for p in players],
+        "substitutes": [{"player": p} for p in subs],
+    }
+
+
+def test_lineups_keep_starters_bench_and_the_grid(epl):
+    from scout.contracts import MATCH_LINEUPS
+    from scout.providers.api_football.matches import lineup_rows_to_frame, parse_fixture_lineups
+
+    payload = {
+        "response": [
+            lineup_block(
+                1,
+                [
+                    {"id": 10, "name": "Keeper", "number": 1, "pos": "G", "grid": "1:1"},
+                    {"id": 11, "name": "Back", "number": 2, "pos": "D", "grid": "2:4"},
+                    {"id": 0, "name": "Unknown", "number": 3, "pos": "D", "grid": "2:3"},
+                ],
+                subs=[{"id": 12, "name": "Sub", "number": 14, "pos": "M", "grid": None}],
+            ),
+            lineup_block(
+                2,
+                [{"id": 20, "name": "Old Style", "number": 9, "pos": "F", "grid": None}],
+                formation=None,
+            ),
+        ]
+    }
+    frame = lineup_rows_to_frame(parse_fixture_lineups(fixture(99), payload, epl))
+    validate(MATCH_LINEUPS, frame)
+    by_id = frame.set_index("source_player_id")
+    assert 0 not in by_id.index  # no player id: dropped
+    assert (by_id.loc[11, "grid_row"], by_id.loc[11, "grid_col"]) == (2, 4)
+    assert bool(by_id.loc[11, "starter"])
+    assert not bool(by_id.loc[12, "starter"])
+    assert pd.isna(by_id.loc[12, "grid_row"])
+    assert by_id.loc[10, "formation"] == "4-2-3-1"
+    assert pd.isna(by_id.loc[20, "formation"])  # older seasons have no formation
+
+
+def test_injuries_parse_and_drop_repeats(epl):
+    from scout.contracts import INJURIES
+    from scout.providers.api_football.matches import injury_rows_to_frame, parse_injuries
+
+    entry = {
+        "player": {"id": 7, "name": "A", "type": "Missing Fixture", "reason": "Knee Injury"},
+        "team": {"id": 1, "name": "Test Town"},
+        "fixture": {"id": 99, "date": "2023-09-01T19:00:00+00:00"},
+    }
+    payload = {
+        "response": [
+            entry,
+            entry,
+            {**entry, "fixture": {"id": 100, "date": "2023-09-08T19:00:00+00:00"}},
+        ]
+    }
+    frame = injury_rows_to_frame(parse_injuries(payload, epl, 2023))
+    validate(INJURIES, frame)
+    assert frame["fixture_id"].tolist() == [99, 100]
+    assert frame["reason"].unique().tolist() == ["Knee Injury"]
+
+
+def test_injury_backfill_makes_one_request_per_covered_season(settings):
+    from scout.backfill.matches import run_injury_backfill
+
+    class InjuryProvider(FakeMatchProvider):
+        def injuries(self, league, season):
+            self.client.requests_made += 1
+            return {
+                "response": [
+                    {
+                        "player": {
+                            "id": 7,
+                            "name": "A",
+                            "type": "Questionable",
+                            "reason": "Illness",
+                        },
+                        "team": {"id": 1, "name": "T"},
+                        "fixture": {"id": season, "date": f"{season}-09-01T19:00:00+00:00"},
+                    }
+                ]
+            }
+
+    class Seasons(FakeSeasons):
+        def list_seasons(self, league):
+            return [
+                SeasonInfo(league.key, s, None, None, False, True, True, True, True, s >= 2020)
+                for s in (2019, 2020, 2021)
+            ]
+
+    provider = InjuryProvider({}, {})
+    result = run_injury_backfill(settings, Seasons({}), provider, league_keys=["epl"])
+    assert [o.season for o in result.outcomes] == [2020, 2021]  # 2019 has no injury coverage
+    assert provider.client.requests_made == 2
+    assert match_parquet_path(settings, "epl", 2021, "injuries").exists()

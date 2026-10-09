@@ -246,6 +246,13 @@ class ApiFootballMatchProvider:
     def fixture_statistics(self, fixture_id: int) -> dict[str, Any]:
         return self.client.get("fixtures/statistics", {"fixture": fixture_id}).payload
 
+    def fixture_lineups(self, fixture_id: int) -> dict[str, Any]:
+        return self.client.get("fixtures/lineups", {"fixture": fixture_id}).payload
+
+    def injuries(self, league: LeagueConfig, season: int) -> dict[str, Any]:
+        params = {"league": league.api_football_id, "season": season}
+        return self.client.get("injuries", params).payload
+
 
 # Team level: /fixtures/statistics, one row per team per match.
 
@@ -367,3 +374,150 @@ def _drop_negative_counts_team(frame: pd.DataFrame) -> None:
                 frame.at[idx, "fixture_id"],
             )
         frame.loc[negative, column] = pd.NA
+
+
+# Lineups: /fixtures/lineups, one row per player listed (starters and bench).
+# Formation and the pitch grid ("row:column") only exist in later seasons.
+
+LINEUP_COLUMNS = [
+    "source",
+    "fixture_id",
+    "kickoff",
+    "league_key",
+    "league_id",
+    "season",
+    "team_id",
+    "team_name",
+    "formation",
+    "coach_id",
+    "coach_name",
+    "source_player_id",
+    "player_name",
+    "shirt_number",
+    "position",
+    "grid_row",
+    "grid_col",
+    "starter",
+]
+
+
+def parse_fixture_lineups(
+    fixture: dict[str, Any], payload: dict[str, Any], league: LeagueConfig
+) -> list[dict]:
+    info = fixture.get("fixture") or {}
+    rows = []
+    for block in payload.get("response") or []:
+        team = block.get("team") or {}
+        coach = block.get("coach") or {}
+        for starter, key in ((True, "startXI"), (False, "substitutes")):
+            for entry in block.get(key) or []:
+                player = entry.get("player") or {}
+                grid = str(player.get("grid") or "")
+                row_col = grid.split(":") if ":" in grid else [None, None]
+                rows.append(
+                    {
+                        "source": SOURCE,
+                        "fixture_id": info.get("id"),
+                        "kickoff": info.get("date"),
+                        "league_key": league.key,
+                        "league_id": league.api_football_id,
+                        "season": (fixture.get("league") or {}).get("season"),
+                        "team_id": team.get("id"),
+                        "team_name": team.get("name"),
+                        "formation": block.get("formation"),
+                        "coach_id": coach.get("id"),
+                        "coach_name": coach.get("name"),
+                        "source_player_id": player.get("id"),
+                        "player_name": player.get("name"),
+                        "shirt_number": player.get("number"),
+                        "position": player.get("pos"),
+                        "grid_row": row_col[0],
+                        "grid_col": row_col[1],
+                        "starter": starter,
+                    }
+                )
+    return rows
+
+
+def lineup_rows_to_frame(rows: list[dict]) -> pd.DataFrame:
+    frame = pd.DataFrame(rows, columns=LINEUP_COLUMNS)
+    for column in [
+        "fixture_id",
+        "league_id",
+        "season",
+        "team_id",
+        "coach_id",
+        "source_player_id",
+        "shirt_number",
+        "grid_row",
+        "grid_col",
+    ]:
+        frame[column] = pd.to_numeric(frame[column], errors="coerce").astype("Int64")
+    frame["starter"] = frame["starter"].astype(bool)
+    frame["kickoff"] = pd.to_datetime(frame["kickoff"], utc=True, errors="coerce").dt.as_unit("ns")
+    frame.loc[~frame["position"].isin(["G", "D", "M", "F"]), "position"] = None
+    # Same source errors as the player stats: no id, or two players sharing one.
+    no_id = frame["source_player_id"].isna() | (frame["source_player_id"] <= 0)
+    if no_id.any():
+        log.warning("Dropping %d lineup rows without a player id", int(no_id.sum()))
+    frame = frame[~no_id]
+    dup = frame.duplicated(["fixture_id", "team_id", "source_player_id"], keep="first")
+    if dup.any():
+        log.warning("Dropping %d lineup rows repeating a player id in a match", int(dup.sum()))
+    return frame[~dup].reset_index(drop=True)
+
+
+# Injuries: /injuries per league and season, one row per player and match.
+
+INJURY_COLUMNS = [
+    "source",
+    "league_key",
+    "season",
+    "fixture_id",
+    "fixture_date",
+    "team_id",
+    "team_name",
+    "source_player_id",
+    "player_name",
+    "status",
+    "reason",
+]
+
+
+def parse_injuries(payload: dict[str, Any], league: LeagueConfig, season: int) -> list[dict]:
+    rows = []
+    for item in payload.get("response") or []:
+        player = item.get("player") or {}
+        team = item.get("team") or {}
+        fixture = item.get("fixture") or {}
+        rows.append(
+            {
+                "source": SOURCE,
+                "league_key": league.key,
+                "season": season,
+                "fixture_id": fixture.get("id"),
+                "fixture_date": fixture.get("date"),
+                "team_id": team.get("id"),
+                "team_name": team.get("name"),
+                "source_player_id": player.get("id"),
+                "player_name": player.get("name"),
+                "status": player.get("type"),  # "Missing Fixture" or "Questionable"
+                "reason": player.get("reason"),
+            }
+        )
+    return rows
+
+
+def injury_rows_to_frame(rows: list[dict]) -> pd.DataFrame:
+    frame = pd.DataFrame(rows, columns=INJURY_COLUMNS)
+    for column in ["season", "fixture_id", "team_id", "source_player_id"]:
+        frame[column] = pd.to_numeric(frame[column], errors="coerce").astype("Int64")
+    frame["fixture_date"] = pd.to_datetime(
+        frame["fixture_date"], utc=True, errors="coerce"
+    ).dt.as_unit("ns")
+    no_id = frame["source_player_id"].isna() | (frame["source_player_id"] <= 0)
+    frame = frame[~no_id]
+    dup = frame.duplicated(["fixture_id", "source_player_id"], keep="first")
+    if dup.any():
+        log.warning("Dropping %d repeated injury rows", int(dup.sum()))
+    return frame[~dup].reset_index(drop=True)

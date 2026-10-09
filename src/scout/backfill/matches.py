@@ -23,7 +23,13 @@ import pandera.errors
 
 from scout.backfill.runner import BackfillResult, SeasonOutcome
 from scout.config import LeagueConfig, Settings
-from scout.contracts import PLAYER_MATCH_STATS, TEAM_MATCH_STATS, validate
+from scout.contracts import (
+    INJURIES,
+    MATCH_LINEUPS,
+    PLAYER_MATCH_STATS,
+    TEAM_MATCH_STATS,
+    validate,
+)
 from scout.fsutil import atomic_write_text
 from scout.providers.api_football import (
     ApiFootballStatsProvider,
@@ -32,9 +38,13 @@ from scout.providers.api_football import (
 )
 from scout.providers.api_football.matches import (
     ApiFootballMatchProvider,
+    injury_rows_to_frame,
+    lineup_rows_to_frame,
     match_rows_to_frame,
+    parse_fixture_lineups,
     parse_fixture_players,
     parse_fixture_statistics,
+    parse_injuries,
     team_rows_to_frame,
 )
 from scout.ratelimit import DailyQuotaExhaustedError
@@ -73,7 +83,16 @@ TEAM_LEVEL = Level(
     TEAM_MATCH_STATS,
     lambda info: info.has_match_team_stats,
 )
-LEVELS = {level.name: level for level in (PLAYER_LEVEL, TEAM_LEVEL)}
+LINEUP_LEVEL = Level(
+    "lineup",
+    "match_lineups",
+    lambda provider, fid: provider.fixture_lineups(fid),
+    parse_fixture_lineups,
+    lineup_rows_to_frame,
+    MATCH_LINEUPS,
+    lambda info: info.has_lineups,
+)
+LEVELS = {level.name: level for level in (PLAYER_LEVEL, TEAM_LEVEL, LINEUP_LEVEL)}
 
 
 def match_parquet_path(
@@ -277,3 +296,51 @@ def write_match_report(result: BackfillResult, reports_dir: Path, level: str = "
         ),
     )
     return md
+
+
+def run_injury_backfill(
+    settings: Settings,
+    seasons_provider: ApiFootballStatsProvider,
+    provider: ApiFootballMatchProvider,
+    *,
+    league_keys: list[str] | None = None,
+    scope: str = "leagues",
+) -> BackfillResult:
+    """``/injuries`` for every covered, finished season: one request each (the
+    API returns a whole league season in one response)."""
+    result = BackfillResult()
+    pool = settings.competitions if scope == "competitions" else settings.leagues
+    client = provider.client
+    start_requests = client.requests_made
+    try:
+        for league in [lg for lg in pool if not league_keys or lg.key in league_keys]:
+            listed = seasons_provider.list_seasons(league)
+            for season in sorted(s.season for s in listed if s.has_injuries and not s.current):
+                frame = injury_rows_to_frame(
+                    parse_injuries(provider.injuries(league, season), league, season)
+                )
+                outcome = SeasonOutcome(
+                    league.key, season, "complete", pages_total=1, pages_cached=1, rows=len(frame)
+                )
+                try:
+                    validate(INJURIES, frame)
+                except pandera.errors.SchemaErrors as exc:
+                    outcome.status = "contract_failed"
+                    outcome.detail = f"{len(exc.failure_cases)} contract violations"
+                    log.error(
+                        "%s %s injuries failed the contract: %s", league.key, season, outcome.detail
+                    )
+                else:
+                    path = match_parquet_path(settings, league.key, season, "injuries")
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    frame.to_parquet(path, index=False)
+                result.outcomes.append(outcome)
+                log.info(
+                    "%s %s injuries: %s, %d rows", league.key, season, outcome.status, outcome.rows
+                )
+    except (DailyQuotaExhaustedError, QuotaExceededError) as exc:
+        result.stopped_reason = f"quota: {exc}"
+        log.warning("Stopping: %s. Run the same command again to resume.", exc)
+    finally:
+        result.requests_made = client.requests_made - start_requests
+    return result
