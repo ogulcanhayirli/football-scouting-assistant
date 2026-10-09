@@ -26,7 +26,7 @@ that is reported even when it wins.
 | Glue and Athena over the features (`infra/`, CDK) | Deployed to eu-central-1 (stack `ScoutData`); `scout athena "SQL"` queries it |
 | SageMaker Feature Store (`ScoutFeatureStore` stack) | Deployed: 16,264 records, offline store (Iceberg); its point in time answers match our tables exactly |
 | Expanding window backtest, baselines, first LightGBM (`MODELS.md`) | Done: fair value clearly beats the baseline; growth does not yet |
-| Automatic model tuning in SageMaker | Next |
+| Automatic model tuning in SageMaker (`ScoutTraining` stack) | Done for 24 month growth: 20 jobs, about 7 cents; tuned model beats the baseline narrowly (0.558 against 0.564) |
 | Similarity search, agent, rest of the AWS stack | Not started |
 
 ## Architecture
@@ -128,6 +128,11 @@ uv run scout featurestore pit --as-of 2023-01-01
 
 # Expanding window backtest of the baselines and LightGBM, all targets
 uv run scout backtest
+
+# Run the backtest in SageMaker: one training job, or automatic model tuning
+uv run scout train --target growth_24m
+uv run scout tune --target growth_24m --max-jobs 20 --parallel 2
+uv run scout backtest --target growth_24m --tuning-job <tuning job name>
 
 # Query the feature tables in Athena, as the read only scout-analyst role
 uv run scout athena "SELECT player_name, goals_per90 FROM player_season_features

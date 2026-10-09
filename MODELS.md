@@ -71,9 +71,52 @@ What they say:
 * Errors are lower for EPL than for the Süper Lig, in line with the noisier
   Süper Lig values found in FEASIBILITY.md.
 
+## Automatic model tuning (growth 24m)
+
+`scout tune --target growth_24m` ran SageMaker automatic model tuning:
+Bayesian search, 20 training jobs, 2 at a time, on `ml.m5.large`. Each job ran
+the full expanding window backtest above and reported its mean out of time
+error; the tuner minimised it. Wall clock about 37 minutes; 1,769 billable
+seconds in total (under half an instance hour), 63 to 149 seconds per job.
+Every job reproduced the local numbers exactly when given the same settings.
+
+Best settings (job `scout-tune-g24-1009-063811-004`):
+
+| Setting | Untuned | Tuned |
+|---|---|---|
+| objective | regression (squared error) | **regression_l1 (absolute error)** |
+| learning_rate | 0.03 | 0.0070 |
+| num_boost_round | 600 | 568 |
+| num_leaves | 31 | 46 |
+| min_data_in_leaf | 20 | 67 |
+| feature_fraction | 0.8 | 0.88 |
+| bagging_fraction | 0.8 | 0.82 |
+| lambda_l2 | 1.0 | 0.28 |
+
+| Model | MAE (log) | Median error | Rank correlation | EPL MAE | Süper Lig MAE |
+|---|---|---|---|---|---|
+| no_change | 0.748 | 66.7% | | 0.634 | 0.877 |
+| group_median (baseline) | 0.564 | 42.3% | 0.429 | 0.493 | 0.644 |
+| lightgbm (untuned) | 0.573 | 43.0% | 0.456 | 0.491 | 0.666 |
+| **lightgbm_tuned** | **0.558** | **42.2%** | **0.461** | **0.484** | **0.642** |
+
+What it says:
+
+* **The loss function matters most.** 18 of the 20 candidates, and the top 11,
+  used absolute error. Value changes have heavy tails (a few players jump
+  tenfold); squared error chases those, absolute error predicts the typical
+  case, which is what the error metric rewards.
+* **Tuned trees now beat the baseline**, in both leagues, but only just: 0.558
+  against 0.564 overall, 0.642 against 0.644 in the Süper Lig. By season the
+  tuned model is better in five seasons, level in two and worse in two
+  (2017, 2018).
+* **The margin is optimistic.** The settings were picked as the best of 20 on
+  these same test seasons, so part of the 1% gain is selection luck. The clean
+  check is to tune on test seasons up to 2019 only and score the frozen
+  settings on 2020 to 2022.
+
 ## Next
 
-1. Automatic model tuning in SageMaker, scoring each candidate on this exact
-   backtest, so tuning can't overfit a single split.
+1. The clean check above: tune on earlier seasons, score on later ones.
 2. Error analysis on the saved predictions: which players the models miss,
    and what their seasons looked like before a big jump.
