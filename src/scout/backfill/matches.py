@@ -181,9 +181,12 @@ def run_match_backfill(
     league_keys: list[str] | None = None,
     seasons: list[int] | None = None,
     level: Level = PLAYER_LEVEL,
+    scope: str = "leagues",
 ) -> BackfillResult:
+    """``scope`` is ``leagues`` or ``competitions`` (cups and national teams)."""
     result = BackfillResult()
-    leagues = [lg for lg in settings.leagues if not league_keys or lg.key in league_keys]
+    pool = settings.competitions if scope == "competitions" else settings.leagues
+    leagues = [lg for lg in pool if not league_keys or lg.key in league_keys]
     client = provider.client
     start_requests = client.requests_made
     try:

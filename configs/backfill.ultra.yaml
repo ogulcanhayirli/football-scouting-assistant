@@ -51,6 +51,27 @@ leagues:
     api_football_id: 40
     transfermarkt_id: GB2
 
+# Cups and national team competitions: per match player and team stats only.
+# They add columns to the players' league rows, counted by match date.
+competitions:
+  - {key: champions_league, name: UEFA Champions League, api_football_id: 2, kind: club}
+  - {key: europa_league, name: UEFA Europa League, api_football_id: 3, kind: club}
+  - {key: conference_league, name: UEFA Conference League, api_football_id: 848, kind: club}
+  - {key: world_cup, name: World Cup, api_football_id: 1, kind: national}
+  - {key: euro, name: Euro Championship, api_football_id: 4, kind: national}
+  - {key: nations_league, name: UEFA Nations League, api_football_id: 5, kind: national}
+  - {key: copa_america, name: Copa America, api_football_id: 9, kind: national}
+  - {key: africa_cup, name: Africa Cup of Nations, api_football_id: 6, kind: national}
+  - {key: asian_cup, name: Asian Cup, api_football_id: 7, kind: national}
+  - {key: gold_cup, name: CONCACAF Gold Cup, api_football_id: 22, kind: national}
+  - {key: wc_qual_europe, name: World Cup Qualification Europe, api_football_id: 32, kind: national}
+  - {key: wc_qual_south_america, name: World Cup Qualification South America, api_football_id: 34, kind: national}
+  - {key: wc_qual_africa, name: World Cup Qualification Africa, api_football_id: 29, kind: national}
+  - {key: wc_qual_asia, name: World Cup Qualification Asia, api_football_id: 30, kind: national}
+  - {key: wc_qual_concacaf, name: World Cup Qualification CONCACAF, api_football_id: 31, kind: national}
+  - {key: euro_qual, name: Euro Championship Qualification, api_football_id: 960, kind: national}
+  - {key: friendlies, name: International Friendlies, api_football_id: 10, kind: national}
+
 backfill:
   seasons: all
   endpoints: [players]

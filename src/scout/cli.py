@@ -62,6 +62,7 @@ def cmd_backfill(settings: Settings, args: argparse.Namespace) -> int:
                 league_keys=args.league,
                 seasons=args.season,
                 level=LEVELS["team" if args.level == "team" else "player"],
+                scope=args.scope,
             )
             md_path = write_match_report(
                 result, settings.paths.reports_dir, "team" if args.level == "team" else "player"
@@ -312,6 +313,12 @@ def main(argv: list[str] | None = None) -> int:
         default="season",
         help="season: /players totals (default); match: /fixtures/players per match; "
         "team: /fixtures/statistics per match",
+    )
+    backfill.add_argument(
+        "--scope",
+        choices=["leagues", "competitions"],
+        default="leagues",
+        help="match and team levels: the leagues, or the cups and national team competitions",
     )
     backfill.set_defaults(func=cmd_backfill)
 

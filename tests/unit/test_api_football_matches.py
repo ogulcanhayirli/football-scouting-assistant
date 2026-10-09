@@ -369,3 +369,17 @@ def test_team_level_backfill_writes_its_own_table(settings):
     path = match_parquet_path(settings, "epl", 2023, "team_match_stats")
     assert len(pd.read_parquet(path)) == 12
     assert not match_parquet_path(settings, "epl", 2023).exists()  # player table untouched
+
+
+def test_competition_scope_downloads_cups_not_leagues(settings):
+    fixtures, payloads = _season(7000, n=6)
+    provider = FakeMatchProvider(
+        {("champions_league", 2023): fixtures, ("epl", 2023): fixtures}, payloads
+    )
+    seasons = FakeSeasons({"champions_league": {2023}, "epl": {2023}})
+    result = run_match_backfill(
+        settings, seasons, provider, league_keys=["champions_league", "epl"], scope="competitions"
+    )
+    assert [(o.league_key, o.status) for o in result.outcomes] == [("champions_league", "complete")]
+    assert match_parquet_path(settings, "champions_league", 2023).exists()
+    assert not match_parquet_path(settings, "epl", 2023).exists()

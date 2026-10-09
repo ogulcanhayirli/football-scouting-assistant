@@ -87,10 +87,20 @@ class BackfillConfig(BaseModel):
     )
 
 
+class CompetitionConfig(LeagueConfig):
+    """A cup or national team competition. Its matches add columns to the players'
+    league rows (European and international minutes, form); it never gets rows of
+    its own."""
+
+    transfermarkt_id: str = ""
+    kind: Literal["club", "national"]
+
+
 class Settings(BaseModel):
     api_football: ApiFootballConfig
     transfermarkt: TransfermarktConfig = TransfermarktConfig()
     leagues: list[LeagueConfig]
+    competitions: list[CompetitionConfig] = Field(default_factory=list)
     paths: PathsConfig = PathsConfig()
     backfill: BackfillConfig = BackfillConfig()
 

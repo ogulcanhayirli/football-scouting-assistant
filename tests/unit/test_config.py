@@ -48,3 +48,21 @@ def test_missing_secret_raises(monkeypatch):
     monkeypatch.delenv("X_SSM", raising=False)
     with pytest.raises(MissingSecretError):
         get_secret("X_KEY", "X_SSM")
+
+
+def test_competitions_are_separate_from_leagues():
+    settings = load_settings(CONFIGS / "backfill.ultra.yaml")
+    competition_keys = {c.key for c in settings.competitions}
+    assert {
+        "champions_league",
+        "europa_league",
+        "conference_league",
+        "world_cup",
+    } <= competition_keys
+    assert competition_keys.isdisjoint({lg.key for lg in settings.leagues})
+    ids = [c.api_football_id for c in settings.competitions] + [
+        lg.api_football_id for lg in settings.leagues
+    ]
+    assert len(ids) == len(set(ids))
+    assert {c.kind for c in settings.competitions} == {"club", "national"}
+    assert load_settings(CONFIGS / "backfill.free.yaml").competitions == []
