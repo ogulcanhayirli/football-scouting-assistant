@@ -359,6 +359,18 @@ def team_rows_to_frame(rows: list[dict]) -> pd.DataFrame:
     frame["is_home"] = frame["is_home"].astype("boolean")
     frame["kickoff"] = pd.to_datetime(frame["kickoff"], utc=True, errors="coerce").dt.as_unit("ns")
     _drop_negative_counts_team(frame)
+    # Some 2021 Asian qualifiers send a total of 0 next to real on target,
+    # off target and blocked counts. That total is wrong; it becomes missing.
+    bad_total = (frame["shots_on"] > frame["shots_total"]).fillna(False)
+    for idx in frame.index[bad_total]:
+        log.warning(
+            "Shots on target %s exceed the total %s for %s in fixture %s; total missing",
+            frame.at[idx, "shots_on"],
+            frame.at[idx, "shots_total"],
+            frame.at[idx, "team_name"],
+            frame.at[idx, "fixture_id"],
+        )
+    frame.loc[bad_total, "shots_total"] = pd.NA
     # In a few older matches the inside/outside split adds up to more than the
     # total (which always equals on target + off target + blocked). The total
     # is kept; the split becomes missing for that row.

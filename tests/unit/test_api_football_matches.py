@@ -337,8 +337,9 @@ def test_team_contract_rejects_impossible_shots(epl):
     from scout.contracts import TEAM_MATCH_STATS
     from scout.providers.api_football.matches import parse_fixture_statistics, team_rows_to_frame
 
-    payload = {"response": [team_block(1, "Test Town", **{"Shots on Goal": 20})]}
+    payload = {"response": [team_block(1, "Test Town")]}
     frame = team_rows_to_frame(parse_fixture_statistics(fixture(99), payload, epl))
+    frame.loc[0, "shots_on"] = 20  # past the adapter repair
     with pytest.raises(pandera.errors.SchemaErrors, match="shots_on must not exceed"):
         validate(TEAM_MATCH_STATS, frame)
 
@@ -503,3 +504,14 @@ def test_inconsistent_shot_split_becomes_missing(epl):
     assert pd.isna(frame.loc[0, "shots_inside_box"])
     assert pd.isna(frame.loc[0, "shots_outside_box"])
     assert frame.loc[0, "shots_total"] == 12
+
+
+def test_zero_total_with_shots_on_target_becomes_missing(epl):
+    from scout.contracts import TEAM_MATCH_STATS
+    from scout.providers.api_football.matches import parse_fixture_statistics, team_rows_to_frame
+
+    payload = {"response": [team_block(1, "Test Town", **{"Total Shots": 0})]}
+    frame = team_rows_to_frame(parse_fixture_statistics(fixture(99), payload, epl))
+    validate(TEAM_MATCH_STATS, frame)
+    assert pd.isna(frame.loc[0, "shots_total"])
+    assert frame.loc[0, "shots_on"] > 0
