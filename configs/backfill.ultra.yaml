@@ -50,6 +50,28 @@ leagues:
     name: Championship
     api_football_id: 40
     transfermarkt_id: GB2
+  # Added for more seller leagues: the five other leagues with full
+  # Transfermarkt history (values for every season). Ids checked against the API.
+  - key: scottish_premiership
+    name: Scottish Premiership
+    api_football_id: 179
+    transfermarkt_id: SC1
+  - key: danish_superliga
+    name: Danish Superliga
+    api_football_id: 119
+    transfermarkt_id: DK1
+  - key: greek_super_league
+    name: Greek Super League
+    api_football_id: 197
+    transfermarkt_id: GR1
+  - key: russian_premier_league
+    name: Russian Premier League
+    api_football_id: 235
+    transfermarkt_id: RU1
+  - key: ukrainian_premier_league
+    name: Ukrainian Premier League
+    api_football_id: 333
+    transfermarkt_id: UKR1
 
 # Cups and national team competitions: per match player and team stats only.
 # They add columns to the players' league rows, counted by match date.
