@@ -260,6 +260,22 @@ INJURIES = DataFrameSchema(
     name="injuries",
 )
 
+TRANSFERS = DataFrameSchema(
+    {
+        "source_player_id": Column("Int64", Check.gt(0)),
+        "transfer_date": Column("datetime64[ns]"),
+        "team_out_id": Column("Int64", Check.gt(0), nullable=True),
+        "team_in_id": Column("Int64", Check.gt(0), nullable=True),
+        "type_raw": Column(str, nullable=True),
+        "kind": Column(str, Check.isin(["fee", "loan", "loan_return", "free", "unknown"])),
+        "fee_eur": Column("Float64", Check.ge(0), nullable=True),
+    },
+    unique=["source_player_id", "transfer_date", "team_out_id", "team_in_id"],
+    strict=False,
+    coerce=False,
+    name="transfers",
+)
+
 
 def validate(schema: DataFrameSchema, frame: pd.DataFrame) -> pd.DataFrame:
     """Validate lazily so one run reports every violation, not just the first."""
@@ -275,6 +291,7 @@ __all__ = [
     "PLAYER_SEASON_LABELS",
     "PLAYER_SEASON_STATS",
     "TEAM_MATCH_STATS",
+    "TRANSFERS",
     "VALUATIONS",
     "pa",
     "validate",

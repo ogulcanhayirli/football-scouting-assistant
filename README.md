@@ -115,6 +115,13 @@ uv run scout --config configs/backfill.pro.yaml backfill
 
 # Per match player stats (one request per match), for seasons that have them
 uv run scout --config configs/backfill.ultra.yaml backfill --level match
+# The same per match for team stats, lineups; per league season for injuries;
+# add --scope competitions for the cups and national team competitions
+uv run scout --config configs/backfill.ultra.yaml backfill --level team
+uv run scout --config configs/backfill.ultra.yaml backfill --level lineup
+uv run scout --config configs/backfill.ultra.yaml backfill --level injuries
+# Transfer history, one request per club in the downloaded leagues (about 640)
+uv run scout --config configs/backfill.ultra.yaml backfill --level transfers
 
 # Point in time feature and label tables (needs the Transfermarkt snapshot)
 uv run scout --config configs/backfill.ultra.yaml features

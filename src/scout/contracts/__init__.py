@@ -15,6 +15,7 @@ from scout.contracts.schemas import (
     PLAYER_SEASON_STATS,
     PLAYERS,
     TEAM_MATCH_STATS,
+    TRANSFERS,
     VALUATIONS,
     validate,
 )
@@ -28,6 +29,7 @@ __all__ = [
     "PLAYER_SEASON_LABELS",
     "PLAYER_SEASON_STATS",
     "TEAM_MATCH_STATS",
+    "TRANSFERS",
     "VALUATIONS",
     "validate",
 ]

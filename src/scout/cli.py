@@ -51,6 +51,23 @@ def cmd_backfill(settings: Settings, args: argparse.Namespace) -> int:
 
     with build_client(settings) as client:
         provider = ApiFootballStatsProvider(client)
+        if args.level == "transfers":
+            from scout.backfill.transfers import run_transfer_backfill
+            from scout.providers.api_football.transfers import ApiFootballTransferProvider
+
+            result = run_transfer_backfill(
+                settings, ApiFootballTransferProvider(client), league_keys=args.league
+            )
+            logging.getLogger(__name__).info(
+                "Transfers: %s, %d/%d clubs, %d rows, %d requests %s",
+                result.status,
+                result.clubs_done,
+                result.clubs_total,
+                result.rows,
+                result.requests_made,
+                result.detail,
+            )
+            return 0 if result.complete else 2
         if args.level == "injuries":
             from scout.backfill.matches import run_injury_backfill, write_match_report
             from scout.providers.api_football.matches import ApiFootballMatchProvider
@@ -323,11 +340,12 @@ def main(argv: list[str] | None = None) -> int:
     backfill.add_argument("--season", action="append", type=int, help="Season; repeatable")
     backfill.add_argument(
         "--level",
-        choices=["season", "match", "team", "lineup", "injuries"],
+        choices=["season", "match", "team", "lineup", "injuries", "transfers"],
         default="season",
         help="season: /players totals (default); match: /fixtures/players per match; "
         "team: /fixtures/statistics per match; lineup: /fixtures/lineups per match; "
-        "injuries: /injuries per league season",
+        "injuries: /injuries per league season; "
+        "transfers: /transfers once per club in the downloaded leagues",
     )
     backfill.add_argument(
         "--scope",
