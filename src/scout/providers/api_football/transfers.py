@@ -5,9 +5,12 @@ career of moves (not only the moves involving this club), so the same
 transfer arrives once per club the player passed through. Rows are
 deduplicated on player, date and both clubs.
 
-``type`` is free text: a fee ("€ 25M", "€ 750K"), "Loan", "Back from Loan",
-"Free", "N/A" or "-". It is kept as sent in ``type_raw`` and read into
-``kind`` and, for euro fees, ``fee_eur``.
+``type`` is free text. Seen in real responses: fees written "€ 25M",
+"25M €" or "6.5M"; "Transfer" (a permanent move, fee not given); "Loan";
+"Back from Loan", "Return from loan", "End of Loan"; "Free", "Free agent",
+"Free Transfer", "Free €"; "Raise" (from the youth team), "Swap",
+"End of career"; "N/A" and "-". It is kept as sent in ``type_raw`` and read
+into ``kind`` and, for fees in euros, ``fee_eur``.
 """
 
 from __future__ import annotations
@@ -22,7 +25,12 @@ from scout.providers.api_football.client import SOURCE, ApiFootballClient
 
 log = logging.getLogger(__name__)
 
-TRANSFER_KINDS = ["fee", "loan", "loan_return", "free", "unknown"]
+TRANSFER_KINDS = ["transfer", "loan", "loan_return", "free", "other", "unknown"]
+OTHER_TYPES = {"raise", "swap", "end of career"}
+# Some moves carry a placeholder year (1926 for moves made in 2024 and 2025).
+EARLIEST_DATE = pd.Timestamp("1950-01-01")
+# The same move listed twice a few weeks apart (C. Kelleher, 3 and 30 June 2025).
+REPEAT_DAYS = 60
 TRANSFER_COLUMNS = [
     "source",
     "source_player_id",
@@ -38,7 +46,9 @@ TRANSFER_COLUMNS = [
 ]
 TRANSFER_KEY = ["source_player_id", "transfer_date", "team_out_id", "team_in_id"]
 
-_FEE = re.compile(r"^\s*€\s*([0-9]+(?:[.,][0-9]+)?)\s*([MK]?)\s*$", re.IGNORECASE)
+_AMOUNT = r"([0-9]+(?:[.,][0-9]+)?)\s*([MK]?)"
+_FEE_EUR = re.compile(rf"^\s*(?:€\s*{_AMOUNT}|{_AMOUNT}\s*€)\s*$", re.IGNORECASE)
+_FEE_ANY = re.compile(r"^\s*[€$£]?\s*[0-9]+(?:[.,][0-9]+)?\s*[MK]?\s*[€$£]?\s*$", re.IGNORECASE)
 
 
 class ApiFootballTransferProvider:
@@ -50,13 +60,13 @@ class ApiFootballTransferProvider:
 
 
 def parse_fee_eur(type_raw: str | None) -> float | None:
-    """'€ 25M' -> 25_000_000.0; anything that is not a euro amount -> None."""
-    match = _FEE.match(type_raw or "")
+    """'€ 25M' or '25M €' -> 25_000_000.0; anything not marked as euros -> None."""
+    match = _FEE_EUR.match(type_raw or "")
     if not match:
         return None
-    amount = float(match.group(1).replace(",", "."))
-    unit = match.group(2).upper()
-    return amount * {"M": 1e6, "K": 1e3, "": 1.0}[unit]
+    groups = [g for g in match.groups() if g is not None]
+    amount, unit = float(groups[0].replace(",", ".")), (groups[1] if len(groups) > 1 else "")
+    return amount * {"M": 1e6, "K": 1e3, "": 1.0}[unit.upper()]
 
 
 def transfer_kind(type_raw: str | None) -> str:
@@ -65,8 +75,10 @@ def transfer_kind(type_raw: str | None) -> str:
         return "loan_return" if ("back" in text or "return" in text or "end" in text) else "loan"
     if text.startswith("free"):
         return "free"
-    if parse_fee_eur(type_raw) is not None or re.match(r"^[€$£]\s*[0-9]", text):
-        return "fee"
+    if text == "transfer" or _FEE_ANY.match(text):
+        return "transfer"
+    if text in OTHER_TYPES:
+        return "other"
     return "unknown"
 
 
@@ -100,8 +112,11 @@ def parse_transfers(payload: dict[str, Any]) -> list[dict]:
 def transfer_rows_to_frame(rows: list[dict]) -> pd.DataFrame:
     """Typed, deduplicated transfers. Source errors are logged and repaired:
 
-    * rows without a player id, or with a date that can't be read, are dropped
+    * rows without a player id, or with a date that can't be read or lies
+      before 1950 (a placeholder year), are dropped
     * a club id of 0 or below means "unknown club" and becomes missing
+    * the same move (player and both clubs) listed again within 60 days is
+      kept once, at its first date
     """
     frame = pd.DataFrame(rows, columns=TRANSFER_COLUMNS)
     for column in ["source_player_id", "team_out_id", "team_in_id"]:
@@ -113,13 +128,19 @@ def transfer_rows_to_frame(rows: list[dict]) -> pd.DataFrame:
         frame["transfer_date"], errors="coerce", format="%Y-%m-%d"
     ).astype("datetime64[ns]")
     no_id = frame["source_player_id"].isna() | (frame["source_player_id"] <= 0).fillna(True)
-    no_date = frame["transfer_date"].isna()
+    no_date = frame["transfer_date"].isna() | (frame["transfer_date"] < EARLIEST_DATE)
     if no_id.any() or no_date.any():
         log.warning(
-            "Dropping %d transfers without a player id and %d without a readable date",
+            "Dropping %d transfers without a player id and %d without a usable date",
             int(no_id.sum()),
             int((no_date & ~no_id).sum()),
         )
     frame = frame[~(no_id | no_date)]
     frame = frame.drop_duplicates(TRANSFER_KEY, keep="first")
-    return frame.sort_values(TRANSFER_KEY[:2], kind="stable").reset_index(drop=True)
+    frame = frame.sort_values(TRANSFER_KEY[:2], kind="stable")
+    move = ["source_player_id", "team_out_id", "team_in_id"]
+    gap = frame.groupby(move, dropna=False)["transfer_date"].diff()
+    repeat = (gap <= pd.Timedelta(days=REPEAT_DAYS)).fillna(False)
+    if repeat.any():
+        log.warning("Dropping %d moves listed again within %d days", int(repeat.sum()), REPEAT_DAYS)
+    return frame[~repeat].reset_index(drop=True)

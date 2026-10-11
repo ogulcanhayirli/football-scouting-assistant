@@ -50,14 +50,25 @@ def payload(*players):
 @pytest.mark.parametrize(
     ("raw", "fee", "kind"),
     [
-        ("€ 25M", 25e6, "fee"),
-        ("€ 750K", 750e3, "fee"),
-        ("€ 2.5M", 2.5e6, "fee"),
-        ("$ 3M", None, "fee"),
+        ("€ 25M", 25e6, "transfer"),
+        ("€ 750K", 750e3, "transfer"),
+        ("€ 2.5M", 2.5e6, "transfer"),
+        ("35.4M €", 35.4e6, "transfer"),
+        ("800K €", 800e3, "transfer"),
+        ("6.5M", None, "transfer"),  # amount without a currency
+        ("$ 3M", None, "transfer"),
+        ("Transfer", None, "transfer"),
         ("Loan", None, "loan"),
         ("Back from Loan", None, "loan_return"),
+        ("Return from loan", None, "loan_return"),
+        ("End of Loan", None, "loan_return"),
         ("Free", None, "free"),
+        ("Free agent", None, "free"),
         ("Free Transfer", None, "free"),
+        ("Free €", None, "free"),
+        ("Raise", None, "other"),
+        ("Swap", None, "other"),
+        ("End of career", None, "other"),
         ("N/A", None, "unknown"),
         ("-", None, "unknown"),
         (None, None, "unknown"),
@@ -75,14 +86,14 @@ def test_the_same_move_seen_from_two_clubs_is_kept_once():
     frame = transfer_rows_to_frame(rows)
     validate(TRANSFERS, frame)
     assert len(frame) == 2
-    assert frame["kind"].tolist() == ["fee", "loan"]
+    assert frame["kind"].tolist() == ["transfer", "loan"]
     assert frame.loc[0, "fee_eur"] == 25e6
 
 
 def test_rows_without_player_or_readable_date_are_dropped_and_unknown_clubs_missing(caplog):
     rows = parse_transfers(
         payload(
-            (7, [move("2019-07-01", 0, 2), move("not a date", 1, 2)]),
+            (7, [move("2019-07-01", 0, 2), move("not a date", 1, 2), move("1926-01-20", 3, 4)]),
             (None, [move("2020-07-01", 1, 2)]),
         )
     )
@@ -91,6 +102,23 @@ def test_rows_without_player_or_readable_date_are_dropped_and_unknown_clubs_miss
     assert len(frame) == 1
     assert pd.isna(frame.loc[0, "team_out_id"])
     assert any("Dropping" in m for m in caplog.messages)
+
+
+def test_the_same_move_listed_again_within_weeks_is_kept_once():
+    rows = parse_transfers(
+        payload(
+            (
+                7,
+                [
+                    move("2025-06-03", 1, 2, "Transfer"),
+                    move("2025-06-30", 1, 2, "Transfer"),
+                    move("2027-07-01", 1, 2, "Transfer"),  # a real second move back
+                ],
+            )
+        )
+    )
+    frame = transfer_rows_to_frame(rows)
+    assert frame["transfer_date"].dt.strftime("%Y-%m-%d").tolist() == ["2025-06-03", "2027-07-01"]
 
 
 class FakeClient:

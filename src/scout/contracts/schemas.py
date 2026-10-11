@@ -267,7 +267,9 @@ TRANSFERS = DataFrameSchema(
         "team_out_id": Column("Int64", Check.gt(0), nullable=True),
         "team_in_id": Column("Int64", Check.gt(0), nullable=True),
         "type_raw": Column(str, nullable=True),
-        "kind": Column(str, Check.isin(["fee", "loan", "loan_return", "free", "unknown"])),
+        "kind": Column(
+            str, Check.isin(["transfer", "loan", "loan_return", "free", "other", "unknown"])
+        ),
         "fee_eur": Column("Float64", Check.ge(0), nullable=True),
     },
     unique=["source_player_id", "transfer_date", "team_out_id", "team_in_id"],
