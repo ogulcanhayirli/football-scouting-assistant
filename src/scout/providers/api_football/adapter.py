@@ -165,6 +165,8 @@ def _fix_season_source_errors(frame: pd.DataFrame) -> pd.DataFrame:
       2026-10-09 for five players). Any birth date less than 14 years before
       the season starts is stored as missing; left in, it would also break
       matching to Transfermarkt, which blocks on birth date.
+    * A blank position (whitespace only, Scottish Premiership 2012 and 2013)
+      is stored as missing.
     """
     no_team = frame["team_id"].isna()
     for _, row in frame[no_team].iterrows():
@@ -188,6 +190,16 @@ def _fix_season_source_errors(frame: pd.DataFrame) -> pd.DataFrame:
             row["season"],
         )
     frame.loc[too_young.fillna(False), "birth_date"] = pd.NaT
+    blank = frame["position"].notna() & (frame["position"].astype("string").str.strip() == "")
+    for _, row in frame[blank.fillna(False)].iterrows():
+        log.warning(
+            "Blank position for %s (%s) in %s %s; stored as missing",
+            row["player_name"],
+            row["source_player_id"],
+            row["league_key"],
+            row["season"],
+        )
+    frame.loc[blank.fillna(False), "position"] = None
     return frame
 
 

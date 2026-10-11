@@ -270,3 +270,14 @@ def test_rows_without_team_are_dropped_and_placeholder_birth_dates_cleared(
     assert any("no team" in m for m in caplog.messages)
     assert any("impossible" in m for m in caplog.messages)
     validate(PLAYER_SEASON_STATS, frame)
+
+
+def test_blank_position_becomes_missing(load_fixture, epl, caplog):
+    payload = load_fixture("api_football/players_epl_2023_p1.json")
+    payload["response"][0]["statistics"][0]["games"]["position"] = "\n    "
+    player_id = payload["response"][0]["player"]["id"]
+    with caplog.at_level(logging.WARNING):
+        frame = rows_to_frame(parse_players_page(payload, epl, 2023))
+    assert frame.loc[frame["source_player_id"] == player_id, "position"].isna().all()
+    assert any("Blank position" in m for m in caplog.messages)
+    validate(PLAYER_SEASON_STATS, frame)
