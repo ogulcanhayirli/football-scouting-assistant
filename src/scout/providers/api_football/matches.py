@@ -177,6 +177,8 @@ def _fix_source_errors(frame: pd.DataFrame) -> pd.DataFrame:
       often in this frame is kept, the other dropped;
     * a player credited with more goals than the team scored: the goal count
       becomes missing, because either number could be the wrong one;
+    * more successful dribbles than attempts (Brasileirão 2022, two players):
+      both counts become missing, because either could be the wrong one;
     * a position other than G, D, M or F ("SUB", "-") becomes missing.
     """
     no_id = frame["source_player_id"].isna() | (frame["source_player_id"] <= 0)
@@ -224,6 +226,16 @@ def _fix_source_errors(frame: pd.DataFrame) -> pd.DataFrame:
             frame.at[idx, "fixture_id"],
         )
     frame.loc[too_many.fillna(False), "goals"] = pd.NA
+    bad_dribbles = (frame["dribbles_success"] > frame["dribbles_attempts"]).fillna(False)
+    for idx in frame.index[bad_dribbles]:
+        log.warning(
+            "Dribbles success %s exceeds attempts %s for %s in fixture %s; both missing",
+            frame.at[idx, "dribbles_success"],
+            frame.at[idx, "dribbles_attempts"],
+            frame.at[idx, "player_name"],
+            frame.at[idx, "fixture_id"],
+        )
+    frame.loc[bad_dribbles, ["dribbles_success", "dribbles_attempts"]] = pd.NA
     unknown = frame["position"].notna() & ~frame["position"].isin(["G", "D", "M", "F"])
     frame.loc[unknown, "position"] = None  # "SUB" and "-" are placeholders, not positions
     return frame.reset_index(drop=True)

@@ -515,3 +515,15 @@ def test_zero_total_with_shots_on_target_becomes_missing(epl):
     validate(TEAM_MATCH_STATS, frame)
     assert pd.isna(frame.loc[0, "shots_total"])
     assert frame.loc[0, "shots_on"] > 0
+
+
+def test_more_successful_dribbles_than_attempts_become_missing(epl, caplog):
+    payload = players_payload(
+        [player(10, "Caio Synthetic", dribbles__attempts=2, dribbles__success=3)], []
+    )
+    with caplog.at_level(logging.WARNING):
+        frame = match_rows_to_frame(parse_fixture_players(fixture(99), payload, epl))
+    validate(PLAYER_MATCH_STATS, frame)
+    assert pd.isna(frame.loc[0, "dribbles_success"])
+    assert pd.isna(frame.loc[0, "dribbles_attempts"])
+    assert any("Dribbles success" in m for m in caplog.messages)
