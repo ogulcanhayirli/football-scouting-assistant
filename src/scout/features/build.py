@@ -19,16 +19,23 @@ and current market value. They describe the player on the snapshot date
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
 
+log = logging.getLogger(__name__)
+
 MATCH_TIER_FROM = 2015  # first season with per match player stats in both leagues
 REGULAR_MINUTES = 450
 VALUE_MAX_AGE_DAYS = 365
 FORM_MATCHES = 10
-RECORDED_SHARE = 0.5  # a stat counts as recorded in a season above this share
+RECORDED_SHARE = 0.5
+MIN_AGE, MAX_AGE = (
+    14,
+    46,
+)  # the contract's range  # a stat counts as recorded in a season above this share
 
 # Counts summed over matches and turned into per 90 rates.
 COUNT_STATS = [
@@ -322,6 +329,17 @@ def profile_features(inputs: Inputs, rows: pd.DataFrame) -> pd.DataFrame:
     out = out.join(tm, on="tm_player_id")
     birth = out["af_birth_date"].fillna(out["tm_birth_date"])
     out["age"] = (out["feature_date"] - birth).dt.days / 365.25
+    # A birth date giving an age outside 14 to 46 belongs to someone else (a
+    # young "Dida" in Brasileirão 2019 got the 1973 birth date of the keeper).
+    implausible = ~out["age"].between(MIN_AGE, MAX_AGE) & out["age"].notna()
+    if implausible.any():
+        log.warning(
+            "Age outside %d to %d for %d rows; stored as missing",
+            MIN_AGE,
+            MAX_AGE,
+            int(implausible.sum()),
+        )
+    out.loc[implausible, "age"] = np.nan
     out["height_cm"] = out["af_height_cm"].fillna(out["tm_height_cm"])
     return out.drop(columns=["af_birth_date", "tm_birth_date", "af_height_cm", "tm_height_cm"])
 

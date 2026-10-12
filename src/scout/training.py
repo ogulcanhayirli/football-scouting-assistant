@@ -16,6 +16,7 @@ show exactly what would be sent without calling AWS.
 
 from __future__ import annotations
 
+import gzip
 import hashlib
 import io
 import logging
@@ -93,7 +94,12 @@ def build_source_package(root: Path = ROOT) -> tuple[bytes, str]:
     """The ``sourcedir.tar.gz`` bytes and a short content hash. Deterministic:
     fixed order, timestamps and owners, so the same files give the same hash."""
     buffer = io.BytesIO()
-    with tarfile.open(fileobj=buffer, mode="w:gz", compresslevel=9) as tar:
+    # The gzip header carries a timestamp too; fix it at 0, or two builds a
+    # second apart differ.
+    with (
+        gzip.GzipFile(fileobj=buffer, mode="wb", compresslevel=9, mtime=0) as gz,
+        tarfile.open(fileobj=gz, mode="w") as tar,
+    ):
         for name, source in sorted(PACKAGE_FILES.items()):
             data = (root / source).read_bytes()
             info = tarfile.TarInfo(name)

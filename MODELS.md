@@ -115,6 +115,25 @@ What it says:
   check is to tune on test seasons up to 2019 only and score the frozen
   settings on 2020 to 2022.
 
+## More leagues, same features (October 2026)
+
+The data grew from 2 to 17 leagues (the other top four, the Championship,
+three feeder leagues, Scotland, Denmark, Greece, Russia, Ukraine, Brazil and
+Argentina), the feature code unchanged. Compared on the **same EPL and Süper
+Lig test rows** as above (labels checked identical), untuned LightGBM:
+
+| Target | MAE before | MAE now | Rank corr. before | Rank corr. now | Baseline MAE |
+|---|---|---|---|---|---|
+| fair value | 0.536 | **0.456** | 0.907 | **0.935** | 0.835 |
+| growth 24m | 0.573 | **0.550** | 0.456 | **0.498** | 0.564 |
+| growth 36m | 0.697 | **0.680** | 0.502 | **0.522** | 0.710 |
+
+More players to learn from helps every target. Untuned trees now beat the
+baseline on 24 month growth too, which before only the tuned model did.
+Across all 17 leagues, fair value errors are lowest in the big five and the
+feeder leagues (about 0.42 to 0.46) and highest in Argentina (0.60) and
+Ukraine (0.64), where values are thinnest.
+
 ## Next
 
 1. The clean check above: tune on earlier seasons, score on later ones.

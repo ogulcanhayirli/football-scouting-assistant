@@ -297,6 +297,17 @@ def test_build_features_end_to_end():
     assert by.loc[(2023, 10), "value_date"] <= by.loc[(2023, 10), "feature_date"]
 
 
+def test_a_birth_date_giving_an_impossible_age_is_ignored():
+    inputs = _inputs()
+    inputs.season_stats.loc[1, "birth_date"] = pd.Timestamp("1973-01-01")  # someone else's
+    inputs.tm_players.loc[1, "birth_date"] = pd.Timestamp("1973-01-01")
+    features, _ = build_features(inputs)
+    validate(PLAYER_SEASON_FEATURES, features)
+    by = features.set_index(["season", "source_player_id"])
+    assert pd.isna(by.loc[(2023, 11), "age"])
+    assert by.loc[(2023, 10), "age"] == pytest.approx(24.5, abs=0.01)
+
+
 def test_contract_catches_a_value_from_after_the_feature_date():
     features, _ = build_features(_inputs())
     features.loc[0, "value_date"] = features.loc[0, "feature_date"] + pd.Timedelta(days=1)
