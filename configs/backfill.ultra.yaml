@@ -72,6 +72,18 @@ leagues:
     name: Ukrainian Premier League
     api_football_id: 333
     transfermarkt_id: UKR1
+  # South America: the two biggest exporters to Europe. Calendar year seasons
+  # (season 2023 runs from spring to December 2023). Transfermarkt covers their
+  # games only from 2024, so values for earlier seasons exist mainly for
+  # players who later moved to a covered league. Ids checked against the API.
+  - key: brasileirao
+    name: Brasileirão Série A
+    api_football_id: 71
+    transfermarkt_id: BRA1
+  - key: liga_profesional
+    name: Liga Profesional Argentina
+    api_football_id: 128
+    transfermarkt_id: ARG1
 
 # Cups and national team competitions: per match player and team stats only.
 # They add columns to the players' league rows, counted by match date.
@@ -79,6 +91,8 @@ competitions:
   - {key: champions_league, name: UEFA Champions League, api_football_id: 2, kind: club}
   - {key: europa_league, name: UEFA Europa League, api_football_id: 3, kind: club}
   - {key: conference_league, name: UEFA Conference League, api_football_id: 848, kind: club}
+  - {key: copa_libertadores, name: CONMEBOL Libertadores, api_football_id: 13, kind: club}
+  - {key: copa_sudamericana, name: CONMEBOL Sudamericana, api_football_id: 11, kind: club}
   - {key: world_cup, name: World Cup, api_football_id: 1, kind: national}
   - {key: euro, name: Euro Championship, api_football_id: 4, kind: national}
   - {key: nations_league, name: UEFA Nations League, api_football_id: 5, kind: national}

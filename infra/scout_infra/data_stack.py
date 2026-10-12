@@ -57,6 +57,8 @@ LEAGUES = [
     "greek_super_league",
     "russian_premier_league",
     "ukrainian_premier_league",
+    "brasileirao",
+    "liga_profesional",
 ]
 SEASON_RANGE = (2010, 2030)
 BYTES_SCANNED_CUTOFF = 1024**3  # 1 GB per query; the whole feature set is about 6 MB

@@ -18,7 +18,7 @@ def test_committed_configs_load(name):
     assert len({lg.api_football_id for lg in settings.leagues}) == len(keys)
     assert settings.league("super_lig").api_football_id == 203
     if name == "backfill.ultra.yaml":
-        assert len(keys) == 15
+        assert len(keys) == 17
 
 
 def test_free_config_matches_free_tier_limits():
