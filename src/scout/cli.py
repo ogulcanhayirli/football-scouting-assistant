@@ -209,6 +209,13 @@ def cmd_moves(settings: Settings, args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_scouting(settings: Settings, args: argparse.Namespace) -> int:
+    from scout.scouting import run_scouting
+
+    run_scouting(settings)
+    return 0
+
+
 def cmd_backtest(settings: Settings, args: argparse.Namespace) -> int:
     from scout.models.run import run_all
     from scout.models.targets import TARGETS
@@ -410,6 +417,12 @@ def main(argv: list[str] | None = None) -> int:
         "moves", help="Big move model: backtest, report and shortlist (reports/moves.md)"
     )
     moves.set_defaults(func=cmd_moves)
+
+    scouting = sub.add_parser(
+        "scouting",
+        help="League strength, ability, targets, traits, shortlists (reports/scouting.md)",
+    )
+    scouting.set_defaults(func=cmd_scouting)
 
     sync = sub.add_parser("sync", help="Copy data/raw and data/processed to or from S3")
     sync.add_argument("direction", choices=["up", "down"])
