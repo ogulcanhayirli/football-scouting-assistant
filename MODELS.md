@@ -134,6 +134,33 @@ Across all 17 leagues, fair value errors are lowest in the big five and the
 feeder leagues (about 0.42 to 0.46) and highest in Argentina (0.60) and
 Ukraine (0.64), where values are thinnest.
 
+## Context features (cups, team strength, injuries, transfers)
+
+Same comparison, now between the plain features above (v1) and v1 plus the
+context features (v2, FEATURES.md), on test rows whose label is identical in
+both (Brazil and Argentina left out: their feature dates moved to January).
+MAE in log units and rank correlation, untuned LightGBM:
+
+| Target | Rows | v1 MAE | v2 MAE | v1 rank | v2 rank |
+|---|---|---|---|---|---|
+| fair value, EPL and Süper Lig | 9,832 | 0.456 | **0.391** | 0.935 | **0.951** |
+| fair value, all leagues | 64,780 | 0.461 | **0.392** | 0.903 | **0.930** |
+| growth 24m, EPL and Süper Lig | 6,332 | 0.550 | 0.552 | 0.498 | 0.490 |
+| growth 24m, all leagues | 40,415 | 0.537 | 0.537 | 0.553 | 0.556 |
+| growth 36m, all leagues | 29,674 | 0.658 | 0.661 | 0.589 | 0.586 |
+
+* **Fair value gains a lot**, mostly from transfer fees (16% of the model's
+  gain: the last fee and the highest fee so far), team strength (6%) and cup
+  and national team minutes (5%). A fee paid before the feature date is
+  public information, so this is not a leak, but it means the fair value
+  model partly learns what a player last cost.
+* **Growth does not move.** Age still carries half of that model; the new
+  columns add under 5% between them and no accuracy. What a player did in
+  the last year says little about whether his value will jump in the next
+  two; that is the question the move model (next) asks more directly.
+* Brazil and Argentina, with their January feature dates: fair value MAE
+  0.518 (baseline 0.869), growth 24m 0.563 (baseline 0.706).
+
 ## Next
 
 1. The clean check above: tune on earlier seasons, score on later ones.

@@ -58,10 +58,15 @@ new records show up after about 5 to 15 minutes.
 Every row describes a player **as of its `feature_date`** and uses nothing
 dated after it. The feature date is the later of 30 June and the day after
 the season's last league match; that is 27 July 2020 for 2019/20, because of
-the COVID restart, and 30 June otherwise.
+the COVID restart, and 30 June otherwise. Brazil and Argentina play calendar
+year seasons, so for them the floor is 1 January of the next year (the day
+after the last match when that is later: Brasileirão 2020 ended in February
+2021).
 
-Two audit columns let the contract check the rule on every build:
-`last_match_date` and `value_date` must not be after `feature_date`.
+Audit columns let the contract check the rule on every build:
+`last_match_date` and `value_date` must not be after `feature_date`;
+`prev_feature_date`, `last_comp_match_date`, `last_injury_date` and
+`last_transfer_date` must be before it.
 Transfermarkt's contract expiry, international caps and current value are
 not used at all: they describe 2026, not the feature date.
 
@@ -127,6 +132,51 @@ blank.
 | `market_value_1y_before` | the same, one year earlier |
 | `value_change_1y` | `market_value` divided by `market_value_1y_before` |
 | `market_value_max_to_date` | highest value up to the feature date |
+
+**Cups and national teams, the 12 months before the feature date**
+
+| Column | Meaning |
+|---|---|
+| `club_cup_minutes_12m`, `club_cup_matches_12m` | Champions, Europa, Conference League, Libertadores, Sudamericana |
+| `club_cup_ga_per90_12m`, `club_cup_rating_12m` | goals plus assists per 90 and minute weighted rating in them |
+| `ucl_minutes_12m` | Champions League minutes alone |
+| `intl_minutes_12m`, `intl_matches_12m`, `intl_ga_12m` | national team: tournaments, qualifiers, Nations League, friendlies |
+
+Missing (not 0) until the data covers the whole window: European cups from
+2015, South American cups from 2019 (by the league's `region`), national
+teams from the first match in the data. National team data has gaps the API
+leaves: no Euro qualifiers at all, and no qualifiers for the 2026 World Cup,
+so recent seasons undercount international minutes for everyone.
+
+**Team strength (`team_match_stats`), league matches before the feature date**
+
+| Column | Meaning |
+|---|---|
+| `team_possession`, `team_pass_accuracy` | means per match |
+| `team_shots_pm`, `team_shots_against_pm`, `team_shot_share` | shots for and against per match, share of all shots |
+| `team_xg_pm`, `team_xga_pm` | xG for and against per match, from 2023/24 only |
+
+**Injuries, the 12 months before the feature date, every league and cup**
+
+| Column | Meaning |
+|---|---|
+| `injury_matches_missed_12m` | matches missed injured ("Missing Fixture"); suspensions and absences left out |
+| `injury_spells_12m` | separate spells: more than 30 days between missed matches starts a new one |
+
+Missing where the row's own league season has no injury data (before
+2020/21, and some leagues only from 2025).
+
+**Transfers (API Football `/transfers`), moves dated before the feature date**
+
+| Column | Meaning |
+|---|---|
+| `career_moves`, `career_loans`, `career_paid_moves` | counts; a paid move has a fee in euros |
+| `moves_last_2y` | moves in the two years before |
+| `days_since_last_move`, `last_move_kind` | time since, and kind of, the last move |
+| `last_fee_eur`, `max_fee_eur_to_date` | fee of the last move, highest fee so far |
+| `on_loan` | 1 when the last move was a loan out |
+
+Missing for players the API lists no transfers for at all.
 
 ## Label columns
 

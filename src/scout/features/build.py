@@ -20,10 +20,12 @@ and current market value. They describe the player on the snapshot date
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 import pandas as pd
+
+from scout.features import context
 
 log = logging.getLogger(__name__)
 
@@ -76,22 +78,40 @@ RATES = {
 @dataclass(frozen=True)
 class Inputs:
     season_stats: pd.DataFrame  # player_season_stats, all seasons
-    match_stats: pd.DataFrame  # player_match_stats
+    match_stats: pd.DataFrame  # player_match_stats, leagues only
     links: pd.DataFrame  # af_player_id, tm_player_id
     tm_players: pd.DataFrame  # Transfermarkt players (canonical columns)
     valuations: pd.DataFrame  # source_player_id, valuation_date, market_value_eur
     data_end: pd.Timestamp  # last date the valuation data covers
+    # Context sources; empty frames leave their columns missing.
+    comp_matches: pd.DataFrame = field(default_factory=pd.DataFrame)  # cups, national teams
+    team_stats: pd.DataFrame = field(default_factory=pd.DataFrame)  # team_match_stats, leagues
+    injuries: pd.DataFrame = field(default_factory=pd.DataFrame)
+    transfers: pd.DataFrame = field(default_factory=pd.DataFrame)
+    comps: dict = field(default_factory=dict)  # competition key -> (kind, region)
+    league_regions: dict = field(default_factory=dict)  # league key -> region
+    calendar_leagues: frozenset = frozenset()  # leagues whose season is a calendar year
 
 
 # Feature dates
 
 
-def feature_dates(season_stats: pd.DataFrame, match_stats: pd.DataFrame) -> pd.DataFrame:
-    """league_key, season, feature_date for every league season."""
+def feature_dates(
+    season_stats: pd.DataFrame,
+    match_stats: pd.DataFrame,
+    calendar_leagues: frozenset = frozenset(),
+) -> pd.DataFrame:
+    """league_key, season, feature_date for every league season.
+
+    Calendar year leagues (Brazil, Argentina) end in December, so their
+    floor is 1 January of the next year instead of 30 June; a season that
+    ran late (Brasileirão 2020 ended in February 2021) moves past it.
+    """
     keys = season_stats[["league_key", "season"]].drop_duplicates()
-    keys = keys.assign(
-        feature_date=pd.to_datetime((keys["season"].astype(int) + 1).astype(str) + "-06-30")
-    )
+    next_year = (keys["season"].astype(int) + 1).astype(str)
+    calendar = keys["league_key"].isin(calendar_leagues)
+    floor = (next_year + "-06-30").where(~calendar, next_year + "-01-01")
+    keys = keys.assign(feature_date=pd.to_datetime(floor))
     if not match_stats.empty:
         last = (
             match_stats.groupby(["league_key", "season"])["kickoff"]
@@ -502,7 +522,7 @@ def history_features(rows: pd.DataFrame) -> pd.DataFrame:
 def build_features(inputs: Inputs) -> tuple[pd.DataFrame, pd.DataFrame]:
     """The feature table and the label table, one row per league, season and player."""
     keys = ["league_key", "season", "source_player_id"]
-    dates = feature_dates(inputs.season_stats, inputs.match_stats)
+    dates = feature_dates(inputs.season_stats, inputs.match_stats, inputs.calendar_leagues)
 
     match_part = inputs.match_stats[inputs.match_stats["season"] >= MATCH_TIER_FROM]
     detailed = match_tier_features(match_part, dates).assign(tier="match")
@@ -527,8 +547,36 @@ def build_features(inputs: Inputs) -> tuple[pd.DataFrame, pd.DataFrame]:
     rows = rows.merge(history_features(rows), on=keys, how="left")
     rows = rows.reset_index(drop=True)
     rows = pd.concat([rows, value_features(rows, inputs.valuations)], axis=1)
+    rows = add_context(rows, inputs, dates)
     label_table = labels(rows, inputs.valuations, inputs.data_end)
     return _order(rows), label_table
+
+
+def add_context(rows: pd.DataFrame, inputs: Inputs, dates: pd.DataFrame) -> pd.DataFrame:
+    """Cup and national team minutes, team strength, injuries and transfers."""
+    keys = ["league_key", "season", "team_id"]
+    strength = context.team_strength(inputs.team_stats, dates)
+    strength["season"] = strength["season"].astype("Int64")
+    strength["team_id"] = strength["team_id"].astype("Int64")
+    rows = rows.assign(
+        season=rows["season"].astype("Int64"), team_id=rows["team_id"].astype("Int64")
+    )
+    rows = rows.merge(strength, on=keys, how="left").reset_index(drop=True)
+    covered = set()
+    if not inputs.injuries.empty:
+        pairs = inputs.injuries[["league_key", "season"]].drop_duplicates()
+        covered = {(lg, int(se)) for lg, se in pairs.itertuples(index=False)}
+    return pd.concat(
+        [
+            rows,
+            context.competition_features(
+                rows, inputs.comp_matches, inputs.comps, inputs.league_regions
+            ),
+            context.injury_features(rows, inputs.injuries, covered),
+            context.transfer_features(rows, inputs.transfers),
+        ],
+        axis=1,
+    )
 
 
 FIRST_COLUMNS = [
@@ -560,5 +608,6 @@ def _order(frame: pd.DataFrame) -> pd.DataFrame:
     frame["regular"] = frame["regular"].astype(bool)
     frame["link_rule"] = frame["link_rule"].astype("string")
     frame["prev_league"] = frame["prev_league"].astype("string")
+    frame["last_move_kind"] = frame["last_move_kind"].astype("string")
     frame["career_seasons"] = frame["career_seasons"].astype("Int64")
     return frame.sort_values(["league_key", "season", "source_player_id"]).reset_index(drop=True)

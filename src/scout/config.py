@@ -20,6 +20,13 @@ class LeagueConfig(BaseModel):
     name: str
     api_football_id: int
     transfermarkt_id: str = Field(description="Transfermarkt competition code, e.g. GB1, TR1.")
+    region: Literal["europe", "south_america"] = Field(
+        default="europe", description="Decides which club cups cover its players."
+    )
+    calendar_year: bool = Field(
+        default=False,
+        description="Season runs within one calendar year (Brazil, Argentina), not August to May.",
+    )
 
 
 class QuotaConfig(BaseModel):

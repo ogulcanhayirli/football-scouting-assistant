@@ -8,6 +8,7 @@ from scout.models.backtest import (
     LeakError,
     check_no_leak,
     expanding_folds,
+    fold_season,
     metrics,
     purge,
     run_backtest,
@@ -95,6 +96,33 @@ def test_backtest_predicts_every_later_season_from_the_past_only():
     # The signal is in "skill", which only the tree model sees.
     assert overall.loc["lightgbm", "mae_log"] < overall.loc["group_median", "mae_log"]
     assert overall.loc["lightgbm", "spearman"] > 0.9
+
+
+def test_folds_follow_the_feature_date_so_january_rows_sit_with_the_season_before():
+    dates = pd.Series(
+        pd.to_datetime(["2024-06-30", "2020-07-27", "2025-01-01", "2024-12-10", "2025-06-30"])
+    )
+    assert fold_season(dates).tolist() == [2023, 2019, 2023, 2023, 2024]
+
+
+def test_growth_backtest_with_a_calendar_year_league_purges_only_its_own_rows():
+    data = _dataset(seasons=range(2010, 2020))
+    data["value_24m_date"] = data["feature_date"] + pd.DateOffset(months=24)
+    # A calendar year league: its season 2016 ends in December, feature date January 2017.
+    brazil = _dataset(seed=1, seasons=range(2010, 2020), per_season=30)
+    brazil["league_key"] = pd.Categorical(["brasileirao"] * len(brazil))
+    brazil["feature_date"] = pd.to_datetime((brazil["season"] + 1).astype(str) + "-01-01")
+    brazil["value_24m_date"] = brazil["feature_date"] + pd.DateOffset(months=24)
+    both = pd.concat([data, brazil], ignore_index=True)
+    both["league_key"] = both["league_key"].astype("category")
+    predictions = run_backtest(both, ["age", "skill"], GROWTH, {"group_median": group_median})
+    european = predictions[predictions["league_key"] != "brasileirao"]
+    assert sorted(european["season"].unique()) == list(range(2013, 2020))
+    # Test 2016 (dated June 2017): all European seasons up to 2014 (5 x 120) and
+    # the calendar seasons up to 2015 (6 x 30), less 2015, whose labels (January
+    # 2018) come after June 2017. With folds by season number the European 2014
+    # rows (labels June 2017) would have been purged against the January rows.
+    assert european.loc[european["season"] == 2016, "train_rows"].iloc[0] == 600 + 150
 
 
 def test_group_median_falls_back_to_coarser_groups():

@@ -289,3 +289,16 @@ the test date, and a check on the actual dates before every fold. Random k
 fold would let a model see a player's later seasons and later price levels.
 The simple baseline is reported next to every model. *Would change if* never:
 this is the rule the project's honesty rests on.
+
+**D17. Context features count events by date, not by season.** Cup, national
+team, injury and transfer features count what happened in the 12 months (or
+the career) before the feature date, whichever league or competition it came
+from, and are missing, not 0, where the source does not cover the window.
+*Would change if* a source gained full history, which would only widen the
+covered rows.
+
+**D18. Backtest folds follow the feature date.** A row's fold is the
+European season that ended last before its feature date, so a calendar year
+league's season ending in December (feature date January) sits with the
+European season before it. Folding by season number would make every growth
+label of the European rows two seasons back look late and purge them.

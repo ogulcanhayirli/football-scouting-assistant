@@ -17,6 +17,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from scout.backfill.transfers import transfers_path
 from scout.config import Settings
 from scout.contracts import PLAYER_SEASON_FEATURES, PLAYER_SEASON_LABELS, validate
 from scout.features.build import Inputs, build_features
@@ -57,10 +58,27 @@ def build_links(season_stats: pd.DataFrame, tm_players: pd.DataFrame) -> pd.Data
     return links.reset_index(drop=True)
 
 
+def _split(frame: pd.DataFrame, keys: set[str]) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Rows of the given league keys, and the rest (cups and national teams)."""
+    if frame.empty:
+        return frame, frame
+    mine = frame["league_key"].isin(keys)
+    return frame[mine].reset_index(drop=True), frame[~mine].reset_index(drop=True)
+
+
 def load_inputs(settings: Settings) -> Inputs:
     processed = settings.paths.processed_dir
+    league_keys = {lg.key for lg in settings.leagues}
+    comp_keys = {c.key for c in settings.competitions}
     season_stats = _read_partitions(processed / "player_season_stats")
-    match_stats = _read_partitions(processed / "player_match_stats")
+    match_stats, comp_matches = _split(
+        _read_partitions(processed / "player_match_stats"), league_keys
+    )
+    comp_matches = comp_matches[comp_matches["league_key"].isin(comp_keys)]
+    team_stats, _ = _split(_read_partitions(processed / "team_match_stats"), league_keys)
+    injuries = _read_partitions(processed / "injuries")
+    transfers_file = transfers_path(settings)
+    transfers = pd.read_parquet(transfers_file) if transfers_file.exists() else pd.DataFrame()
     tm = TransfermarktValuationProvider(settings.paths.raw_dir / "transfermarkt")
     tm_players = tm.players(None)
     links = build_links(season_stats, tm_players)
@@ -68,13 +86,32 @@ def load_inputs(settings: Settings) -> Inputs:
     valuations = tm.valuations(None)
     valuations = valuations[valuations["source_player_id"].isin(linked)]
     log.info(
-        "Inputs: %d season rows, %d match rows, %d links, %d valuations",
+        "Inputs: %d season rows, %d league and %d cup match rows, %d team rows, "
+        "%d injuries, %d transfers, %d links, %d valuations",
         len(season_stats),
         len(match_stats),
+        len(comp_matches),
+        len(team_stats),
+        len(injuries),
+        len(transfers),
         len(links),
         len(valuations),
     )
-    return Inputs(season_stats, match_stats, links, tm_players, valuations, TM_DATA_END)
+    return Inputs(
+        season_stats,
+        match_stats,
+        links,
+        tm_players,
+        valuations,
+        TM_DATA_END,
+        comp_matches=comp_matches,
+        team_stats=team_stats,
+        injuries=injuries,
+        transfers=transfers,
+        comps={c.key: (c.kind, c.region) for c in settings.competitions},
+        league_regions={lg.key: lg.region for lg in settings.leagues},
+        calendar_leagues=frozenset(lg.key for lg in settings.leagues if lg.calendar_year),
+    )
 
 
 def _write_partitioned(frame: pd.DataFrame, root: Path) -> int:

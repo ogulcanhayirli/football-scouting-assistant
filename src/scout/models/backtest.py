@@ -82,6 +82,21 @@ def purge(train: pd.DataFrame, test: pd.DataFrame, target: Target) -> pd.DataFra
     return train[~late]
 
 
+def fold_season(feature_date: pd.Series) -> pd.Series:
+    """The season a row is tested and trained with, from its feature date: the
+    European season that ended last. A feature date from June on belongs to
+    the season that just ended (30 June 2024 -> 2023, late July 2020 -> 2019);
+    one before June belongs to the season before that, so a calendar year
+    league whose 2024 season ends in December (feature date January 2025)
+    sits with 2023/24, not with 2024/25, whose rows are dated June 2025.
+
+    Without this the January rows would make every growth label of the
+    European 2022 rows look late for test season 2024 and purge them all.
+    """
+    year = feature_date.dt.year
+    return (year - 1).where(feature_date.dt.month >= 6, year - 2).astype(int)
+
+
 # A model is a function: (train rows, test rows, feature columns) -> predictions.
 Model = Callable[[pd.DataFrame, pd.DataFrame, list[str]], np.ndarray]
 
@@ -91,9 +106,10 @@ def run_backtest(
 ) -> pd.DataFrame:
     """Out of time predictions for every fold and model, one row per test row."""
     out = []
-    for fold in expanding_folds(data["season"].astype(int).tolist(), target):
-        train = data[data["season"].isin(fold.train_seasons)]
-        test = data[data["season"] == fold.test_season]
+    folds = fold_season(data["feature_date"])
+    for fold in expanding_folds(folds.tolist(), target):
+        train = data[folds.isin(fold.train_seasons)]
+        test = data[folds == fold.test_season]
         train = purge(train, test, target)
         check_no_leak(train, test, target)
         frame = test[
