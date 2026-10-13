@@ -255,7 +255,9 @@ def transfer_features(rows: pd.DataFrame, transfers: pd.DataFrame) -> pd.DataFra
     out["last_transfer_date"] = pd.Series(pd.NaT, index=rows.index, dtype="datetime64[ns]")
     if transfers.empty:
         return out
-    events = _plain(transfers[["source_player_id", "transfer_date", "kind", "fee_eur"]], ["fee_eur"])
+    events = _plain(
+        transfers[["source_player_id", "transfer_date", "kind", "fee_eur"]], ["fee_eur"]
+    )
     events["transfer_date"] = _naive(events["transfer_date"])
     pairs = _window_events(rows, events, "transfer_date", None).sort_values(
         ["row", "transfer_date"]

@@ -161,6 +161,47 @@ MAE in log units and rank correlation, untuned LightGBM:
 * Brazil and Argentina, with their January feature dates: fair value MAE
   0.518 (baseline 0.869), growth 24m 0.563 (baseline 0.706).
 
+## Big move model (`scout moves`)
+
+The question from the start of the project: which players at ordinary clubs
+will join a top club? Details and the shortlist are in `reports/moves.md`.
+
+* **Top club:** the 20 highest squad values per season over all 17 leagues
+  (in 2023: City, Arsenal, Real Madrid, PSG, Liverpool, Chelsea, Bayern,
+  Barcelona, ... Brighton, Dortmund, Leipzig, Napoli, Real Sociedad).
+* **Rows:** regular players not at a top club at the feature date, and not
+  already signed by one (Mastantuono, River Plate 2025, joined Real Madrid
+  before the January feature date).
+* **Label:** a move (transfer, loan or free) to a top club within 24 months.
+  A move back to a club he had left before does not count: in the first
+  version a third of the "big moves" were loanees returning to their owner.
+* Same expanding window backtest; a label counts as observed when its window
+  closes, so open windows are purged from training.
+
+| Model | Rows | Movers | AUC | Average precision | Movers in each season's top 50 |
+|---|---|---|---|---|---|
+| base rate | 59,344 | 1,385 | | 0.023 | 2.3% |
+| group rate (league, position, age) | | | 0.780 | 0.083 | 12.7% |
+| **LightGBM** | | | **0.905** | **0.233** | **38.9%** |
+
+* **Not just deals already agreed.** Moves dated 1 July were often agreed in
+  spring, before the 30 June feature date. Scored separately: moves in the
+  same summer AUC 0.927, the next winter 0.879, a year or more later 0.895
+  (baseline 0.77 to 0.79). For moves a year or more later, 17.5% of each
+  season's top 50 make one, against 1.1% of all players.
+* **Caught in their season's top 50**, among others: Rakitić (Sevilla to
+  Barcelona), Fabinho (Monaco to Liverpool), Keïta (Leipzig to Liverpool),
+  Havertz (Leverkusen to Chelsea), Dybala (Palermo to Juventus), Nuno Mendes
+  (Sporting to PSG), João Neves (Benfica to PSG).
+* **A live check.** The newest season (feature date 30 June 2026) has no
+  labels yet, but the transfer data runs to October 2026: 9 of the 50 highest
+  scored players have already joined a top club (Manzambi to Aston Villa,
+  Bouaddi to Manchester City, Godts to PSG, Baleba to Manchester United, ...),
+  against 45 of all 6,026 candidates (0.7%).
+* AUC is lowest in the big five leagues (0.79 to 0.88), where more players
+  move and the question is harder, and highest in the seller leagues (0.91
+  to 0.97).
+
 ## Next
 
 1. The clean check above: tune on earlier seasons, score on later ones.

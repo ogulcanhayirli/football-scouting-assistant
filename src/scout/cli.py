@@ -202,6 +202,13 @@ def cmd_featurestore(settings: Settings, args: argparse.Namespace) -> int:
     return 0 if report["identical"] else 3
 
 
+def cmd_moves(settings: Settings, args: argparse.Namespace) -> int:
+    from scout.models.moves import run_moves
+
+    run_moves(settings)
+    return 0
+
+
 def cmd_backtest(settings: Settings, args: argparse.Namespace) -> int:
     from scout.models.run import run_all
     from scout.models.targets import TARGETS
@@ -398,6 +405,11 @@ def main(argv: list[str] | None = None) -> int:
             p.add_argument("--max-jobs", type=int, default=20)
             p.add_argument("--parallel", type=int, default=2)
         p.set_defaults(func=cmd_train)
+
+    moves = sub.add_parser(
+        "moves", help="Big move model: backtest, report and shortlist (reports/moves.md)"
+    )
+    moves.set_defaults(func=cmd_moves)
 
     sync = sub.add_parser("sync", help="Copy data/raw and data/processed to or from S3")
     sync.add_argument("direction", choices=["up", "down"])

@@ -27,6 +27,10 @@ that is reported even when it wins.
 | SageMaker Feature Store (`ScoutFeatureStore` stack) | Deployed: 16,264 records, offline store (Iceberg); its point in time answers match our tables exactly |
 | Expanding window backtest, baselines, first LightGBM (`MODELS.md`) | Done: fair value clearly beats the baseline; growth does not yet |
 | Automatic model tuning in SageMaker (`ScoutTraining` stack) | Done for 24 month growth: 20 jobs, about 7 cents; tuned model beats the baseline narrowly (0.558 against 0.564) |
+| 17 leagues, 19 cups and national team competitions, team stats, lineups, injuries, transfers | Done: about 245,000 requests on the Ultra plan; 2.2 million player match rows, 285,797 transfers; all in S3 |
+| Features on all leagues plus cup, team, injury and transfer context | Done: 130,631 player seasons, 129 columns; fair value error 0.536 to 0.391 on the original EPL and Süper Lig test rows |
+| Big move model (`scout moves`) | Done: AUC 0.905; 39% of each season's top 50 join a top 20 club within two years (base rate 2.3%) |
+| Athena, Feature Store and tuning on the new data | Not yet: Glue schema regenerated, redeploy pending |
 | Similarity search, agent, rest of the AWS stack | Not started |
 
 ## Architecture
@@ -125,6 +129,9 @@ uv run scout --config configs/backfill.ultra.yaml backfill --level transfers
 
 # Point in time feature and label tables (needs the Transfermarkt snapshot)
 uv run scout --config configs/backfill.ultra.yaml features
+
+# Big move model: backtest, report and shortlist in reports/moves.md
+uv run scout --config configs/backfill.ultra.yaml moves
 
 # Deploy the Glue catalog and Athena workgroup (see docs/AWS_SETUP.md first)
 cd infra && CDK_DEFAULT_ACCOUNT=<account id> npx aws-cdk@2 deploy ScoutData && cd ..
@@ -296,6 +303,13 @@ the career) before the feature date, whichever league or competition it came
 from, and are missing, not 0, where the source does not cover the window.
 *Would change if* a source gained full history, which would only widen the
 covered rows.
+
+**D19. A big move is a new move to a top 20 club by squad value.** The
+top list is recomputed every season from values known then, so it follows
+the market (Brighton and Aston Villa recently) without a hand made list. A
+return to a former club or a loan owner is not a big move. *Would change if*
+a scout cares about a different step, for example top 50 clubs, or moves
+abroad from a given league; both are a parameter of the label.
 
 **D18. Backtest folds follow the feature date.** A row's fold is the
 European season that ended last before its feature date, so a calendar year
