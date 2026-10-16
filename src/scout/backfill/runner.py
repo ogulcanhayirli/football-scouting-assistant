@@ -37,7 +37,7 @@ log = logging.getLogger(__name__)
 class SeasonOutcome:
     league_key: str
     season: int
-    status: str  # complete | partial | refused_by_plan | contract_failed
+    status: str  # complete | partial | refused_by_plan | contract_failed | no_player_data
     pages_total: int | None = None
     pages_cached: int = 0
     rows: int = 0
@@ -53,7 +53,7 @@ class BackfillResult:
     @property
     def complete(self) -> bool:
         return self.stopped_reason is None and all(
-            o.status in {"complete", "refused_by_plan"} for o in self.outcomes
+            o.status in {"complete", "refused_by_plan", "no_player_data"} for o in self.outcomes
         )
 
 
@@ -103,6 +103,14 @@ def _backfill_season(
                 outcome.pages_total,
                 provider.client.guard.remaining_today,
             )
+
+    if not rows:
+        # Pages came back, but none of their stats belong to this league: Liga
+        # Profesional 2023 (id 128) only returns the Copa de la Liga (id 1032).
+        outcome.status = "no_player_data"
+        outcome.detail = "no stats for this league in the response"
+        log.warning("%s %s: %s", league.key, season, outcome.detail)
+        return outcome
 
     frame = rows_to_frame(rows)
     outcome.rows = len(frame)

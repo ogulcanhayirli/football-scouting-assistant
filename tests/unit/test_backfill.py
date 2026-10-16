@@ -143,3 +143,13 @@ def test_coverage_report(settings, fake_api):
     json_path, md_path = write_coverage_report(report, settings.paths.reports_dir)
     assert json.loads(json_path.read_text())["seasons"][0]["league"] == "epl"
     assert "| epl | 2023 | complete | 3/3 |" in md_path.read_text()
+
+
+def test_pages_for_another_competition_are_no_player_data_not_a_failure(settings, fake_api):
+    # The fake API serves EPL stats (league 39) to every request, so a Süper Lig
+    # request gets pages with no stats for its own league, as Liga Profesional
+    # 2023 does with the Copa de la Liga.
+    result = run_backfill(settings, make_provider(settings), league_keys=["super_lig"])
+    assert [o.status for o in result.outcomes] == ["no_player_data"]
+    assert result.complete
+    assert not parquet_path(settings, "super_lig", 2023).exists()

@@ -1,0 +1,46 @@
+[
+ {
+  "name": "league_key",
+  "type": "string"
+ },
+ {
+  "name": "source_player_id",
+  "type": "bigint"
+ },
+ {
+  "name": "feature_date",
+  "type": "timestamp"
+ },
+ {
+  "name": "tm_player_id",
+  "type": "bigint"
+ },
+ {
+  "name": "value_now",
+  "type": "double"
+ },
+ {
+  "name": "value_24m",
+  "type": "double"
+ },
+ {
+  "name": "value_24m_date",
+  "type": "timestamp"
+ },
+ {
+  "name": "log_growth_24m",
+  "type": "double"
+ },
+ {
+  "name": "value_36m",
+  "type": "double"
+ },
+ {
+  "name": "value_36m_date",
+  "type": "timestamp"
+ },
+ {
+  "name": "log_growth_36m",
+  "type": "double"
+ }
+]

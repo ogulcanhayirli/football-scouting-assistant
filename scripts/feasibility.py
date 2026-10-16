@@ -24,9 +24,15 @@ import pandas as pd
 from scout.cli import build_client
 from scout.config import Settings, load_settings
 from scout.feasibility import (
+    completeness_by_season,
+    conflicting_matches,
     estimate_requests,
     field_completeness,
+    first_usable_season,
+    label_coverage,
+    summarize_value_vs_fee,
     valuation_horizon_coverage,
+    value_vs_fee,
 )
 from scout.fsutil import atomic_write_text
 from scout.matching import match_players
@@ -154,15 +160,43 @@ def step_fixtures(budget: Budget, settings: Settings, accessible: dict, findings
     return counts
 
 
-def step_transfermarkt(settings: Settings, stats: pd.DataFrame, findings: dict, download: bool):
-    """(c) valuation depth and (d) player matching."""
+def step_processed(settings: Settings, budget: Budget, findings: dict):
+    """All backfilled seasons from Parquet, instead of sampled pages. Page counts come
+    from the cache, so this spends no requests."""
+    root = settings.paths.processed_dir / "player_season_stats"
+    stats = pd.concat(
+        [pd.read_parquet(p) for p in sorted(root.glob("league=*/season=*.parquet"))],
+        ignore_index=True,
+    )
+    pages_known = {}
+    for league in settings.leagues:
+        for season in sorted(stats.loc[stats["league_key"] == league.key, "season"].unique()):
+            params = {"league": league.api_football_id, "season": int(season), "page": 1}
+            if budget.client.is_cached("players", params):
+                pages_known[(league.key, int(season))] = int(
+                    budget.get("players", params)["paging"]["total"]
+                )
+    by_season = completeness_by_season(stats)
+    findings["completeness_by_season"] = by_season.to_dict(orient="records")
+    findings["first_usable_season"] = first_usable_season(by_season).to_dict(orient="records")
+    findings["stats_rows"] = len(stats)
+    return stats, pages_known
+
+
+def step_transfermarkt(
+    settings: Settings, stats: pd.DataFrame, findings: dict, download: bool, full: bool
+):
+    """(c) valuation depth and (d) player matching. With ``full``, also label coverage
+    per season and how well values predict transfer fees."""
     tm_dir = settings.paths.raw_dir / "transfermarkt"
     if download:
         download_snapshot(settings.transfermarkt, settings.paths.raw_dir)
     tm = TransfermarktValuationProvider(tm_dir)
     apps = tm.league_appearances(settings.leagues)
     vals = tm.valuations(settings.leagues)
-    players = tm.players(settings.leagues)
+    # Transfermarkt appearances start in 2012/13, so players from earlier seasons are
+    # only found when every Transfermarkt player is a candidate (DOB keeps this cheap).
+    players = tm.players(None if full else settings.leagues)
 
     depth = valuation_horizon_coverage(apps, vals, data_end=TM_DATA_END)
     findings["valuation_depth"] = depth.to_dict(orient="records")
@@ -181,6 +215,7 @@ def step_transfermarkt(settings: Settings, stats: pd.DataFrame, findings: dict, 
         .rename("club_names")
     )
     findings["matching"] = {}
+    all_matches = []
     for league in settings.leagues:
         league_stats = stats[stats["league_key"] == league.key].drop_duplicates("source_player_id")
         if league_stats.empty:
@@ -189,7 +224,10 @@ def step_transfermarkt(settings: Settings, stats: pd.DataFrame, findings: dict, 
         candidates = players[players["source_player_id"].isin(ids)].join(
             club_names, on="source_player_id"
         )
+        if full:
+            candidates = players.join(club_names, on="source_player_id")
         result = match_players(league_stats, candidates)
+        all_matches.append(result)
         reasons = result["reason"].value_counts().to_dict()
         findings["matching"][league.key] = {
             "sample_players": len(result),
@@ -233,6 +271,18 @@ def step_transfermarkt(settings: Settings, stats: pd.DataFrame, findings: dict, 
             settings.paths.reports_dir / f"match_unmatched_{league.key}.csv", index=False
         )
 
+    if not full or not all_matches:
+        return
+    every_value = tm.valuations(None)
+    matches = pd.concat(all_matches, ignore_index=True)
+    findings["conflicting_matches"] = conflicting_matches(matches).to_dict(orient="records")
+    coverage = label_coverage(stats, matches, every_value)
+    findings["label_coverage"] = coverage.to_dict(orient="records")
+    club_leagues = apps[["club_id", "league_key"]].drop_duplicates()
+    pairs = value_vs_fee(tm.transfers(), every_value, club_leagues, TM_DATA_END)
+    pairs.to_csv(settings.paths.reports_dir / "value_vs_fee.csv", index=False)
+    findings["value_vs_fee"] = summarize_value_vs_fee(pairs).to_dict(orient="records")
+
 
 def step_estimate(settings: Settings, findings: dict, pages_known: dict, fixtures: dict):
     """(e) requests for the full backfill, season level and match level."""
@@ -250,17 +300,24 @@ def step_estimate(settings: Settings, findings: dict, pages_known: dict, fixture
     findings["pages_measured"] = {f"{k[0]} {k[1]}": v for k, v in pages_known.items()}
 
 
+TABLE_KEYS = [
+    "completeness_by_season",
+    "first_usable_season",
+    "label_coverage",
+    "value_vs_fee",
+    "field_completeness",
+    "valuation_depth",
+    "request_estimate",
+]
+
+
 def write_tables(findings: dict, path: Path) -> None:
     parts = ["# Feasibility tables (generated)", ""]
-    for key in ["field_completeness", "valuation_depth", "request_estimate"]:
+    for key in TABLE_KEYS:
         if findings.get(key):
             parts += [f"## {key}", "", pd.DataFrame(findings[key]).to_markdown(index=False), ""]
     parts += ["## other findings", "", "```json"]
-    other = {
-        k: v
-        for k, v in findings.items()
-        if k not in {"field_completeness", "valuation_depth", "request_estimate"}
-    }
+    other = {k: v for k, v in findings.items() if k not in TABLE_KEYS}
     parts += [json.dumps(other, indent=2, default=str, ensure_ascii=False), "```", ""]
     atomic_write_text(path, "\n".join(parts))
 
@@ -273,6 +330,11 @@ def main() -> int:
         "--no-download", action="store_true", help="Use transfermarkt files already on disk"
     )
     parser.add_argument("--skip-transfermarkt", action="store_true")
+    parser.add_argument(
+        "--from-processed",
+        action="store_true",
+        help="Analyse every backfilled season in data/processed instead of sampled pages",
+    )
     args = parser.parse_args()
 
     logging.basicConfig(
@@ -288,11 +350,15 @@ def main() -> int:
         accessible = step_seasons(budget, settings, findings)
         stats, pages_known = step_fields(budget, settings, accessible, findings)
         fixtures = step_fixtures(budget, settings, accessible, findings)
+        if args.from_processed:
+            stats, pages_known = step_processed(settings, budget, findings)
         findings["requests_spent"] = budget.spent
         findings["quota_left_today"] = client.guard.remaining_today
 
     if not args.skip_transfermarkt:
-        step_transfermarkt(settings, stats, findings, download=not args.no_download)
+        step_transfermarkt(
+            settings, stats, findings, download=not args.no_download, full=args.from_processed
+        )
     step_estimate(settings, findings, pages_known, fixtures)
 
     out = settings.paths.reports_dir

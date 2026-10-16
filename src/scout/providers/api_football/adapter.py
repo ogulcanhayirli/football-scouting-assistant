@@ -79,12 +79,17 @@ ID_COLUMNS = [
 ]
 COLUMNS = ID_COLUMNS + list(STAT_FIELDS)
 
+# The API labels most forwards "Attacker" but some entries "Forward" (seen in
+# EPL 2023). Map them to one label so positions form four groups.
+POSITION_ALIASES = {"Forward": "Attacker"}
+
 
 def _parse_cm_kg(value: Any) -> float | None:
-    if value in (None, ""):
+    parts = str(value).split() if value is not None else []
+    if not parts:
         return None
     try:
-        return float(str(value).split()[0])
+        return float(parts[0])
     except ValueError:
         return None
 
@@ -131,6 +136,7 @@ def parse_players_page(payload: dict[str, Any], league: LeagueConfig, season: in
             }
             for column, (group, field) in STAT_FIELDS.items():
                 row[column] = (stat.get(group) or {}).get(field)
+            row["position"] = POSITION_ALIASES.get(row["position"], row["position"])
             rows.append(row)
     return rows
 
@@ -142,8 +148,86 @@ def rows_to_frame(rows: list[dict]) -> pd.DataFrame:
     for column in ["source_player_id", "team_id", "league_id", "season"]:
         frame[column] = pd.to_numeric(frame[column], errors="coerce").astype("Int64")
     frame["captain"] = frame["captain"].astype("boolean")
+    _drop_negative_counts(frame)
     frame["birth_date"] = pd.to_datetime(frame["birth_date"], errors="coerce")
+    return _fix_season_source_errors(frame)
+
+
+MIN_AGE_YEARS = 14  # no one plays a top flight season younger than this
+
+
+def _fix_season_source_errors(frame: pd.DataFrame) -> pd.DataFrame:
+    """Repair source errors seen in real season responses; each is logged.
+
+    * A row without a team can't be attributed to a club, so it is dropped
+      (Eredivisie 2010, Primeira Liga 2011, Belgian Pro League 2023).
+    * An unknown birth date is sent as the date of the request (seen as
+      2026-10-09 for five players). Any birth date less than 14 years before
+      the season starts is stored as missing; left in, it would also break
+      matching to Transfermarkt, which blocks on birth date.
+    * A blank position (whitespace only, Scottish Premiership 2012 and 2013)
+      is stored as missing.
+    """
+    no_team = frame["team_id"].isna()
+    for _, row in frame[no_team].iterrows():
+        log.warning(
+            "Dropping %s (%s) in %s %s: no team",
+            row["player_name"],
+            row["source_player_id"],
+            row["league_key"],
+            row["season"],
+        )
+    frame = frame[~no_team].reset_index(drop=True)
+    season_start = pd.to_datetime(frame["season"].astype("string") + "-07-01", errors="coerce")
+    too_young = frame["birth_date"] > season_start - pd.DateOffset(years=MIN_AGE_YEARS)
+    for _, row in frame[too_young.fillna(False)].iterrows():
+        log.warning(
+            "Birth date %s for %s (%s) in %s %s is impossible; stored as missing",
+            row["birth_date"].date(),
+            row["player_name"],
+            row["source_player_id"],
+            row["league_key"],
+            row["season"],
+        )
+    frame.loc[too_young.fillna(False), "birth_date"] = pd.NaT
+    blank = frame["position"].notna() & (frame["position"].astype("string").str.strip() == "")
+    for _, row in frame[blank.fillna(False)].iterrows():
+        log.warning(
+            "Blank position for %s (%s) in %s %s; stored as missing",
+            row["player_name"],
+            row["source_player_id"],
+            row["league_key"],
+            row["season"],
+        )
+    frame.loc[blank.fillna(False), "position"] = None
     return frame
+
+
+def _drop_negative_counts(frame: pd.DataFrame, columns: list[str] | None = None) -> None:
+    """Replace impossible negative stats with missing values, in place.
+
+    The API occasionally sends values such as ``lineups: -1`` (EPL 2015,
+    player 20439). A negative count can't be true, and guessing a fix would
+    invent data, so the value becomes missing and a warning names it. The raw
+    cache keeps the original response.
+    """
+    for column in columns or NUMERIC_STATS:
+        negative = frame[column] < 0
+        if not negative.any():
+            continue
+        for idx in frame.index[negative.fillna(False)]:
+            where = f" fixture {frame.at[idx, 'fixture_id']}" if "fixture_id" in frame else ""
+            log.warning(
+                "Negative %s=%s for player %s (%s) in %s %s%s; stored as missing",
+                column,
+                frame.at[idx, column],
+                frame.at[idx, "source_player_id"],
+                frame.at[idx, "player_name"],
+                frame.at[idx, "league_key"],
+                frame.at[idx, "season"],
+                where,
+            )
+        frame.loc[negative.fillna(False), column] = pd.NA
 
 
 def parse_seasons(payload: dict[str, Any], league: LeagueConfig) -> list[SeasonInfo]:
@@ -161,6 +245,10 @@ def parse_seasons(payload: dict[str, Any], league: LeagueConfig) -> list[SeasonI
                     current=bool(s.get("current")),
                     has_player_stats=bool(coverage.get("players"))
                     or bool(fixtures.get("statistics_players")),
+                    has_match_player_stats=bool(fixtures.get("statistics_players")),
+                    has_match_team_stats=bool(fixtures.get("statistics_fixtures")),
+                    has_lineups=bool(fixtures.get("lineups")),
+                    has_injuries=bool(coverage.get("injuries")),
                 )
             )
     return sorted(seasons, key=lambda x: x.season)

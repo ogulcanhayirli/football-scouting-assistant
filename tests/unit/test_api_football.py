@@ -1,7 +1,12 @@
+import copy
+import logging
+
 import httpx
+import pandas as pd
 import pytest
 import respx
 
+from scout.contracts import PLAYER_SEASON_STATS, validate
 from scout.providers.api_football import (
     ApiFootballClient,
     ApiFootballStatsProvider,
@@ -10,7 +15,12 @@ from scout.providers.api_football import (
     QuotaExceededError,
     parse_players_page,
 )
-from scout.providers.api_football.adapter import COLUMNS, parse_seasons, rows_to_frame
+from scout.providers.api_football.adapter import (
+    COLUMNS,
+    _parse_cm_kg,
+    parse_seasons,
+    rows_to_frame,
+)
 from scout.providers.api_football.client import classify_errors
 from scout.ratelimit import QuotaGuard
 from scout.storage import LocalRawStore
@@ -60,6 +70,22 @@ def test_parse_keeps_turkish_characters(load_fixture, super_lig):
     assert names == ["Ç. Şahinoğlu", "İ. Yılmazer"]
 
 
+def test_parse_maps_forward_to_attacker(load_fixture, epl):
+    payload = load_fixture("api_football/players_epl_2023_p1.json")
+    for item in payload["response"]:
+        for stat in item["statistics"]:
+            if stat["games"]["position"] == "Attacker":
+                stat["games"]["position"] = "Forward"
+    positions = {r["position"] for r in parse_players_page(payload, epl, 2023)}
+    assert "Forward" not in positions
+    assert "Attacker" in positions
+
+
+@pytest.mark.parametrize("value", [None, "", " "])
+def test_parse_cm_kg_blank(value):
+    assert _parse_cm_kg(value) is None
+
+
 def test_rows_to_frame_types(load_fixture, epl):
     rows = parse_players_page(load_fixture("api_football/players_epl_2023_p1.json"), epl, 2023)
     frame = rows_to_frame(rows)
@@ -68,6 +94,26 @@ def test_rows_to_frame_types(load_fixture, epl):
     assert str(frame["rating"].dtype) == "Float64"  # "7.012" strings become numbers
     assert frame["rating"].isna().sum() == 1
     assert frame["height_cm"].isna().sum() == 1
+
+
+def test_rows_to_frame_turns_negative_counts_into_missing(load_fixture, epl, caplog):
+    # EPL 2015 sends lineups: -1 for player 20439; the contract rejects it.
+    payload = load_fixture("api_football/players_epl_2023_p1.json")
+    stat = payload["response"][0]["statistics"][0]
+    stat["games"]["lineups"] = -1
+    original = copy.deepcopy(payload)
+    rows = parse_players_page(payload, epl, 2023)
+    target = rows[0]["source_player_id"]
+
+    with caplog.at_level(logging.WARNING, logger="scout.providers.api_football.adapter"):
+        frame = rows_to_frame(rows)
+
+    row = frame[frame["source_player_id"] == target].iloc[0]
+    assert pd.isna(row["lineups"])
+    assert row["minutes"] == stat["games"]["minutes"]  # other stats are untouched
+    assert payload == original  # the raw payload is never rewritten
+    assert any("lineups" in m and str(target) in m for m in caplog.messages)
+    validate(PLAYER_SEASON_STATS, frame)
 
 
 def test_parse_seasons(load_fixture, epl):
@@ -205,3 +251,33 @@ def test_provider_walks_all_pages(client, load_fixture, epl):
     # Second call is served fully from cache.
     provider.player_season_stats(epl, 2023)
     assert route.call_count == 2
+
+
+def test_rows_without_team_are_dropped_and_placeholder_birth_dates_cleared(
+    load_fixture, epl, caplog
+):
+    payload = load_fixture("api_football/players_epl_2023_p1.json")
+    payload["response"][0]["statistics"][0]["team"] = {"id": None, "name": None}
+    payload["response"][1]["player"]["birth"]["date"] = "2026-10-09"  # the request date
+    rows = parse_players_page(payload, epl, 2023)
+    no_team_id = rows[0]["source_player_id"]
+    placeholder_id = payload["response"][1]["player"]["id"]
+    with caplog.at_level(logging.WARNING):
+        frame = rows_to_frame(rows)
+    assert no_team_id not in frame["source_player_id"].tolist()
+    placeholder = frame[frame["source_player_id"] == placeholder_id]
+    assert placeholder["birth_date"].isna().all()
+    assert any("no team" in m for m in caplog.messages)
+    assert any("impossible" in m for m in caplog.messages)
+    validate(PLAYER_SEASON_STATS, frame)
+
+
+def test_blank_position_becomes_missing(load_fixture, epl, caplog):
+    payload = load_fixture("api_football/players_epl_2023_p1.json")
+    payload["response"][0]["statistics"][0]["games"]["position"] = "\n    "
+    player_id = payload["response"][0]["player"]["id"]
+    with caplog.at_level(logging.WARNING):
+        frame = rows_to_frame(parse_players_page(payload, epl, 2023))
+    assert frame.loc[frame["source_player_id"] == player_id, "position"].isna().all()
+    assert any("Blank position" in m for m in caplog.messages)
+    validate(PLAYER_SEASON_STATS, frame)

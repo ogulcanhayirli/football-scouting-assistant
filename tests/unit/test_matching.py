@@ -83,3 +83,42 @@ def test_identical_candidates_without_club_are_ambiguous():
     stats = pd.DataFrame([af(1, "Fred", "Fred", "", "1993-03-05")])
     vals = pd.DataFrame([tm(40, "Fred", "1993-03-05"), tm(41, "Fred", "1993-03-05")])
     assert match_players(stats, vals).iloc[0]["reason"] == "ambiguous"
+
+
+def test_normalize_name_unescapes_html_entities():
+    assert normalize_name("M. O&apos;Riley") == "m o riley"
+
+
+def test_surname_and_initial_rescue_nicknames():
+    stats = pd.DataFrame(
+        [
+            af(1, "T. Hoban", "Thomas Michael", "Hoban", "1994-01-24"),
+            af(2, "Zachary Harry Dearnley", "Zachary Harry", "Dearnley", "1998-09-28"),
+        ]
+    )
+    vals = pd.DataFrame(
+        [tm(11, "Tommie Hoban", "1994-01-24"), tm(12, "Zak Dearnley", "1998-09-28")]
+    )
+    result = match_players(stats, vals).set_index("af_player_id")
+    assert result.loc[1, "tm_player_id"] == 11
+    assert result.loc[2, "tm_player_id"] == 12
+    assert set(result["rule"]) == {"surname"}
+
+
+def test_surname_rule_needs_the_same_initial_and_a_unique_candidate():
+    stats = pd.DataFrame(
+        [
+            af(1, "T. Hoban", "Thomas", "Hoban", "1994-01-24"),
+            af(2, "C. Smith", "Cameron", "Smith", "1995-08-24"),
+        ]
+    )
+    vals = pd.DataFrame(
+        [
+            tm(11, "Patrick Hoban", "1994-01-24"),  # same surname, other initial
+            tm(12, "Cammy Smith", "1995-08-24"),  # two candidates pass: twins, say
+            tm(13, "Callum Smith", "1995-08-24"),
+        ]
+    )
+    result = match_players(stats, vals).set_index("af_player_id")
+    assert result["reason"].tolist() == ["low_score", "low_score"]
+    assert result["tm_player_id"].isna().all()

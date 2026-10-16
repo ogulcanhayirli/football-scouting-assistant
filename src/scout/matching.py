@@ -8,6 +8,10 @@ Strategy, in order of reliability:
    sets handle "M. Salah" against "Mohamed Salah" and long legal names that
    contain the common name.
 3. Break ties with club name similarity.
+4. When no name scores high enough, accept a candidate whose surname matches
+   exactly and whose first name starts with the same letter ("T. Hoban" and
+   "Tommie Hoban"), but only if exactly one candidate passes. Nicknames and
+   short forms ("Zachary" and "Zak") defeat fuzzy scoring but not this rule.
 
 Names are normalised before scoring. Turkish letters are mapped explicitly
 first (``İ`` lowercases to ``i`` plus a combining dot in Python, and ``ı`` has
@@ -17,6 +21,7 @@ to ASCII.
 
 from __future__ import annotations
 
+import html
 import re
 from dataclasses import dataclass
 
@@ -35,7 +40,8 @@ _CLUB_NOISE = re.compile(r"\b(fc|sk|as|afc|cf|jk|fk|spor kulubu|kulubu|club|a s)
 def normalize_name(name: object) -> str:
     if not isinstance(name, str):
         return ""
-    text = unidecode(name.translate(_TURKISH)).lower()
+    # The API sometimes sends HTML entities, e.g. "M. O&apos;Riley".
+    text = unidecode(html.unescape(name).translate(_TURKISH)).lower()
     text = _NON_ALNUM.sub(" ", text.replace("-", " ").replace(".", " "))
     return " ".join(text.split())
 
@@ -56,6 +62,16 @@ def _name_score(af_row: pd.Series, tm_name: str) -> float:
     return max(fuzz.token_set_ratio(full, tm_name), fuzz.token_set_ratio(short, tm_name))
 
 
+def _surname_initial(af_row: pd.Series, tm_name: str) -> bool:
+    """Same surname and same first initial, on normalised names."""
+    last = normalize_name(af_row.get("lastname"))
+    first = normalize_name(af_row.get("firstname")) or normalize_name(af_row.get("player_name"))
+    if not last or not first or not tm_name:
+        return False
+    tm_tokens = tm_name.split()
+    return len(tm_tokens) >= 2 and tm_name.endswith(" " + last) and tm_tokens[0][0] == first[0]
+
+
 def match_players(
     stats_players: pd.DataFrame,
     valuation_players: pd.DataFrame,
@@ -69,8 +85,8 @@ def match_players(
     space separated string of clubs the player appeared for).
 
     Returns one row per stats player with ``tm_player_id`` (or NA), ``score``
-    and ``reason``: matched, no_birth_date, no_candidate_same_dob, low_score
-    or ambiguous.
+    ``reason`` (matched, no_birth_date, no_candidate_same_dob, low_score or
+    ambiguous) and ``rule`` (name_score or surname) for matched rows.
     """
     config = config or MatchConfig()
     tm = valuation_players.copy()
@@ -102,14 +118,22 @@ def match_players(
         best_total, best_name, best_id = scored[0]
         record["score"] = round(best_name, 1)
         if best_name < config.min_score:
-            out.append(record | {"reason": "low_score", "tm_candidate_id": best_id})
+            rule = [c["source_player_id"] for _, c in candidates.iterrows()
+                    if _surname_initial(row, c["_name"])]  # fmt: skip
+            if len(rule) == 1:
+                out.append(
+                    record | {"tm_player_id": rule[0], "reason": "matched", "rule": "surname"}
+                )
+            else:
+                out.append(record | {"reason": "low_score", "tm_candidate_id": best_id})
             continue
         if len(scored) > 1 and best_total - scored[1][0] < config.min_margin:
             out.append(record | {"reason": "ambiguous", "tm_candidate_id": best_id})
             continue
-        out.append(record | {"tm_player_id": best_id, "reason": "matched"})
+        out.append(record | {"tm_player_id": best_id, "reason": "matched", "rule": "name_score"})
 
     result = pd.DataFrame(out)
-    if "tm_candidate_id" not in result:
-        result["tm_candidate_id"] = pd.NA
+    for column in ("tm_candidate_id", "rule"):
+        if column not in result:
+            result[column] = pd.NA
     return result

@@ -1,0 +1,119 @@
+# Ultra plan (until 2026-11-07): 75,000 requests per day, 450 per minute,
+# both read from the x-ratelimit headers the server sends.
+api_football:
+  plan: ultra
+  quota:
+    daily_limit: 75000
+    per_minute_limit: 450
+    safety_margin: 500
+
+leagues:
+  - key: epl
+    name: Premier League
+    api_football_id: 39
+    transfermarkt_id: GB1
+  - key: super_lig
+    name: Süper Lig
+    api_football_id: 203
+    transfermarkt_id: TR1
+  # Added for history and for the clubs that buy from mid table: the other top
+  # four, three feeder leagues and the Championship. Ids checked against the API.
+  - key: la_liga
+    name: La Liga
+    api_football_id: 140
+    transfermarkt_id: ES1
+  - key: bundesliga
+    name: Bundesliga
+    api_football_id: 78
+    transfermarkt_id: L1
+  - key: serie_a
+    name: Serie A
+    api_football_id: 135
+    transfermarkt_id: IT1
+  - key: ligue_1
+    name: Ligue 1
+    api_football_id: 61
+    transfermarkt_id: FR1
+  - key: eredivisie
+    name: Eredivisie
+    api_football_id: 88
+    transfermarkt_id: NL1
+  - key: primeira_liga
+    name: Primeira Liga
+    api_football_id: 94
+    transfermarkt_id: PO1
+  - key: belgian_pro_league
+    name: Belgian Pro League
+    api_football_id: 144
+    transfermarkt_id: BE1
+  - key: championship
+    name: Championship
+    api_football_id: 40
+    transfermarkt_id: GB2
+  # Added for more seller leagues: the five other leagues with full
+  # Transfermarkt history (values for every season). Ids checked against the API.
+  - key: scottish_premiership
+    name: Scottish Premiership
+    api_football_id: 179
+    transfermarkt_id: SC1
+  - key: danish_superliga
+    name: Danish Superliga
+    api_football_id: 119
+    transfermarkt_id: DK1
+  - key: greek_super_league
+    name: Greek Super League
+    api_football_id: 197
+    transfermarkt_id: GR1
+  - key: russian_premier_league
+    name: Russian Premier League
+    api_football_id: 235
+    transfermarkt_id: RU1
+  - key: ukrainian_premier_league
+    name: Ukrainian Premier League
+    api_football_id: 333
+    transfermarkt_id: UKR1
+  # South America: the two biggest exporters to Europe. Calendar year seasons
+  # (season 2023 runs from spring to December 2023). Transfermarkt covers their
+  # games only from 2024, so values for earlier seasons exist mainly for
+  # players who later moved to a covered league. Ids checked against the API.
+  - key: brasileirao
+    name: Brasileirão Série A
+    api_football_id: 71
+    transfermarkt_id: BRA1
+    region: south_america
+    calendar_year: true
+  - key: liga_profesional
+    name: Liga Profesional Argentina
+    api_football_id: 128
+    transfermarkt_id: ARG1
+    region: south_america
+    calendar_year: true
+
+# Cups and national team competitions: per match player and team stats only.
+# They add columns to the players' league rows, counted by match date.
+competitions:
+  - {key: champions_league, name: UEFA Champions League, api_football_id: 2, kind: club}
+  - {key: europa_league, name: UEFA Europa League, api_football_id: 3, kind: club}
+  - {key: conference_league, name: UEFA Conference League, api_football_id: 848, kind: club}
+  - {key: copa_libertadores, name: CONMEBOL Libertadores, api_football_id: 13, kind: club, region: south_america}
+  - {key: copa_sudamericana, name: CONMEBOL Sudamericana, api_football_id: 11, kind: club, region: south_america}
+  - {key: world_cup, name: World Cup, api_football_id: 1, kind: national}
+  - {key: euro, name: Euro Championship, api_football_id: 4, kind: national}
+  - {key: nations_league, name: UEFA Nations League, api_football_id: 5, kind: national}
+  - {key: copa_america, name: Copa America, api_football_id: 9, kind: national}
+  - {key: africa_cup, name: Africa Cup of Nations, api_football_id: 6, kind: national}
+  - {key: asian_cup, name: Asian Cup, api_football_id: 7, kind: national}
+  - {key: gold_cup, name: CONCACAF Gold Cup, api_football_id: 22, kind: national}
+  - {key: wc_qual_europe, name: World Cup Qualification Europe, api_football_id: 32, kind: national}
+  - {key: wc_qual_south_america, name: World Cup Qualification South America, api_football_id: 34, kind: national}
+  - {key: wc_qual_africa, name: World Cup Qualification Africa, api_football_id: 29, kind: national}
+  - {key: wc_qual_asia, name: World Cup Qualification Asia, api_football_id: 30, kind: national}
+  - {key: wc_qual_concacaf, name: World Cup Qualification CONCACAF, api_football_id: 31, kind: national}
+  - {key: euro_qual, name: Euro Championship Qualification, api_football_id: 960, kind: national}
+  - {key: friendlies, name: International Friendlies, api_football_id: 10, kind: national}
+
+backfill:
+  seasons: all
+  endpoints: [players]
+  # On Ultra every season should be served; a refusal means something is wrong.
+  stop_on_plan_error: true

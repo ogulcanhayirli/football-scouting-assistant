@@ -35,6 +35,10 @@ class SeasonInfo:
     end: date | None
     current: bool
     has_player_stats: bool
+    has_match_player_stats: bool = False  # per match player stats (/fixtures/players)
+    has_match_team_stats: bool = False  # per match team stats (/fixtures/statistics)
+    has_lineups: bool = False  # per match lineups (/fixtures/lineups)
+    has_injuries: bool = False  # injuries per league and season (/injuries)
 
 
 class StatsProvider(Protocol):

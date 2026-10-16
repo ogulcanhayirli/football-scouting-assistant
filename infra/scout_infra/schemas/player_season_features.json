@@ -1,0 +1,518 @@
+[
+ {
+  "name": "league_key",
+  "type": "string"
+ },
+ {
+  "name": "source_player_id",
+  "type": "bigint"
+ },
+ {
+  "name": "tm_player_id",
+  "type": "bigint"
+ },
+ {
+  "name": "link_rule",
+  "type": "string"
+ },
+ {
+  "name": "player_name",
+  "type": "string"
+ },
+ {
+  "name": "feature_date",
+  "type": "timestamp"
+ },
+ {
+  "name": "tier",
+  "type": "string"
+ },
+ {
+  "name": "regular",
+  "type": "boolean"
+ },
+ {
+  "name": "team_id",
+  "type": "bigint"
+ },
+ {
+  "name": "team_name",
+  "type": "string"
+ },
+ {
+  "name": "position",
+  "type": "string"
+ },
+ {
+  "name": "sub_position",
+  "type": "string"
+ },
+ {
+  "name": "age",
+  "type": "double"
+ },
+ {
+  "name": "height_cm",
+  "type": "double"
+ },
+ {
+  "name": "foot",
+  "type": "string"
+ },
+ {
+  "name": "nationality",
+  "type": "string"
+ },
+ {
+  "name": "minutes",
+  "type": "double"
+ },
+ {
+  "name": "appearances",
+  "type": "double"
+ },
+ {
+  "name": "starts",
+  "type": "double"
+ },
+ {
+  "name": "last_match_date",
+  "type": "timestamp"
+ },
+ {
+  "name": "teams_played_for",
+  "type": "bigint"
+ },
+ {
+  "name": "goals",
+  "type": "double"
+ },
+ {
+  "name": "assists",
+  "type": "double"
+ },
+ {
+  "name": "shots_total",
+  "type": "double"
+ },
+ {
+  "name": "shots_on",
+  "type": "double"
+ },
+ {
+  "name": "passes_total",
+  "type": "double"
+ },
+ {
+  "name": "passes_key",
+  "type": "double"
+ },
+ {
+  "name": "passes_accurate",
+  "type": "double"
+ },
+ {
+  "name": "tackles_total",
+  "type": "double"
+ },
+ {
+  "name": "blocks",
+  "type": "double"
+ },
+ {
+  "name": "interceptions",
+  "type": "double"
+ },
+ {
+  "name": "duels_total",
+  "type": "double"
+ },
+ {
+  "name": "duels_won",
+  "type": "double"
+ },
+ {
+  "name": "dribbles_attempts",
+  "type": "double"
+ },
+ {
+  "name": "dribbles_success",
+  "type": "double"
+ },
+ {
+  "name": "dribbled_past",
+  "type": "double"
+ },
+ {
+  "name": "fouls_drawn",
+  "type": "double"
+ },
+ {
+  "name": "fouls_committed",
+  "type": "double"
+ },
+ {
+  "name": "cards_yellow",
+  "type": "double"
+ },
+ {
+  "name": "cards_red",
+  "type": "double"
+ },
+ {
+  "name": "saves",
+  "type": "double"
+ },
+ {
+  "name": "goals_conceded",
+  "type": "double"
+ },
+ {
+  "name": "offsides",
+  "type": "double"
+ },
+ {
+  "name": "penalty_won",
+  "type": "double"
+ },
+ {
+  "name": "penalty_committed",
+  "type": "double"
+ },
+ {
+  "name": "rating",
+  "type": "double"
+ },
+ {
+  "name": "goals_per90",
+  "type": "double"
+ },
+ {
+  "name": "assists_per90",
+  "type": "double"
+ },
+ {
+  "name": "shots_total_per90",
+  "type": "double"
+ },
+ {
+  "name": "shots_on_per90",
+  "type": "double"
+ },
+ {
+  "name": "passes_total_per90",
+  "type": "double"
+ },
+ {
+  "name": "passes_key_per90",
+  "type": "double"
+ },
+ {
+  "name": "passes_accurate_per90",
+  "type": "double"
+ },
+ {
+  "name": "tackles_total_per90",
+  "type": "double"
+ },
+ {
+  "name": "blocks_per90",
+  "type": "double"
+ },
+ {
+  "name": "interceptions_per90",
+  "type": "double"
+ },
+ {
+  "name": "duels_total_per90",
+  "type": "double"
+ },
+ {
+  "name": "duels_won_per90",
+  "type": "double"
+ },
+ {
+  "name": "dribbles_attempts_per90",
+  "type": "double"
+ },
+ {
+  "name": "dribbles_success_per90",
+  "type": "double"
+ },
+ {
+  "name": "dribbled_past_per90",
+  "type": "double"
+ },
+ {
+  "name": "fouls_drawn_per90",
+  "type": "double"
+ },
+ {
+  "name": "fouls_committed_per90",
+  "type": "double"
+ },
+ {
+  "name": "cards_yellow_per90",
+  "type": "double"
+ },
+ {
+  "name": "cards_red_per90",
+  "type": "double"
+ },
+ {
+  "name": "saves_per90",
+  "type": "double"
+ },
+ {
+  "name": "goals_conceded_per90",
+  "type": "double"
+ },
+ {
+  "name": "offsides_per90",
+  "type": "double"
+ },
+ {
+  "name": "penalty_won_per90",
+  "type": "double"
+ },
+ {
+  "name": "penalty_committed_per90",
+  "type": "double"
+ },
+ {
+  "name": "shot_accuracy",
+  "type": "double"
+ },
+ {
+  "name": "pass_accuracy",
+  "type": "double"
+ },
+ {
+  "name": "duel_win_rate",
+  "type": "double"
+ },
+ {
+  "name": "dribble_success_rate",
+  "type": "double"
+ },
+ {
+  "name": "team_matches",
+  "type": "double"
+ },
+ {
+  "name": "team_ppg",
+  "type": "double"
+ },
+ {
+  "name": "team_gd_per_match",
+  "type": "double"
+ },
+ {
+  "name": "minutes_share",
+  "type": "double"
+ },
+ {
+  "name": "form_minutes_share",
+  "type": "double"
+ },
+ {
+  "name": "form_involvement_per90",
+  "type": "double"
+ },
+ {
+  "name": "form_rating",
+  "type": "double"
+ },
+ {
+  "name": "prev_minutes",
+  "type": "double"
+ },
+ {
+  "name": "prev_league",
+  "type": "string"
+ },
+ {
+  "name": "prev_minutes_share",
+  "type": "double"
+ },
+ {
+  "name": "prev_rating",
+  "type": "double"
+ },
+ {
+  "name": "prev_goals_per90",
+  "type": "double"
+ },
+ {
+  "name": "prev_assists_per90",
+  "type": "double"
+ },
+ {
+  "name": "prev_feature_date",
+  "type": "timestamp"
+ },
+ {
+  "name": "career_seasons",
+  "type": "bigint"
+ },
+ {
+  "name": "career_minutes",
+  "type": "double"
+ },
+ {
+  "name": "has_prev_season",
+  "type": "boolean"
+ },
+ {
+  "name": "minutes_change",
+  "type": "double"
+ },
+ {
+  "name": "rating_change",
+  "type": "double"
+ },
+ {
+  "name": "minutes_share_change",
+  "type": "double"
+ },
+ {
+  "name": "changed_league",
+  "type": "boolean"
+ },
+ {
+  "name": "market_value",
+  "type": "double"
+ },
+ {
+  "name": "value_date",
+  "type": "timestamp"
+ },
+ {
+  "name": "market_value_1y_before",
+  "type": "double"
+ },
+ {
+  "name": "value_change_1y",
+  "type": "double"
+ },
+ {
+  "name": "market_value_max_to_date",
+  "type": "double"
+ },
+ {
+  "name": "team_possession",
+  "type": "double"
+ },
+ {
+  "name": "team_shots_pm",
+  "type": "double"
+ },
+ {
+  "name": "team_shots_against_pm",
+  "type": "double"
+ },
+ {
+  "name": "team_shot_share",
+  "type": "double"
+ },
+ {
+  "name": "team_pass_accuracy",
+  "type": "double"
+ },
+ {
+  "name": "team_xg_pm",
+  "type": "double"
+ },
+ {
+  "name": "team_xga_pm",
+  "type": "double"
+ },
+ {
+  "name": "club_cup_minutes_12m",
+  "type": "double"
+ },
+ {
+  "name": "club_cup_matches_12m",
+  "type": "double"
+ },
+ {
+  "name": "club_cup_ga_per90_12m",
+  "type": "double"
+ },
+ {
+  "name": "club_cup_rating_12m",
+  "type": "double"
+ },
+ {
+  "name": "ucl_minutes_12m",
+  "type": "double"
+ },
+ {
+  "name": "intl_minutes_12m",
+  "type": "double"
+ },
+ {
+  "name": "intl_matches_12m",
+  "type": "double"
+ },
+ {
+  "name": "intl_ga_12m",
+  "type": "double"
+ },
+ {
+  "name": "last_comp_match_date",
+  "type": "timestamp"
+ },
+ {
+  "name": "injury_matches_missed_12m",
+  "type": "double"
+ },
+ {
+  "name": "injury_spells_12m",
+  "type": "double"
+ },
+ {
+  "name": "last_injury_date",
+  "type": "timestamp"
+ },
+ {
+  "name": "career_moves",
+  "type": "double"
+ },
+ {
+  "name": "career_loans",
+  "type": "double"
+ },
+ {
+  "name": "career_paid_moves",
+  "type": "double"
+ },
+ {
+  "name": "moves_last_2y",
+  "type": "double"
+ },
+ {
+  "name": "days_since_last_move",
+  "type": "double"
+ },
+ {
+  "name": "last_move_kind",
+  "type": "string"
+ },
+ {
+  "name": "last_fee_eur",
+  "type": "double"
+ },
+ {
+  "name": "max_fee_eur_to_date",
+  "type": "double"
+ },
+ {
+  "name": "on_loan",
+  "type": "double"
+ },
+ {
+  "name": "last_transfer_date",
+  "type": "timestamp"
+ }
+]

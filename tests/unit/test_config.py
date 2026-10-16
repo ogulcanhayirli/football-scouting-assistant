@@ -9,11 +9,16 @@ from scout.secrets import MissingSecretError, get_secret
 CONFIGS = Path(__file__).parents[2] / "configs"
 
 
-@pytest.mark.parametrize("name", ["backfill.free.yaml", "backfill.pro.yaml"])
+@pytest.mark.parametrize("name", ["backfill.free.yaml", "backfill.pro.yaml", "backfill.ultra.yaml"])
 def test_committed_configs_load(name):
     settings = load_settings(CONFIGS / name)
-    assert {lg.key for lg in settings.leagues} == {"epl", "super_lig"}
+    keys = [lg.key for lg in settings.leagues]
+    assert keys[:2] == ["epl", "super_lig"]
+    assert len(keys) == len(set(keys))
+    assert len({lg.api_football_id for lg in settings.leagues}) == len(keys)
     assert settings.league("super_lig").api_football_id == 203
+    if name == "backfill.ultra.yaml":
+        assert len(keys) == 17
 
 
 def test_free_config_matches_free_tier_limits():
@@ -43,3 +48,21 @@ def test_missing_secret_raises(monkeypatch):
     monkeypatch.delenv("X_SSM", raising=False)
     with pytest.raises(MissingSecretError):
         get_secret("X_KEY", "X_SSM")
+
+
+def test_competitions_are_separate_from_leagues():
+    settings = load_settings(CONFIGS / "backfill.ultra.yaml")
+    competition_keys = {c.key for c in settings.competitions}
+    assert {
+        "champions_league",
+        "europa_league",
+        "conference_league",
+        "world_cup",
+    } <= competition_keys
+    assert competition_keys.isdisjoint({lg.key for lg in settings.leagues})
+    ids = [c.api_football_id for c in settings.competitions] + [
+        lg.api_football_id for lg in settings.leagues
+    ]
+    assert len(ids) == len(set(ids))
+    assert {c.kind for c in settings.competitions} == {"club", "national"}
+    assert load_settings(CONFIGS / "backfill.free.yaml").competitions == []

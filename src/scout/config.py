@@ -20,6 +20,13 @@ class LeagueConfig(BaseModel):
     name: str
     api_football_id: int
     transfermarkt_id: str = Field(description="Transfermarkt competition code, e.g. GB1, TR1.")
+    region: Literal["europe", "south_america"] = Field(
+        default="europe", description="Decides which club cups cover its players."
+    )
+    calendar_year: bool = Field(
+        default=False,
+        description="Season runs within one calendar year (Brazil, Argentina), not August to May.",
+    )
 
 
 class QuotaConfig(BaseModel):
@@ -58,6 +65,8 @@ class TransfermarktConfig(BaseModel):
             "player_valuations.csv.gz",
             "appearances.csv.gz",
             "clubs.csv.gz",
+            "transfers.csv.gz",
+            "games.csv.gz",
         ]
     )
 
@@ -85,10 +94,20 @@ class BackfillConfig(BaseModel):
     )
 
 
+class CompetitionConfig(LeagueConfig):
+    """A cup or national team competition. Its matches add columns to the players'
+    league rows (European and international minutes, form); it never gets rows of
+    its own."""
+
+    transfermarkt_id: str = ""
+    kind: Literal["club", "national"]
+
+
 class Settings(BaseModel):
     api_football: ApiFootballConfig
     transfermarkt: TransfermarktConfig = TransfermarktConfig()
     leagues: list[LeagueConfig]
+    competitions: list[CompetitionConfig] = Field(default_factory=list)
     paths: PathsConfig = PathsConfig()
     backfill: BackfillConfig = BackfillConfig()
 
