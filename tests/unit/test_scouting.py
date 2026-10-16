@@ -5,6 +5,9 @@ import pytest
 from scout.scouting import (
     _rank_of,
     ability,
+    ability_elo,
+    elo_league_strength,
+    elo_terms,
     league_strength,
     targets,
     team_shares,
@@ -61,6 +64,75 @@ def test_ability_removes_league_and_team_and_shrinks_small_samples():
     few = features.assign(minutes=90.0)
     shrunk = ability(few, strength, team_effect)["adj_rating"]
     assert shrunk.std() < out["adj_rating"].std() / 3  # 90 minutes say little
+
+
+def _elo_rows(rng, n_players=400, seasons=range(2015, 2021)):
+    """Ratings fall 0.05 per 100 Elo of league strength and rise 0.03 per 100
+    Elo of club strength; each league's Elo also drifts from season to
+    season, which the ratings of players who stay do not follow."""
+    level = {"epl": 0.0, "super_lig": -2.5, "eredivisie": -3.0}  # Elo / 100 against the EPL
+    leagues = list(level)
+    base = rng.normal(7.0, 0.2, n_players)
+    drift = {(lg, s): rng.normal(0, 0.8) if lg != "epl" else 0.0 for lg in leagues for s in seasons}
+    rows, terms = [], []
+    for season in seasons:
+        for p in range(n_players):
+            league = leagues[(p + (season if p % 3 == 0 else 0)) % 3]
+            team = rng.normal(0, 1.5)
+            rows.append(
+                {
+                    "league_key": league,
+                    "season": season,
+                    "source_player_id": p + 1,
+                    "tier": "match",
+                    "minutes": 2000.0,
+                    "rating": base[p] - 0.05 * level[league] + 0.03 * team + rng.normal(0, 0.03),
+                    "age": 25.0,
+                    "regular": True,
+                    "sub_position": "Centre-Back",
+                    "team_id": p % 20,
+                }
+            )
+            terms.append({"elo_league": level[league] + drift[(league, season)], "elo_team": team})
+    return pd.DataFrame(rows), pd.DataFrame(terms)
+
+
+def test_elo_league_strength_uses_league_movers():
+    features, terms = _elo_rows(np.random.default_rng(2))
+    table, league_coef, team_coef = elo_league_strength(features, terms)
+    assert league_coef == pytest.approx(-0.05, abs=0.01)
+    assert team_coef == pytest.approx(0.03, abs=0.005)
+    # Counting stayers too: their league's Elo drifts, their rating does not.
+    _, attenuated, _ = elo_league_strength(features, terms, movers_only=False)
+    assert abs(attenuated) < abs(league_coef) * 0.8
+    assert set(table.columns) >= {"league_key", "season", "effect"}
+    out = ability_elo(features, terms, league_coef, team_coef)
+    assert out["ability_pct"].between(0, 100).all()
+
+
+def test_elo_terms_are_against_the_premier_league_and_the_league_average():
+    features = pd.DataFrame(
+        {
+            "league_key": ["epl", "super_lig", "super_lig", "ligue_1"],
+            "season": pd.array([2020, 2020, 2020, 2020], dtype="Int64"),
+            "team_id": pd.array([1, 2, 9, 3], dtype="Int64"),
+        }
+    )
+    teams = pd.DataFrame(
+        {
+            "league_key": ["epl", "super_lig"],
+            "season": [2020, 2020],
+            "team_id": [1, 2],
+            "elo": [1900.0, 1600.0],
+        }
+    )
+    leagues = pd.DataFrame(
+        {"league_key": ["epl", "super_lig"], "season": [2020, 2020], "elo": [1800.0, 1500.0]}
+    )
+    out = elo_terms(features, teams, leagues)
+    assert out["elo_league"].tolist()[:3] == [0.0, -3.0, -3.0]
+    assert out["elo_team"].tolist()[:3] == [1.0, 1.0, 0.0]  # club 9 unrated: league average
+    assert out.iloc[3].isna().all()  # league without Elo
 
 
 def test_team_shares_sum_to_one_per_team():

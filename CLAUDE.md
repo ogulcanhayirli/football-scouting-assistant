@@ -82,7 +82,8 @@ $C transfermarkt --refresh                   # newer release? archive old files,
 $C features                                  # feature and label tables
 $C backtest                                  # value models, all targets
 $C moves                                     # big move model
-$C scouting                                  # league strength, ability, 3 targets
+$C elo                                       # team Elo from cached fixtures, reports/elo.md
+$C scouting [--strength transfer|elo]        # league strength, ability, 3 targets
 $C sync up | down [--dry-run] [--only raw|processed|reports]
 ```
 
@@ -114,6 +115,7 @@ bucket named by `$SCOUT_S3_BUCKET` (eu-central-1).
 | Player profiles | `data/processed/features/player_profiles.parquet` | contract expiry, agent, highest value per link; display only, never a model input |
 | Features | `data/processed/features/player_season_features/league=<key>/season=<year>/data.parquet` | 130,631 rows |
 | Labels | `data/processed/features/player_season_labels/...` | value now, 24 and 36 months |
+| Team Elo | `data/processed/elo/*.parquet` | per match pre match ratings, club and league seasons |
 | Model outputs | `data/processed/models/*.parquet` | backtest predictions, labels |
 | Quota state, log | `data/state/` | |
 
@@ -132,6 +134,7 @@ through the native API, and model only regular players (450+ minutes).
 
 | Model | Command | Target | Baseline | Metrics |
 |---|---|---|---|---|
+| Team Elo | `elo` | result of each club match (90 minutes), from the raw `/fixtures` cache | home result rate | Brier score after the fit window |
 | Fair value | `backtest` | log market value at the feature date; value columns excluded | `group_median` (league, position, age band) | MAE and RMSE in log units, median percentage error, Spearman |
 | Growth 24m, 36m | `backtest` | log of value 24 or 36 months later over value now | `no_change`, `group_median` | as above |
 | Big move | `moves` | joins a top 20 club by squad value within 24 months; returns to a former club excluded | `group_rate` | AUC, average precision, share of movers in each season's top 50 |
@@ -150,6 +153,13 @@ October 2026, from MODELS.md and `reports/`:
 * Elite AUC 0.88, step up 0.91, performance 0.81 (backtest, 2 seasons ahead).
   The models rank who makes it but do not predict collapses.
 * Automatic model tuning in SageMaker was run once, for growth 24m only.
+* Team Elo (`src/scout/elo.py`): 163,835 club matches from 2010, home advantage
+  70, K 12, league link 1.0, fitted on matches before July 2015 only; Brier
+  0.161 against 0.180 for the home rate baseline. Its league strength
+  correlates -0.85 with the transfer based one (Spearman -0.72). The ability
+  score with the Elo terms (`scouting --strength elo`) is slightly more stable
+  year to year (0.498 against 0.489); transfer league effect plus Elo team
+  term is the most stable (0.537). Details in `reports/elo.md`.
 
 Outputs: `reports/backtest_<target>.md`, `reports/moves.md`,
 `reports/scouting.md`, predictions under `data/processed/models/`.
@@ -173,6 +183,7 @@ src/scout/  config, secrets, ratelimit, storage, sync, athena, featurestore,
   providers/transfermarkt/  snapshot download and adapter
   contracts/                pandera schemas for every table
   backfill/                 season, match, injury and transfer runners
+  elo.py, elo_compare.py    team Elo from cached fixtures; comparison report
   features/                 build.py (core), context.py (cups, team, injuries, transfers), pipeline.py
   models/                   targets, backtest, estimators, moves, run
 training/   SageMaker entry point and requirements
@@ -191,7 +202,7 @@ Owner decisions of 2026-10-16. Each one line; details in the code and docs once 
 4. Bargains: score is actual value divided by the current value model's prediction, ranked within position; ability at or above the 70th percentile within position and at least half of team minutes; split into prime (29 and under) and experienced (30 and over); contract expiry shown.
 5. Simplify: two user facing tables, candidates and bargains; keep the value model, big move, elite and step up; retire the growth model; performance risers only if decision 3 passes.
 6. Data before 7 November: yes; feeder leagues first (Austria, Switzerland, Croatia, Serbia, Czech Republic, Norway, Sweden, Poland, Mexico, MLS, Colombia, Uruguay, Japan, South Korea, Saudi Arabia, then the second tiers of the big five), then the sidelined endpoint per player, match events, youth competitions, coaches, and a final pull of the current season on 6 November.
-7. New free sources: FBref advanced stats for the big five and the European cups from 2017/18, and ClubElo for team and league strength; API Football stays for breadth.
+7. New free sources: FBref advanced stats for the big five and the European cups from 2017/18; Elo computed from our own fixtures; ClubElo not used because its API went offline in September 2026. API Football stays for breadth.
 8. Ability score version 2 is built from per 90 stats with minutes shrinkage, without the match rating, and replaces version 1 only if it is more stable year to year and predicts the targets at least as well.
 9. Serving stack: no Lambda, API Gateway, DynamoDB or Bedrock agent; a weekly GitHub Actions run publishes Parquet, CSV and one static HTML page to S3 static hosting.
 
@@ -222,6 +233,11 @@ Settle them with the owner rather than guessing.
   Profesional 2023 has no season totals (the API returns the Copa de la Liga).
 * Market value targets reflect the market's opinion; coach and system effects
   are not predictable from this data.
+* League and team strength for the ability score: `scouting` still defaults
+  to `--strength transfer`. `reports/elo.md` has the comparison; the owner
+  decides between transfer, Elo, and transfer league plus Elo team (the most
+  stable, not built as a flag yet). Decision 8 also asks that a replacement
+  predicts the targets at least as well, which is not yet checked.
 * The `pyproject.toml` description still names only the Premier League and the
   Süper Lig.
 * The work branch is `claude/gifted-brown-nwtnj0`; it is not merged into

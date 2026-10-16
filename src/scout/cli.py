@@ -226,7 +226,14 @@ def cmd_moves(settings: Settings, args: argparse.Namespace) -> int:
 def cmd_scouting(settings: Settings, args: argparse.Namespace) -> int:
     from scout.scouting import run_scouting
 
-    run_scouting(settings)
+    run_scouting(settings, args.strength)
+    return 0
+
+
+def cmd_elo(settings: Settings, args: argparse.Namespace) -> int:
+    from scout.elo_compare import run_elo_comparison
+
+    print(run_elo_comparison(settings))
     return 0
 
 
@@ -446,7 +453,19 @@ def main(argv: list[str] | None = None) -> int:
         "scouting",
         help="League strength, ability, targets, traits, shortlists (reports/scouting.md)",
     )
+    scouting.add_argument(
+        "--strength",
+        choices=["transfer", "elo"],
+        default="transfer",
+        help="League and team strength: transfer based (default) or team Elo (run `elo` first)",
+    )
     scouting.set_defaults(func=cmd_scouting)
+
+    elo = sub.add_parser(
+        "elo",
+        help="Team Elo from the cached fixtures, league strength, comparison (reports/elo.md)",
+    )
+    elo.set_defaults(func=cmd_elo)
 
     sync = sub.add_parser("sync", help="Copy data/raw, data/processed and reports to or from S3")
     sync.add_argument("direction", choices=["up", "down"])
