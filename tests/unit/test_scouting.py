@@ -1,0 +1,173 @@
+import numpy as np
+import pandas as pd
+import pytest
+
+from scout.scouting import (
+    _rank_of,
+    ability,
+    league_strength,
+    targets,
+    team_shares,
+    trait_table,
+)
+
+
+def _season_rows(rng, n_players=400, seasons=range(2015, 2021)):
+    """Players with a fixed true level; ratings are level + league effect +
+    team effect + noise. Some players switch leagues every season."""
+    effects = {"epl": 0.0, "super_lig": 0.15, "eredivisie": 0.25}
+    leagues = list(effects)
+    level = rng.normal(7.0, 0.2, n_players)
+    rows = []
+    for season in seasons:
+        for p in range(n_players):
+            league = leagues[(p + (season if p % 3 == 0 else 0)) % 3]
+            gd = rng.normal(0, 0.5)
+            rows.append(
+                {
+                    "league_key": league,
+                    "season": season,
+                    "source_player_id": p + 1,
+                    "tier": "match",
+                    "minutes": 2000.0,
+                    "rating": level[p] + effects[league] + 0.08 * gd + rng.normal(0, 0.03),
+                    "team_gd_per_match": gd,
+                    "age": 25.0,
+                    "regular": True,
+                    "sub_position": "Centre-Back",
+                    "team_id": p % 20,
+                }
+            )
+    return pd.DataFrame(rows), effects
+
+
+def test_league_strength_recovers_the_true_effects():
+    features, effects = _season_rows(np.random.default_rng(0))
+    strength, team_effect = league_strength(features)
+    by = strength.set_index("league_key")["raw_effect"]
+    for league, effect in effects.items():
+        assert by[league] == pytest.approx(effect, abs=0.02)
+    assert team_effect == pytest.approx(0.08, abs=0.02)
+
+
+def test_ability_removes_league_and_team_and_shrinks_small_samples():
+    features, _ = _season_rows(np.random.default_rng(1), n_players=60)
+    strength, team_effect = league_strength(features)
+    out = ability(features, strength, team_effect)
+    # The same player rates the same after adjustment wherever he plays.
+    spread = out.groupby(features["source_player_id"])["adj_rating"].std()
+    assert spread.median() < 0.05
+    assert out["ability_pct"].between(0, 100).all()
+    few = features.assign(minutes=90.0)
+    shrunk = ability(few, strength, team_effect)["adj_rating"]
+    assert shrunk.std() < out["adj_rating"].std() / 3  # 90 minutes say little
+
+
+def test_team_shares_sum_to_one_per_team():
+    frame = pd.DataFrame(
+        {
+            "league_key": ["epl"] * 3,
+            "season": [2020] * 3,
+            "team_id": [1, 1, 2],
+            "goals": [3.0, 1.0, 0.0],
+            "assists": [1.0, 1.0, 0.0],
+            "shots_total": [10.0, 30.0, 5.0],
+            "passes_key": [5.0, 5.0, 1.0],
+            "dribbles_success": [4.0, 0.0, 2.0],
+        }
+    )
+    out = team_shares(frame)
+    assert out.loc[:1, "share_goals"].tolist() == [0.75, 0.25]
+    assert np.isnan(out.loc[2, "share_goals"])  # the team scored nothing
+    assert out.loc[2, "share_shots"] == 1
+
+
+def test_rank_of_counts_the_values_above():
+    table = {2020: np.array([100.0, 50.0, 50.0, 10.0])}
+    ranks = _rank_of(pd.Series([60.0, 50.0, 5.0, np.nan]), pd.Series([2020] * 4), table)
+    assert ranks.tolist()[:3] == [2, 2, 5]
+    assert np.isnan(ranks.iloc[3])
+
+
+def _target_inputs():
+    """One season of 1,200 valued players, then two later seasons."""
+    rows = []
+    for season in (2018, 2019, 2020):
+        for p in range(1, 1201):
+            rows.append(
+                {
+                    "league_key": "epl",
+                    "season": season,
+                    "source_player_id": p,
+                    "tm_player_id": p,
+                    "feature_date": pd.Timestamp(f"{season + 1}-06-30"),
+                    "regular": True,
+                    "minutes": 2000.0,
+                    "market_value": float(10_000 - p),  # rank = player id
+                }
+            )
+    features = pd.DataFrame(rows)
+    vals = features[["tm_player_id", "feature_date", "market_value"]].rename(
+        columns={
+            "tm_player_id": "source_player_id",
+            "feature_date": "valuation_date",
+            "market_value": "market_value_eur",
+        }
+    )
+    return features, vals
+
+
+def test_elite_and_step_up_labels():
+    features, vals = _target_inputs()
+    # Player 300 jumps to the top in 2019, player 1100 climbs to #200 in 2020.
+    for pid, season, value in ((300, 2019, 1e9), (1100, 2020, 9_850.0)):
+        vals.loc[
+            (vals["source_player_id"] == pid)
+            & (vals["valuation_date"] == pd.Timestamp(f"{season + 1}-06-30")),
+            "market_value_eur",
+        ] = value
+    extra = pd.DataFrame({"ability_pct": np.nan}, index=features.index)
+    out = targets(features, extra, vals, data_end=pd.Timestamp("2021-06-30"))
+    first = out[out["season"] == 2018].set_index("source_player_id")
+    assert first.loc[300, "elite"] == 1
+    assert first.loc[300, "step_up"] == 1  # #300 to #1
+    assert first.loc[500, "elite"] == 0
+    assert np.isnan(first.loc[1100, "elite"])  # too far away for elite
+    assert first.loc[1100, "step_up"] == 1  # #1100 to #151 or so
+    assert np.isnan(first.loc[50, "elite"])  # already in the top 100
+    assert out.loc[out["season"] == 2019, "elite"].isna().all()  # window not over
+
+
+def test_performance_needs_a_rise_that_holds():
+    features, vals = _target_inputs()
+    ids = features["source_player_id"]
+    season = features["season"]
+    pct = pd.Series(50.0, index=features.index)
+    # Player 1 rises and stays; player 2 has one good season; player 3 is good already.
+    pct[(ids == 1) & (season > 2018)] = 85.0
+    pct[(ids == 2) & (season == 2019)] = 95.0
+    pct[ids == 3] = 90.0
+    out = targets(features, pd.DataFrame({"ability_pct": pct}), vals, pd.Timestamp("2021-06-30"))
+    first = out[out["season"] == 2018].set_index("source_player_id")
+    assert first.loc[1, "performance"] == 1
+    assert first.loc[2, "performance"] == 0
+    assert first.loc[3, "performance"] == 0
+
+
+def test_trait_table_compares_with_peers_of_the_same_age():
+    rng = np.random.default_rng(2)
+    n = 400
+    data = pd.DataFrame(
+        {
+            "group": "winger",
+            "age_band": rng.choice(["under 21", "24 to 26"], n),
+            "step_up": (np.arange(n) < 60).astype(float),
+        }
+    )
+    data["pct_share_dribbles"] = np.where(data["step_up"] == 1, 80.0, 50.0)
+    data["pct_rating"] = np.where(data["step_up"] == 1, 90.0, 50.0)
+    with_rating = trait_table(data, "step_up")
+    without = trait_table(data, "step_up", with_rating=False)
+    assert with_rating.iloc[0]["measure"] == "rating"
+    assert without.iloc[0]["measure"] == "share_dribbles"
+    assert without.iloc[0]["gap"] == 30

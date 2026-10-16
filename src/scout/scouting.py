@@ -1,5 +1,5 @@
 """Scouting views on top of the feature tables: league strength, an ability
-score, three career targets, the traits behind them, and two shortlists.
+score, three career targets, the traits behind them, and four shortlists.
 
 Decisions, each argued in SCOUTING.md:
 
@@ -11,15 +11,17 @@ Decisions, each argued in SCOUTING.md:
   taken out, shrunk towards the position average for players with few
   minutes, as a percentile within the position group and season.
 * **Targets,** each within 2 seasons:
-  ``elite``: enters the 100 most valuable players (from outside them);
+  ``elite``: enters the 100 most valuable players, from #101 to #1,000 now;
   ``step_up``: value rank at least 3 times better, ending in the top 500;
-  ``performance``: ability percentile up by 20 points or more, to 75 or more.
+  ``performance``: both of the next two seasons at the 70th ability
+  percentile or better, and their average 20 points above now.
   The first two are the market's view (resale); the third is the football
   (Bardakcı at 29: Champions League and Euro 2024, value rank still #1,137).
 * **Traits** compare the players who reached a target with players of the
   same position group and age band who did not, on percentiles within their
   own league and season, so league strength and age are not the finding.
-  Market value is left out of the traits.
+  Market value is left out of the traits, and every trait table is shown
+  with and without the API rating, whose formula hides the measures.
 """
 
 from __future__ import annotations
@@ -45,8 +47,9 @@ HORIZON_SEASONS = 2
 ELITE_RANK = 100
 STEP_UP_RANK = 500
 STEP_UP_FACTOR = 3.0
-PERF_RISE = 20.0
-PERF_LEVEL = 75.0
+ELITE_REACH = 1000  # elite candidates start here; further away it is too rare to learn
+PERF_RISE = 20.0  # the next two seasons average this many percentiles above now
+PERF_LEVEL = 70.0  # and both are at least this good: a rise that holds, not one lucky season
 SHRINK_MINUTES = 900  # an ability score from 900 minutes is half data, half position average
 MIN_MOVES = 50  # league strength from fewer moves is pulled towards the prior
 LABEL_TOLERANCE = pd.Timedelta(days=31)  # a value from 12 June 2026 stands for 30 June 2026
@@ -273,13 +276,17 @@ def targets(
         reachable &= when["_t"] <= data_end + LABEL_TOLERANCE
     best = best.replace(np.inf, np.nan)
     out["best_rank_2y"] = best
-    candidate = out["value_rank"] > ELITE_RANK
     known = reachable & out["value_rank"].notna() & best.notna()
-    out["elite"] = (best <= ELITE_RANK).astype(float).where(known & candidate)
+    # Elite only within reach: from below #1,000 it happened 34 times in 15
+    # seasons, too rare to learn; those players have the step up target.
+    within_reach = out["value_rank"].between(ELITE_RANK + 1, ELITE_REACH)
+    out["elite"] = (best <= ELITE_RANK).astype(float).where(known & within_reach)
     step = (best <= STEP_UP_RANK) & (out["value_rank"] / best >= STEP_UP_FACTOR)
-    out["step_up"] = step.astype(float).where(known & candidate)
+    out["step_up"] = step.astype(float).where(known & (out["value_rank"] > ELITE_RANK))
 
-    # Performance: the best ability percentile in the next two seasons.
+    # Performance: a rise that holds. Half of all one season rises were gone a
+    # season later (the score's season to season correlation is 0.53), so both
+    # of the next two seasons must be good and their average well above now.
     pct = (
         pd.DataFrame(
             {
@@ -295,20 +302,24 @@ def targets(
     pct = pct.dropna().to_dict()
     pid = out["source_player_id"].astype(int).tolist()
     season = out["season"].astype(int).tolist()
-    future = pd.Series(np.nan, index=out.index)
+    later = []
     seen = pd.Series(False, index=out.index)
     for k in range(1, HORIZON_SEASONS + 1):
-        later = pd.Series(
-            [pct.get((p, s + k), np.nan) for p, s in zip(pid, season, strict=True)], index=out.index
+        # A season not rated as a regular counts as 0: it breaks the rise.
+        later.append(
+            pd.Series(
+                [pct.get((p, s + k), 0.0) for p, s in zip(pid, season, strict=True)],
+                index=out.index,
+            )
         )
         seen |= pd.Series(
             [(p, s + k) in present for p, s in zip(pid, season, strict=True)], index=out.index
         )
-        future = pd.concat([future, later], axis=1).max(axis=1)
+    later = pd.concat(later, axis=1)
     now = extra["ability_pct"]
-    rose = (future - now >= PERF_RISE) & (future >= PERF_LEVEL)
-    # Seen again but never rated as a regular counts as no rise; never seen
-    # again (left our leagues) and seasons too new to have two later ones are unknown.
+    rose = (later.min(axis=1) >= PERF_LEVEL) & (later.mean(axis=1) - now >= PERF_RISE)
+    # Never seen again (left our leagues) and seasons too new to have two
+    # later ones are unknown.
     complete = out["season"].astype(int) + HORIZON_SEASONS <= int(features["season"].max())
     out["performance"] = rose.astype(float).where(now.notna() & seen & complete)
     out["ability_pct"] = now
@@ -377,7 +388,12 @@ def evaluate(predictions: pd.DataFrame, k: int = 50) -> dict:
 # Traits
 
 
-def trait_table(data: pd.DataFrame, target: str, top: int = 6) -> pd.DataFrame:
+RATING_STATS = {"rating", "adj_rating"}
+
+
+def trait_table(
+    data: pd.DataFrame, target: str, top: int = 6, with_rating: bool = True
+) -> pd.DataFrame:
     """Per position group: the measures on which players who reached the
     target stood furthest above same age non achievers of the same position,
     as median league percentiles."""
@@ -392,6 +408,8 @@ def trait_table(data: pd.DataFrame, target: str, top: int = 6) -> pd.DataFrame:
         rest = g[g[target] == 0]
         diffs = []
         for stat in TRAIT_STATS:
+            if not with_rating and stat in RATING_STATS:
+                continue
             column = f"pct_{stat}"
             if column not in g or hits[column].notna().mean() < 0.5:
                 continue
@@ -503,7 +521,8 @@ def _lists(data: pd.DataFrame, size: int = 25) -> dict[str, pd.DataFrame]:
         "value_rank",
         "ability_pct",
     ]
-    elite = newest[newest["value_rank"] > ELITE_RANK].sort_values("score_elite", ascending=False)
+    elite = newest[newest["value_rank"].between(ELITE_RANK + 1, ELITE_REACH)]
+    elite = elite.sort_values("score_elite", ascending=False)
     step = newest[newest["value_rank"] > STEP_UP_RANK].sort_values("score_step_up", ascending=False)
     bargains = newest[(newest["ability_pct"] >= 85) & (newest["value_rank"] > 1000)]
     bargains = bargains.sort_values(["ability_pct", "value_rank"], ascending=[False, False])
@@ -520,7 +539,7 @@ def _lists(data: pd.DataFrame, size: int = 25) -> dict[str, pd.DataFrame]:
         return frame[show + extra].head(size).round(rounding)
 
     return {
-        "Investment: likely to enter the top 100 (now outside it)": fmt(
+        "Investment: likely to enter the top 100 (now #101 to #1,000)": fmt(
             elite, ["score_elite", "score_step_up"]
         ),
         "Investment: likely big step up (now outside the top 500)": fmt(
@@ -554,8 +573,19 @@ def write_report(data, strength, team_effect, results, scored, reports: Path) ->
         "",
     ]
     for target in TARGET_NAMES:
-        table = trait_table(data, target)
-        parts += [f"## Traits: {target.replace('_', ' ')}", "", table.to_markdown(index=False), ""]
+        name = target.replace("_", " ")
+        parts += [
+            f"## Traits: {name}",
+            "",
+            "With the API rating (its formula mixes all the stats):",
+            "",
+            trait_table(data, target).to_markdown(index=False),
+            "",
+            "Without it, the measures underneath:",
+            "",
+            trait_table(data, target, with_rating=False).to_markdown(index=False),
+            "",
+        ]
         top = scored[target].sort_values("score", ascending=False).groupby("season").head(25)
         hits = top[top["y"] == 1][["season", "player_name", "age"]]
         parts += [
