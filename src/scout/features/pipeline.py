@@ -4,6 +4,9 @@ Outputs, under ``data/processed/features/``, partitioned like the other
 tables so Glue and Athena can read them later:
 
 * ``player_links.parquet``: API Football id to Transfermarkt id
+* ``player_profiles.parquet``: contract expiry, agent and highest market
+  value of each linked player, as the snapshot states them today. Display
+  only, for the current season's lists; never joined into the features.
 * ``player_season_features/league=<key>/season=<year>/data.parquet``
 * ``player_season_labels/league=<key>/season=<year>/data.parquet``
 
@@ -19,7 +22,12 @@ import pandas as pd
 
 from scout.backfill.transfers import transfers_path
 from scout.config import Settings
-from scout.contracts import PLAYER_SEASON_FEATURES, PLAYER_SEASON_LABELS, validate
+from scout.contracts import (
+    PLAYER_PROFILES,
+    PLAYER_SEASON_FEATURES,
+    PLAYER_SEASON_LABELS,
+    validate,
+)
 from scout.features.build import Inputs, build_features
 from scout.fsutil import atomic_write_text
 from scout.matching import match_players
@@ -27,8 +35,6 @@ from scout.providers.transfermarkt import TransfermarktValuationProvider
 from scout.tables import PARTITION_FILE
 
 log = logging.getLogger(__name__)
-
-TM_DATA_END = pd.Timestamp("2026-06-12")  # last valuation in the snapshot
 
 
 def _read_partitions(root: Path) -> pd.DataFrame:
@@ -58,6 +64,23 @@ def build_links(season_stats: pd.DataFrame, tm_players: pd.DataFrame) -> pd.Data
     return links.reset_index(drop=True)
 
 
+def build_profiles(
+    links: pd.DataFrame, tm_profiles: pd.DataFrame, as_of: pd.Timestamp
+) -> pd.DataFrame:
+    """One row per linked player with the snapshot's present day profile fields.
+
+    ``as_of`` is the snapshot's last valuation date: the fields describe the
+    player around then, not at any feature date.
+    """
+    out = links[["af_player_id", "tm_player_id"]].merge(
+        tm_profiles.rename(columns={"source_player_id": "tm_player_id"}),
+        on="tm_player_id",
+        how="left",
+    )
+    out["as_of"] = as_of
+    return out.reset_index(drop=True)
+
+
 def _split(frame: pd.DataFrame, keys: set[str]) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Rows of the given league keys, and the rest (cups and national teams)."""
     if frame.empty:
@@ -85,6 +108,8 @@ def load_inputs(settings: Settings) -> Inputs:
     linked = set(links["tm_player_id"].dropna().astype(int))
     valuations = tm.valuations(None)
     valuations = valuations[valuations["source_player_id"].isin(linked)]
+    data_end = tm.data_end()
+    log.info("Transfermarkt valuations end on %s", data_end.date())
     log.info(
         "Inputs: %d season rows, %d league and %d cup match rows, %d team rows, "
         "%d injuries, %d transfers, %d links, %d valuations",
@@ -103,7 +128,7 @@ def load_inputs(settings: Settings) -> Inputs:
         links,
         tm_players,
         valuations,
-        TM_DATA_END,
+        data_end,
         comp_matches=comp_matches,
         team_stats=team_stats,
         injuries=injuries,
@@ -143,6 +168,11 @@ def run_features(settings: Settings) -> tuple[pd.DataFrame, pd.DataFrame]:
     out = settings.paths.processed_dir / "features"
     out.mkdir(parents=True, exist_ok=True)
     inputs.links.to_parquet(out / "player_links.parquet", index=False)
+    tm = TransfermarktValuationProvider(settings.paths.raw_dir / "transfermarkt")
+    profiles = validate(
+        PLAYER_PROFILES, build_profiles(inputs.links, tm.profiles(), inputs.data_end)
+    )
+    profiles.to_parquet(out / "player_profiles.parquet", index=False)
     n = _write_partitioned(features, out / "player_season_features")
     _write_partitioned(label_table, out / "player_season_labels")
     write_feature_report(features, label_table, settings.paths.reports_dir)

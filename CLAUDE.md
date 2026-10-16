@@ -78,6 +78,7 @@ $C backfill --level match                    # per match player stats
 $C backfill --level team | lineup | injuries  # add --scope competitions for cups
 $C backfill --level transfers                # /transfers once per club
 $C transfermarkt                             # the dcaribou snapshot, once
+$C transfermarkt --refresh                   # newer release? archive old files, fetch changed ones
 $C features                                  # feature and label tables
 $C backtest                                  # value models, all targets
 $C moves                                     # big move model
@@ -102,7 +103,7 @@ bucket named by `$SCOUT_S3_BUCKET` (eu-central-1).
 | What | Local path | Size or count |
 |---|---|---|
 | API Football raw cache | `data/raw/api_football/<endpoint>/<param>=<value>/....json` | 254,398 responses, each with a `.meta.json` |
-| Transfermarkt snapshot | `data/raw/transfermarkt/*.csv.gz` | values end 2026-06-12 |
+| Transfermarkt snapshot | `data/raw/transfermarkt/*.csv.gz` | release of 2026-09-05 (latest on 2026-10-16; upstream paused), values end 2026-06-12; replaced files go to `archive/<date>/` |
 | Season totals | `data/processed/player_season_stats/league=<key>/season=<year>.parquet` | 183,482 rows |
 | Per match player stats | `data/processed/player_match_stats/...` | 2,226,071 rows, from 2015 |
 | Per match team stats | `data/processed/team_match_stats/...` | 137,600 rows; xG from 2023/24 |
@@ -110,6 +111,7 @@ bucket named by `$SCOUT_S3_BUCKET` (eu-central-1).
 | Injuries | `data/processed/injuries/...` | 139,927 rows, from 2020 |
 | Transfers | `data/processed/transfers/transfers.parquet` | 285,797 moves |
 | Player links | `data/processed/features/player_links.parquet` | 33,875 linked players |
+| Player profiles | `data/processed/features/player_profiles.parquet` | contract expiry, agent, highest value per link; display only, never a model input |
 | Features | `data/processed/features/player_season_features/league=<key>/season=<year>/data.parquet` | 130,631 rows |
 | Labels | `data/processed/features/player_season_labels/...` | value now, 24 and 36 months |
 | Model outputs | `data/processed/models/*.parquet` | backtest predictions, labels |
@@ -210,8 +212,9 @@ Settle them with the owner rather than guessing.
 * Decision 9 replaces the planned AWS shape in README.md (Lambda, API Gateway,
   DynamoDB, Bedrock agent); README.md still describes the old plan.
 * Decision 4 shows contract expiry, which rule 1 keeps out of features because
-  the snapshot describes 2026; it may be shown for the current season only,
-  never used as a model input.
+  the snapshot describes 2026. It now lives in `player_profiles.parquet` with
+  agent and highest value, for the current season's lists only; the feature
+  contract and `NOT_FEATURES` both block those columns from models.
 * The Glue schema is regenerated for 129 feature columns but `ScoutData` is
   not redeployed, and the Feature Store group predates the context features.
 * API gaps: no Euro qualifier data at all and no 2026 World Cup qualifiers,

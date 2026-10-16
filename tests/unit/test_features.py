@@ -3,7 +3,13 @@ import pandas as pd
 import pandera.errors
 import pytest
 
-from scout.contracts import PLAYER_SEASON_FEATURES, PLAYER_SEASON_LABELS, validate
+from scout.contracts import (
+    PLAYER_PROFILES,
+    PLAYER_SEASON_FEATURES,
+    PLAYER_SEASON_LABELS,
+    PRESENT_ONLY_COLUMNS,
+    validate,
+)
 from scout.features import (
     Inputs,
     build_features,
@@ -20,7 +26,10 @@ from scout.features.build import (
     season_tier_features,
     team_results,
 )
+from scout.features.pipeline import build_profiles
+from scout.models.targets import NOT_FEATURES, TARGETS, feature_columns
 from scout.providers.api_football.matches import MATCH_COLUMNS
+from scout.scouting import model_columns
 
 KEYS = ["league_key", "season", "source_player_id"]
 
@@ -428,3 +437,36 @@ def test_seasons_without_match_data_fall_back_to_season_totals():
     belgium = features[features["league_key"] == "belgian_pro_league"]
     assert belgium["tier"].tolist() == ["season"]  # 2019 has no match data, still kept
     assert features[features["season"] == 2023]["tier"].unique().tolist() == ["match"]
+
+
+@pytest.mark.parametrize("column", PRESENT_ONLY_COLUMNS)
+def test_present_only_profile_columns_never_reach_a_model(column):
+    """Contract expiry, agent and highest value describe today: the feature
+    contract rejects them and every model's column list leaves them out."""
+    features, _ = build_features(_inputs())
+    assert column not in features.columns
+    leaked = features.assign(**{column: 1.0})
+    with pytest.raises(pandera.errors.SchemaErrors, match="no_present_only_columns"):
+        validate(PLAYER_SEASON_FEATURES, leaked)
+    assert column in NOT_FEATURES
+    assert column not in feature_columns(leaked, TARGETS["growth_24m"])
+    assert column not in model_columns(leaked)
+
+
+def test_build_profiles_keeps_one_row_per_linked_player():
+    links = pd.DataFrame(
+        {"af_player_id": pd.array([1, 2], "Int64"), "tm_player_id": pd.array([11, 22], "Int64")}
+    )
+    tm = pd.DataFrame(
+        {
+            "source_player_id": pd.array([11, 33], "Int64"),
+            "contract_expiry": pd.to_datetime(["2028-06-30", "2027-06-30"]),
+            "agent": pd.array(["A", "B"], "string"),
+            "highest_market_value_eur": [5e6, 1e6],
+        }
+    )
+    out = validate(PLAYER_PROFILES, build_profiles(links, tm, pd.Timestamp("2026-06-12")))
+    assert out["af_player_id"].tolist() == [1, 2]
+    assert out.loc[0, "contract_expiry"] == pd.Timestamp("2028-06-30")
+    assert pd.isna(out.loc[1, "agent"])  # linked but not in the profile source
+    assert (out["as_of"] == pd.Timestamp("2026-06-12")).all()

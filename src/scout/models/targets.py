@@ -20,11 +20,15 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
+from scout.contracts import PRESENT_ONLY_COLUMNS
+
 KEYS = ["league_key", "season", "source_player_id"]
 
-# Never inputs: identifiers, names, dates, and columns that are only there
-# to audit the point in time rule.
+# Never inputs: identifiers, names, dates, columns that are only there to
+# audit the point in time rule, and the snapshot's present day profile fields
+# (the feature contract already rejects those; this is the second lock).
 NOT_FEATURES = {
+    *PRESENT_ONLY_COLUMNS,
     "source_player_id",
     "tm_player_id",
     "link_rule",

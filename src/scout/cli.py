@@ -116,9 +116,23 @@ def cmd_coverage(settings: Settings, args: argparse.Namespace) -> int:
 
 
 def cmd_transfermarkt(settings: Settings, args: argparse.Namespace) -> int:
-    from scout.providers.transfermarkt import download_snapshot
+    from scout.providers.transfermarkt import (
+        TransfermarktValuationProvider,
+        download_snapshot,
+        refresh_snapshot,
+    )
 
-    download_snapshot(settings.transfermarkt, settings.paths.raw_dir)
+    if not args.refresh:
+        download_snapshot(settings.transfermarkt, settings.paths.raw_dir)
+        return 0
+    results = refresh_snapshot(settings.transfermarkt, settings.paths.raw_dir)
+    for r in results:
+        where = f", old copy in {r.archived_to}" if r.archived_to else ""
+        print(f"{r.name}: {r.status} (published {r.last_modified}){where}")
+    tm = TransfermarktValuationProvider(settings.paths.raw_dir / "transfermarkt")
+    print(f"Latest valuation date: {tm.data_end().date()}")
+    if any(r.status != "unchanged" for r in results):
+        print("Snapshot changed: run `scout features` to rebuild links, profiles and features.")
     return 0
 
 
@@ -377,6 +391,12 @@ def main(argv: list[str] | None = None) -> int:
     coverage.set_defaults(func=cmd_coverage)
 
     tm = sub.add_parser("transfermarkt", help="Download the transfermarkt-datasets snapshot")
+    tm.add_argument(
+        "--refresh",
+        action="store_true",
+        help="check the published release and download only the files that changed; "
+        "replaced files are moved to archive/<date>/",
+    )
     tm.set_defaults(func=cmd_transfermarkt)
 
     features = sub.add_parser("features", help="Build point in time feature and label tables")

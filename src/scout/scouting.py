@@ -463,7 +463,7 @@ def run_scouting(settings) -> Path:
     tm = TransfermarktValuationProvider(settings.paths.raw_dir / "transfermarkt")
     valuations = tm.valuations(None)
     valuations = valuations[valuations["source_player_id"].isin(linked)]
-    data_end = pd.Timestamp("2026-06-12")
+    data_end = tm.data_end()
     data, strength, team_effect = build(features, valuations, data_end)
     for column in CATEGORICAL:
         if column in data:
