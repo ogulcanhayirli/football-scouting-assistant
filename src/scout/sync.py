@@ -1,10 +1,11 @@
 """Copy the local data folders to and from a private S3 bucket.
 
-``data/raw`` maps to ``<prefix>raw/`` and ``data/processed`` to
-``<prefix>processed/``. A file is skipped when the other side already holds
-the same bytes, judged by size and MD5 against the S3 ETag (objects are
-uploaded in one part, and with SSE-S3 encryption the ETag is then the MD5;
-under SSE-KMS it is not, and every file would be copied again). Nothing is ever deleted on
+``data/raw`` maps to ``<prefix>raw/``, ``data/processed`` to
+``<prefix>processed/`` and ``reports`` to ``<prefix>reports/``. A file is
+skipped when the other side already holds the same bytes, judged by size and
+MD5 against the S3 ETag (objects are uploaded in one part, and with SSE-S3
+encryption the ETag is then the MD5; under SSE-KMS it is not, and every file
+would be copied again). Nothing is ever deleted on
 either side, and the bucket keeps old versions when a file changes.
 
 The S3 client is passed in, so tests use an in memory fake and the module

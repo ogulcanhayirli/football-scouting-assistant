@@ -82,7 +82,7 @@ $C features                                  # feature and label tables
 $C backtest                                  # value models, all targets
 $C moves                                     # big move model
 $C scouting                                  # league strength, ability, 3 targets
-$C sync up | down [--dry-run] [--only raw|processed]
+$C sync up | down [--dry-run] [--only raw|processed|reports]
 ```
 
 Also `athena "SQL"`, `featurestore ingest | pit --as-of DATE`,
@@ -96,8 +96,8 @@ background tasks: untracked `nohup` jobs died when the container went idle.
 ## Data inventory
 
 Local paths are under the repository; `scout sync` maps `data/raw` to
-`raw/` and `data/processed` to `processed/` in the bucket named by
-`$SCOUT_S3_BUCKET` (eu-central-1). `reports/` is local only.
+`raw/`, `data/processed` to `processed/` and `reports` to `reports/` in the
+bucket named by `$SCOUT_S3_BUCKET` (eu-central-1).
 
 | What | Local path | Size or count |
 |---|---|---|
@@ -179,6 +179,20 @@ tests/      unit, contracts, fixtures (synthetic)
 infra/      CDK app and its tests
 ```
 
+## Decisions
+
+Owner decisions of 2026-10-16. Each one line; details in the code and docs once built.
+
+1. Fall back risk horizon: two years, the same pool and seasons as the elite target; three years is run once as a check only and not shipped.
+2. List format: each candidate shows elite chance from the model score quintile and fall back risk from the flag count, with the flags and their raw numbers; no bucket with fewer than 30 players, rounded to the nearest 5%, count shown.
+3. Performance risers: baseline is the best of the player's last two seasons, with a floor of half of team minutes in the current season; the list is kept only if the fixed version beats the base rate in the backtest.
+4. Bargains: score is actual value divided by the current value model's prediction, ranked within position; ability at or above the 70th percentile within position and at least half of team minutes; split into prime (29 and under) and experienced (30 and over); contract expiry shown.
+5. Simplify: two user facing tables, candidates and bargains; keep the value model, big move, elite and step up; retire the growth model; performance risers only if decision 3 passes.
+6. Data before 7 November: yes; feeder leagues first (Austria, Switzerland, Croatia, Serbia, Czech Republic, Norway, Sweden, Poland, Mexico, MLS, Colombia, Uruguay, Japan, South Korea, Saudi Arabia, then the second tiers of the big five), then the sidelined endpoint per player, match events, youth competitions, coaches, and a final pull of the current season on 6 November.
+7. New free sources: FBref advanced stats for the big five and the European cups from 2017/18, and ClubElo for team and league strength; API Football stays for breadth.
+8. Ability score version 2 is built from per 90 stats with minutes shrinkage, without the match rating, and replaces version 1 only if it is more stable year to year and predicts the targets at least as well.
+9. Serving stack: no Lambda, API Gateway, DynamoDB or Bedrock agent; a weekly GitHub Actions run publishes Parquet, CSV and one static HTML page to S3 static hosting.
+
 ## Open questions
 
 These are unresolved or inconsistent in the repository as of 2026-10-16.
@@ -189,18 +203,15 @@ Settle them with the owner rather than guessing.
   the README status table does not list them.
 * The three scouting targets have no baseline next to the model, against
   rule 3.
-* Pending owner decisions on the scouting lists: fall back risk over 2 or 3
-  years; showing each candidate's elite chance and fall back risk as
-  historical percentages with warning flags (low minutes, ability below 55,
-  5+ matches missed injured, value falling); performance risers measured
-  against the player's usual level instead of the last season (the list now
-  finds dips, such as Bernardo Silva); bargains sorted by value relative to
-  peers and split into prime and 30 and over; whether to merge the six models
-  into one candidate view.
-* Whether any more data should be downloaded before 7 November 2026 (match
-  events were mentioned, about 100,000 requests).
-* `processed/` in S3 was synced on 2026-10-16 and matched the local tables
-  then; any rebuild since needs another `sync up`. `reports/` is never synced.
+* `processed/` and `reports/` in S3 were synced on 2026-10-16 and matched the
+  local files then; any rebuild since needs another `sync up`.
+* Decision 7 adds FBref, but README.md (Data sources and attribution) says no
+  site is scraped; FBref's terms and access method need checking first.
+* Decision 9 replaces the planned AWS shape in README.md (Lambda, API Gateway,
+  DynamoDB, Bedrock agent); README.md still describes the old plan.
+* Decision 4 shows contract expiry, which rule 1 keeps out of features because
+  the snapshot describes 2026; it may be shown for the current season only,
+  never used as a model input.
 * The Glue schema is regenerated for 129 feature columns but `ScoutData` is
   not redeployed, and the Feature Store group predates the context features.
 * API gaps: no Euro qualifier data at all and no 2026 World Cup qualifiers,

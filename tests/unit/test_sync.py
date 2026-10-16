@@ -197,3 +197,18 @@ def test_cli_sync_without_bucket_fails(tmp_path, monkeypatch):
     monkeypatch.delenv("SCOUT_S3_BUCKET", raising=False)
     config = _config(tmp_path)
     assert cli.main(["--config", str(config), "sync", "up"]) == 1
+
+
+def test_cli_sync_uploads_reports_too(data, tmp_path, monkeypatch, capsys):
+    boto3 = pytest.importorskip("boto3")
+    s3 = FakeS3()
+    monkeypatch.setattr(boto3, "client", lambda service, **kwargs: s3)
+    monkeypatch.setenv("SCOUT_S3_BUCKET", BUCKET)
+    reports = tmp_path / "reports"
+    _write(reports / "moves.md", b"# Big move model")
+    config = _config(
+        tmp_path, raw_dir=data["raw"], processed_dir=data["processed"], reports_dir=reports
+    )
+    assert cli.main(["--config", str(config), "sync", "up"]) == 0
+    assert any(key.endswith("reports/moves.md") for key in s3.objects)
+    assert "reports: sync up: 1 transferred" in capsys.readouterr().out

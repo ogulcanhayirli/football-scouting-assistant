@@ -332,7 +332,11 @@ def cmd_sync(settings: Settings, args: argparse.Namespace) -> int:
     import boto3  # optional extra: uv sync --extra aws
     from botocore.config import Config
 
-    folders = {"raw": settings.paths.raw_dir, "processed": settings.paths.processed_dir}
+    folders = {
+        "raw": settings.paths.raw_dir,
+        "processed": settings.paths.processed_dir,
+        "reports": settings.paths.reports_dir,
+    }
     if args.only:
         folders = {name: folders[name] for name in args.only}
     client = boto3.client("s3", config=Config(max_pool_connections=args.workers + 2))
@@ -424,11 +428,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     scouting.set_defaults(func=cmd_scouting)
 
-    sync = sub.add_parser("sync", help="Copy data/raw and data/processed to or from S3")
+    sync = sub.add_parser("sync", help="Copy data/raw, data/processed and reports to or from S3")
     sync.add_argument("direction", choices=["up", "down"])
     sync.add_argument("--bucket", help="Defaults to $SCOUT_S3_BUCKET")
     sync.add_argument("--prefix", default="", help="Key prefix inside the bucket")
-    sync.add_argument("--only", action="append", choices=["raw", "processed"])
+    sync.add_argument("--only", action="append", choices=["raw", "processed", "reports"])
     sync.add_argument("--dry-run", action="store_true", help="List what would be copied")
     sync.add_argument("--workers", type=int, default=8, help="Parallel transfers (default 8)")
     sync.set_defaults(func=cmd_sync)
