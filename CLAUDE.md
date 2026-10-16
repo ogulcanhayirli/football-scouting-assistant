@@ -199,8 +199,8 @@ Settle them with the owner rather than guessing.
   into one candidate view.
 * Whether any more data should be downloaded before 7 November 2026 (match
   events were mentioned, about 100,000 requests).
-* The S3 copy of `processed/` was last synced on 2026-10-12, before the
-  current feature tables and model outputs were built.
+* `processed/` in S3 was synced on 2026-10-16 and matched the local tables
+  then; any rebuild since needs another `sync up`. `reports/` is never synced.
 * The Glue schema is regenerated for 129 feature columns but `ScoutData` is
   not redeployed, and the Feature Store group predates the context features.
 * API gaps: no Euro qualifier data at all and no 2026 World Cup qualifiers,
