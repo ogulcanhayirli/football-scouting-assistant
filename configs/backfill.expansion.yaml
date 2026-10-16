@@ -1,0 +1,55 @@
+# Owner decision 6: feeder leagues, second tiers of the big five and youth
+# competitions, downloaded on Ultra before 2026-11-07. Ids, seasons and the
+# request estimate are in configs/expansion_probe.md. Run with
+# scripts/run_expansion.py, which keeps the competition order and syncs raw
+# files to S3 after each one.
+#
+# Kept apart from backfill.ultra.yaml until the features are built for these
+# leagues: the Glue league list must match that file (tests/unit/test_infra_config.py).
+api_football:
+  plan: ultra
+  quota:
+    # 75,000 a day on Ultra; the 5,000 margin caps a day at 70,000 (owner, 16 October).
+    daily_limit: 75000
+    per_minute_limit: 450
+    safety_margin: 5000
+
+# Transfermarkt codes checked against games.csv.gz of the snapshot where it has
+# games (2024 on); Colombia, Uruguay and the second tiers have none there.
+# region: only europe and south_america exist. North America, Asia and Saudi
+# Arabia keep the default for now; settle this before building their features.
+leagues:
+  - {key: austrian_bundesliga, name: Austrian Bundesliga, api_football_id: 218, transfermarkt_id: A1}
+  - {key: swiss_super_league, name: Swiss Super League, api_football_id: 207, transfermarkt_id: C1}
+  - {key: croatian_hnl, name: Croatian HNL, api_football_id: 210, transfermarkt_id: KR1}
+  - {key: serbian_superliga, name: Serbian SuperLiga, api_football_id: 286, transfermarkt_id: SER1}
+  - {key: czech_first_league, name: Czech First League, api_football_id: 345, transfermarkt_id: TS1}
+  - {key: norwegian_eliteserien, name: Eliteserien, api_football_id: 103, transfermarkt_id: NO1, calendar_year: true}
+  - {key: swedish_allsvenskan, name: Allsvenskan, api_football_id: 113, transfermarkt_id: SE1, calendar_year: true}
+  - {key: polish_ekstraklasa, name: Ekstraklasa, api_football_id: 106, transfermarkt_id: PL1}
+  - {key: liga_mx, name: Liga MX, api_football_id: 262, transfermarkt_id: MEX1}
+  - {key: mls, name: Major League Soccer, api_football_id: 253, transfermarkt_id: MLS1, calendar_year: true}
+  - {key: colombian_primera_a, name: Colombian Primera A, api_football_id: 239, transfermarkt_id: COL1, region: south_america, calendar_year: true}
+  - {key: uruguayan_primera, name: Uruguayan Primera División, api_football_id: 268, transfermarkt_id: URU1, region: south_america, calendar_year: true}
+  # J1 lists 2026 as a short season and 2027 as the first autumn to spring one.
+  - {key: j1_league, name: J1 League, api_football_id: 98, transfermarkt_id: JAP1, calendar_year: true}
+  - {key: k_league_1, name: K League 1, api_football_id: 292, transfermarkt_id: RSK1, calendar_year: true}
+  - {key: saudi_pro_league, name: Saudi Pro League, api_football_id: 307, transfermarkt_id: SA1}
+  - {key: bundesliga_2, name: 2. Bundesliga, api_football_id: 79, transfermarkt_id: L2}
+  - {key: segunda_division, name: Segunda División, api_football_id: 141, transfermarkt_id: ES2}
+  - {key: serie_b, name: Serie B, api_football_id: 136, transfermarkt_id: IT2}
+  - {key: ligue_2, name: Ligue 2, api_football_id: 62, transfermarkt_id: FR2}
+  - {key: eerste_divisie, name: Eerste Divisie, api_football_id: 89, transfermarkt_id: NL2}
+
+# Youth competitions: context only, like the cups in backfill.ultra.yaml.
+competitions:
+  - {key: uefa_youth_league, name: UEFA Youth League, api_football_id: 14, kind: club}
+  - {key: uefa_u21_championship, name: UEFA U21 Championship, api_football_id: 38, kind: national}
+  - {key: fifa_u20_world_cup, name: FIFA U20 World Cup, api_football_id: 490, kind: national}
+  - {key: fifa_u17_world_cup, name: FIFA U17 World Cup, api_football_id: 587, kind: national}
+  - {key: olympics_men, name: Olympic football (men), api_football_id: 480, kind: national}
+
+backfill:
+  seasons: all
+  endpoints: [players]
+  stop_on_plan_error: true

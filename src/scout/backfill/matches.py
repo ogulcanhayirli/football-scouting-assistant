@@ -146,11 +146,14 @@ def _backfill_match_season(
     season: int,
     settings: Settings,
     level: Level = PLAYER_LEVEL,
+    probe_first: bool = True,
 ) -> SeasonOutcome:
+    """With ``probe_first`` off, every match is fetched even when the probe matches
+    are empty (the owner asked for that on seasons the API flags as covered)."""
     outcome = SeasonOutcome(league.key, season, status="partial")
     fixtures = provider.fixtures(league, season)
     outcome.pages_total = len(fixtures)
-    if not _season_has_player_data(provider, fixtures, level):
+    if probe_first and not _season_has_player_data(provider, fixtures, level):
         outcome.status = "no_player_data"
         outcome.detail = f"none of {PROBE_MATCHES} probed matches has player data; skipped"
         log.warning("%s %s: %s", league.key, season, outcome.detail)
@@ -173,6 +176,11 @@ def _backfill_match_season(
                 provider.client.guard.remaining_today,
             )
 
+    if not rows:
+        outcome.status = "no_player_data"
+        outcome.detail = f"all {len(fixtures)} matches empty"
+        log.warning("%s %s: %s", league.key, season, outcome.detail)
+        return outcome
     frame = level.to_frame(rows)
     outcome.rows = len(frame)
     outcome.detail = f"{empty} matches without player data" if empty else ""
@@ -201,6 +209,7 @@ def run_match_backfill(
     seasons: list[int] | None = None,
     level: Level = PLAYER_LEVEL,
     scope: str = "leagues",
+    probe_first: bool = True,
 ) -> BackfillResult:
     """``scope`` is ``leagues`` or ``competitions`` (cups and national teams)."""
     result = BackfillResult()
@@ -216,7 +225,9 @@ def run_match_backfill(
             for season in targets:
                 log.info("%s %s: matches starting", league.key, season)
                 try:
-                    outcome = _backfill_match_season(provider, league, season, settings, level)
+                    outcome = _backfill_match_season(
+                        provider, league, season, settings, level, probe_first
+                    )
                 except PlanRestrictionError as exc:
                     outcome = SeasonOutcome(league.key, season, "refused_by_plan", detail=str(exc))
                     log.warning("%s %s refused by plan: %s", league.key, season, exc)

@@ -258,6 +258,33 @@ def test_season_without_player_data_costs_only_the_probe(settings):
     assert not match_parquet_path(settings, "epl", 2023).exists()
 
 
+def test_without_probe_every_match_is_fetched(settings):
+    # Only the last match has players, so the probe would have skipped the season.
+    fixtures = [fixture(3500 + i) for i in range(40)]
+    payloads = {
+        3500 + i: players_payload([player(3500 + i, f"P {i}", goals=1)], []) for i in range(39, 40)
+    }
+    provider = FakeMatchProvider({("epl", 2023): fixtures}, payloads)
+    result = run_match_backfill(
+        settings, FakeSeasons({"epl": {2023}}), provider, league_keys=["epl"], probe_first=False
+    )
+    assert provider.client.requests_made == 40
+    assert result.outcomes[0].status == "complete"
+    assert len(pd.read_parquet(match_parquet_path(settings, "epl", 2023))) == 1
+
+
+def test_without_probe_an_empty_season_writes_nothing(settings):
+    fixtures = [fixture(3600 + i) for i in range(10)]
+    provider = FakeMatchProvider({("epl", 2023): fixtures}, {})
+    result = run_match_backfill(
+        settings, FakeSeasons({"epl": {2023}}), provider, league_keys=["epl"], probe_first=False
+    )
+    assert provider.client.requests_made == 10
+    assert result.outcomes[0].status == "no_player_data"
+    assert result.complete
+    assert not match_parquet_path(settings, "epl", 2023).exists()
+
+
 def test_quota_stop_is_resumable(settings):
     fixtures, payloads = _season(4000, n=12)
     provider = FakeMatchProvider({("epl", 2023): fixtures}, payloads, fail_after=8)
