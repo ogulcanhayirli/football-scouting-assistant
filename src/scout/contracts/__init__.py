@@ -7,6 +7,8 @@ schema fails at the boundary instead of silently skewing a model.
 """
 
 from scout.contracts.schemas import (
+    COACH_SPELLS,
+    FIXTURE_EVENTS,
     INJURIES,
     MATCH_LINEUPS,
     PLAYER_MATCH_STATS,
@@ -16,6 +18,7 @@ from scout.contracts.schemas import (
     PLAYER_SEASON_STATS,
     PLAYERS,
     PRESENT_ONLY_COLUMNS,
+    SIDELINED,
     TEAM_MATCH_STATS,
     TRANSFERS,
     VALUATIONS,
@@ -23,6 +26,8 @@ from scout.contracts.schemas import (
 )
 
 __all__ = [
+    "COACH_SPELLS",
+    "FIXTURE_EVENTS",
     "INJURIES",
     "MATCH_LINEUPS",
     "PLAYERS",
@@ -32,6 +37,7 @@ __all__ = [
     "PLAYER_SEASON_LABELS",
     "PLAYER_SEASON_STATS",
     "PRESENT_ONLY_COLUMNS",
+    "SIDELINED",
     "TEAM_MATCH_STATS",
     "TRANSFERS",
     "VALUATIONS",

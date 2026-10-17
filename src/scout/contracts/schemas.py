@@ -5,6 +5,7 @@ import pandera.pandas as pa
 from pandera.pandas import Check, Column, DataFrameSchema
 
 from scout.providers.api_football.adapter import NUMERIC_STATS
+from scout.providers.api_football.extras import MAX_ELAPSED as MAX_EVENT_MINUTE
 from scout.providers.api_football.matches import (
     MATCH_NUMERIC_STATS,
     MAX_MATCH_MINUTES,
@@ -320,12 +321,71 @@ TRANSFERS = DataFrameSchema(
 )
 
 
+EARLIEST_DATE = pd.Timestamp("1950-01-01")
+_dated = {"nullable": True, "checks": Check.ge(EARLIEST_DATE)}
+
+SIDELINED = DataFrameSchema(
+    {
+        "source": Column(str),
+        "source_player_id": Column("Int64", Check.gt(0)),
+        "type": Column(str, nullable=True),
+        "start_date": Column("datetime64[ns]", Check.ge(EARLIEST_DATE)),
+        "end_date": Column("datetime64[ns]", **_dated),
+    },
+    checks=[_not_greater("start_date", "end_date")],
+    unique=["source_player_id", "type", "start_date", "end_date"],
+    strict=False,
+    coerce=False,
+    name="sidelined",
+)
+
+COACH_SPELLS = DataFrameSchema(
+    {
+        "source": Column(str),
+        "coach_id": Column("Int64", Check.gt(0)),
+        "coach_name": Column(str, nullable=True),
+        "birth_date": Column("datetime64[ns]", **_dated),
+        "team_id": Column("Int64", Check.gt(0)),
+        "start_date": Column("datetime64[ns]", **_dated),
+        "end_date": Column("datetime64[ns]", **_dated),
+    },
+    checks=[_not_greater("start_date", "end_date")],
+    unique=["coach_id", "team_id", "start_date", "end_date"],
+    strict=False,
+    coerce=False,
+    name="coach_spells",
+)
+
+FIXTURE_EVENTS = DataFrameSchema(
+    {
+        "source": Column(str),
+        "fixture_id": Column("Int64", Check.gt(0)),
+        "kickoff": Column("datetime64[ns, UTC]"),
+        "season": Column("Int64", Check.in_range(2000, 2100)),
+        "event_index": Column("Int64", Check.ge(0)),
+        "elapsed": Column("Int64", Check.in_range(0, MAX_EVENT_MINUTE), nullable=True),
+        "extra": Column("Int64", Check.ge(0), nullable=True),
+        "team_id": Column("Int64", nullable=True),
+        "source_player_id": Column("Int64", Check.gt(0), nullable=True),
+        "assist_id": Column("Int64", Check.gt(0), nullable=True),
+        "type": Column(str, nullable=True),
+        "detail": Column(str, nullable=True),
+    },
+    unique=["fixture_id", "event_index"],
+    strict=False,
+    coerce=False,
+    name="fixture_events",
+)
+
+
 def validate(schema: DataFrameSchema, frame: pd.DataFrame) -> pd.DataFrame:
     """Validate lazily so one run reports every violation, not just the first."""
     return schema.validate(frame, lazy=True)
 
 
 __all__ = [
+    "COACH_SPELLS",
+    "FIXTURE_EVENTS",
     "INJURIES",
     "MATCH_LINEUPS",
     "PLAYERS",
@@ -335,6 +395,7 @@ __all__ = [
     "PLAYER_SEASON_LABELS",
     "PLAYER_SEASON_STATS",
     "PRESENT_ONLY_COLUMNS",
+    "SIDELINED",
     "TEAM_MATCH_STATS",
     "TRANSFERS",
     "VALUATIONS",
