@@ -151,6 +151,17 @@ def _after(column: str, start: str) -> Check:
 _rate = {"nullable": True, "checks": Check.in_range(0, 1)}
 _per90 = {"nullable": True, "checks": Check.ge(0)}
 
+# Columns that describe a player as the Transfermarkt snapshot sees him today.
+# They live only in the player profile table, for display in the current
+# season's lists; a feature table carrying one would break the point in time
+# rule, so the feature contract rejects them.
+PRESENT_ONLY_COLUMNS = ("contract_expiry", "agent", "highest_market_value_eur")
+
+
+def _no_present_only_columns(df: pd.DataFrame) -> bool:
+    return not set(PRESENT_ONLY_COLUMNS) & set(df.columns)
+
+
 PLAYER_SEASON_FEATURES = DataFrameSchema(
     {
         "league_key": Column(str, Check.str_matches(r"^[a-z0-9_]+$")),
@@ -180,10 +191,34 @@ PLAYER_SEASON_FEATURES = DataFrameSchema(
         _before("last_comp_match_date", "feature_date"),
         _before("last_injury_date", "feature_date"),
         _before("last_transfer_date", "feature_date"),
+        Check(
+            _no_present_only_columns,
+            name="no_present_only_columns",
+            error=f"feature tables must not carry {PRESENT_ONLY_COLUMNS}",
+        ),
     ],
     unique=["league_key", "season", "source_player_id"],
     strict=False,
     name="player_season_features",
+)
+
+PLAYER_PROFILES = DataFrameSchema(
+    {
+        "af_player_id": Column("Int64", Check.gt(0), unique=True),
+        "tm_player_id": Column("Int64", Check.gt(0)),
+        "contract_expiry": Column(
+            "datetime64[ns]",
+            Check.in_range(pd.Timestamp("2000-01-01"), pd.Timestamp("2040-12-31")),
+            nullable=True,
+        ),
+        "agent": Column("string", Check.str_length(min_value=1), nullable=True),
+        "highest_market_value_eur": Column(
+            float, [Check.gt(0), Check.le(500_000_000)], nullable=True
+        ),
+        "as_of": Column("datetime64[ns]"),
+    },
+    strict=False,
+    name="player_profiles",
 )
 
 PLAYER_SEASON_LABELS = DataFrameSchema(
@@ -295,9 +330,11 @@ __all__ = [
     "MATCH_LINEUPS",
     "PLAYERS",
     "PLAYER_MATCH_STATS",
+    "PLAYER_PROFILES",
     "PLAYER_SEASON_FEATURES",
     "PLAYER_SEASON_LABELS",
     "PLAYER_SEASON_STATS",
+    "PRESENT_ONLY_COLUMNS",
     "TEAM_MATCH_STATS",
     "TRANSFERS",
     "VALUATIONS",

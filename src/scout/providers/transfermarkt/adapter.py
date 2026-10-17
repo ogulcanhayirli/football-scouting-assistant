@@ -3,7 +3,12 @@
 The dataset (github.com/dcaribou/transfermarkt-datasets) is published as
 gzipped CSVs. It has no stated license, so we use it for non commercial work
 only and attribute it. Updates paused in July 2026; valuations end on
-2026-06-12, which bounds the backtest window.
+2026-06-12, which bounds the backtest window. ``data_end`` reads that date
+from the snapshot, so a refreshed snapshot moves the window by itself.
+
+``refresh_snapshot`` checks the published files against the cached ones and
+downloads only those that changed; the files they replace are moved to
+``archive/<date>/``, never deleted.
 
 Players are scoped to a league through ``appearances``: anyone who played a
 domestic league match there. That is more complete than the current club
@@ -14,6 +19,7 @@ from __future__ import annotations
 
 import json
 import logging
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -39,6 +45,9 @@ REQUIRED_COLUMNS: dict[str, set[str]] = {
         "country_of_citizenship",
         "current_club_id",
         "current_club_name",
+        "contract_expiration_date",
+        "agent_name",
+        "highest_market_value_in_eur",
     },
     "player_valuations.csv.gz": {
         "player_id",
@@ -72,6 +81,41 @@ def season_of(dates: pd.Series) -> pd.Series:
     return (dates.dt.year - (dates.dt.month < 7).astype(int)).astype("Int64")
 
 
+# A contract running outside these years is an entry error, not a contract.
+CONTRACT_RANGE = (pd.Timestamp("2000-01-01"), pd.Timestamp("2040-12-31"))
+MAX_MARKET_VALUE_EUR = 500_000_000
+
+KEPT_HEADERS = {"etag", "last-modified", "content-length"}
+ARCHIVE_DIR = "archive"
+
+
+def _kept_headers(headers: httpx.Headers) -> dict[str, str]:
+    return {k.lower(): v for k, v in headers.items() if k.lower() in KEPT_HEADERS}
+
+
+def _fetch(http: httpx.Client, url: str, path: Path) -> dict[str, str]:
+    """Stream ``url`` to ``path``: the body lands through a rename, the sidecar first."""
+    tmp = path.with_suffix(path.suffix + ".part")
+    with http.stream("GET", url) as response:
+        response.raise_for_status()
+        with tmp.open("wb") as fh:
+            for chunk in response.iter_bytes():
+                fh.write(chunk)
+        headers = _kept_headers(response.headers)
+    meta = {
+        "url": url,
+        "fetched_at": datetime.now(UTC).isoformat(timespec="seconds"),
+        "headers": headers,
+    }
+    atomic_write_text(path.with_name(path.name + ".meta.json"), json.dumps(meta, indent=2))
+    tmp.replace(path)
+    return headers
+
+
+def _url(config: TransfermarktConfig, name: str) -> str:
+    return f"{config.base_url.rstrip('/')}/{name}"
+
+
 def download_snapshot(
     config: TransfermarktConfig,
     raw_dir: Path,
@@ -89,27 +133,79 @@ def download_snapshot(
             if path.is_file():
                 log.info("transfermarkt %s cached, skipping", name)
                 continue
-            url = f"{config.base_url.rstrip('/')}/{name}"
-            tmp = path.with_suffix(path.suffix + ".part")
-            with http.stream("GET", url) as response:
-                response.raise_for_status()
-                with tmp.open("wb") as fh:
-                    for chunk in response.iter_bytes():
-                        fh.write(chunk)
-                headers = {
-                    k: v
-                    for k, v in response.headers.items()
-                    if k.lower() in {"etag", "last-modified", "content-length"}
-                }
-            meta = {
-                "url": url,
-                "fetched_at": datetime.now(UTC).isoformat(timespec="seconds"),
-                "headers": headers,
-            }
-            atomic_write_text(path.with_name(name + ".meta.json"), json.dumps(meta, indent=2))
-            tmp.replace(path)
+            _fetch(http, _url(config, name), path)
             log.info("transfermarkt %s downloaded", name)
     return paths
+
+
+@dataclass(frozen=True)
+class FileRefresh:
+    name: str
+    status: str  # "unchanged", "new" or "updated"
+    last_modified: str | None
+    archived_to: Path | None = None
+
+
+def _same_release(cached: dict[str, str], remote: dict[str, str]) -> bool:
+    """The ETag decides; without one, size and modification time must both match."""
+    if cached.get("etag") and remote.get("etag"):
+        return cached["etag"] == remote["etag"]
+    keys = ("content-length", "last-modified")
+    return all(cached.get(k) and cached.get(k) == remote.get(k) for k in keys)
+
+
+def _archive(path: Path, cached: dict[str, str], fetched_at: str) -> Path:
+    """Move a superseded file and its sidecar to ``archive/<date>/``; nothing is deleted."""
+    stamp = cached.get("last-modified")
+    day = pd.Timestamp(stamp).date() if stamp else pd.Timestamp(fetched_at).date()
+    folder = path.parent / ARCHIVE_DIR / day.isoformat()
+    folder.mkdir(parents=True, exist_ok=True)
+    meta = path.with_name(path.name + ".meta.json")
+    if (folder / path.name).exists():
+        raise FileExistsError(f"{folder / path.name} already archived; refusing to overwrite")
+    if meta.is_file():
+        meta.replace(folder / meta.name)
+    path.replace(folder / path.name)
+    return folder
+
+
+def refresh_snapshot(
+    config: TransfermarktConfig,
+    raw_dir: Path,
+    *,
+    transport: httpx.BaseTransport | None = None,
+) -> list[FileRefresh]:
+    """Bring the cached snapshot up to the latest published release.
+
+    A HEAD request per file compares the published ETag with the one in the
+    cached sidecar. Unchanged files are not downloaded again; a changed file
+    is downloaded and the old copy moved to ``archive/<last modified date>/``.
+    """
+    target = Path(raw_dir) / SOURCE
+    target.mkdir(parents=True, exist_ok=True)
+    out = []
+    with httpx.Client(timeout=300, transport=transport, follow_redirects=True) as http:
+        for name in config.files:
+            path = target / name
+            url = _url(config, name)
+            head = http.head(url)
+            head.raise_for_status()
+            remote = _kept_headers(head.headers)
+            meta_path = path.with_name(name + ".meta.json")
+            meta = json.loads(meta_path.read_text()) if meta_path.is_file() else {}
+            cached = {k.lower(): v for k, v in meta.get("headers", {}).items()}
+            if path.is_file() and _same_release(cached, remote):
+                log.info("transfermarkt %s unchanged (%s)", name, remote.get("last-modified"))
+                out.append(FileRefresh(name, "unchanged", remote.get("last-modified")))
+                continue
+            archived = None
+            if path.is_file():
+                archived = _archive(path, cached, meta.get("fetched_at", ""))
+            headers = _fetch(http, url, path)
+            status = "updated" if archived else "new"
+            log.info("transfermarkt %s %s (%s)", name, status, headers.get("last-modified"))
+            out.append(FileRefresh(name, status, headers.get("last-modified"), archived))
+    return out
 
 
 class TransfermarktValuationProvider:
@@ -182,6 +278,37 @@ class TransfermarktValuationProvider:
             }
         )
         return out.reset_index(drop=True)
+
+    def data_end(self) -> pd.Timestamp:
+        """Date of the last valuation in the snapshot: labels after it are missing."""
+        dates = pd.to_datetime(self._read("player_valuations.csv.gz")["date"], errors="coerce")
+        return dates.max().normalize()
+
+    def profiles(self) -> pd.DataFrame:
+        """Contract expiry, agent and highest market value, as the snapshot states them.
+
+        These describe the player on the snapshot date, not at any feature date,
+        so they are for display in the current season's lists only and must
+        never become model inputs. An impossible contract year or value is an
+        entry error and becomes missing.
+        """
+        players = self._read("players.csv.gz")
+        contract = pd.to_datetime(players["contract_expiration_date"], errors="coerce")
+        bad_contract = contract.notna() & ~contract.between(*CONTRACT_RANGE)
+        highest = pd.to_numeric(players["highest_market_value_in_eur"], errors="coerce")
+        bad_value = highest.notna() & ~highest.between(0, MAX_MARKET_VALUE_EUR, inclusive="right")
+        for bad, what in ((bad_contract, "contract expiry"), (bad_value, "highest value")):
+            if bad.any():
+                log.warning("transfermarkt: %d impossible %s stored as missing", bad.sum(), what)
+        agent = players["agent_name"].astype("string").str.strip()
+        return pd.DataFrame(
+            {
+                "source_player_id": players["player_id"].astype("Int64"),
+                "contract_expiry": contract.mask(bad_contract),
+                "agent": agent.mask(agent == ""),
+                "highest_market_value_eur": highest.mask(bad_value).astype(float),
+            }
+        ).reset_index(drop=True)
 
     def valuations(self, leagues: list[LeagueConfig] | None) -> pd.DataFrame:
         """Valuations of players who appeared in ``leagues``, or of everyone when None."""

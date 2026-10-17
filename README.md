@@ -172,7 +172,10 @@ The backfill writes `reports/coverage_report.md` and `.json`, logs to
   market value history and transfer fees, derived from Transfermarkt (transfermarkt.com). The
   project states no license, so it is used here for non commercial purposes only
   and credited here. The snapshot ends in July 2026, and its last valuation
-  is dated 2026-06-12.
+  is dated 2026-06-12. `scout transfermarkt --refresh` checks the published
+  release and downloads only files whose ETag changed, moving the old copies
+  to `data/raw/transfermarkt/archive/<date>/`; as of 2026-10-16 upstream
+  updates are paused and the release of 5 September 2026 is the latest.
 * No site is scraped. No club logos or badges are stored or shown, and the
   `logo` and `photo` URLs in API responses are dropped by the adapter.
 

@@ -6,7 +6,13 @@ Decisions, each argued in SCOUTING.md:
 * **League strength** comes from players who changed leagues: the change in
   their match rating when they move, with the change in team strength and
   age held fixed, measured against the Premier League. Leagues with few
-  moves are pulled towards the average of the smaller leagues.
+  moves are pulled towards the average of the smaller leagues. This is the
+  default (``strength="transfer"``). The alternative (``strength="elo"``)
+  takes league and team strength from our own team Elo (``scout.elo``): the
+  league's mean club rating that season against the Premier League's, and
+  the club's rating against its league's; the same player pairs turn both
+  into rating units. It stays behind the flag until the comparison in
+  ``reports/elo.md`` decides.
 * **Ability score:** the match rating with league strength and team strength
   taken out, shrunk towards the position average for players with few
   minutes, as a percentile within the position group and season.
@@ -106,7 +112,9 @@ TRAIT_STATS = [
 # League strength and ability
 
 
-def league_strength(features: pd.DataFrame) -> tuple[pd.DataFrame, float]:
+def league_strength(
+    features: pd.DataFrame, team_column: str = "team_gd_per_match"
+) -> tuple[pd.DataFrame, float]:
     """Each league's rating effect against the Premier League (positive: a
     player rates higher there, so the league is weaker), the moves behind
     it, and the rating effect of one goal of team goal difference per match.
@@ -115,16 +123,7 @@ def league_strength(features: pd.DataFrame) -> tuple[pd.DataFrame, float]:
     rating change = league effect (new) - league effect (old) + team effect
     x team strength change + drift + age term, by least squares.
     """
-    r = features[(features["tier"] == "match") & (features["minutes"] >= 900)]
-    r = r[r["rating"].notna() & r["team_gd_per_match"].notna()]
-    r = r.sort_values("minutes").drop_duplicates(["source_player_id", "season"], keep="last")
-    a = r[["source_player_id", "season", "league_key", "rating", "team_gd_per_match", "age"]].copy()
-    a["season"] = a["season"].astype(int)
-    for column in ("rating", "team_gd_per_match", "age"):
-        a[column] = a[column].astype(float)
-    pairs = a.merge(
-        a.assign(season=a["season"] - 1), on=["source_player_id", "season"], suffixes=("_a", "_b")
-    ).dropna()
+    pairs = _consecutive_pairs(features, [team_column])
     leagues = sorted(set(pairs["league_key_a"]) | set(pairs["league_key_b"]))
     others = [lg for lg in leagues if lg != "epl"]
     col = {lg: i for i, lg in enumerate(others)}
@@ -134,7 +133,7 @@ def league_strength(features: pd.DataFrame) -> tuple[pd.DataFrame, float]:
             x[i, col[lb]] += 1
         if la in col:
             x[i, col[la]] -= 1
-    x[:, -3] = pairs["team_gd_per_match_b"] - pairs["team_gd_per_match_a"]
+    x[:, -3] = pairs[f"{team_column}_b"] - pairs[f"{team_column}_a"]
     x[:, -2] = 1.0
     x[:, -1] = pairs["age_a"] - 25
     y = (pairs["rating_b"] - pairs["rating_a"]).to_numpy()
@@ -156,15 +155,111 @@ def position_group(features: pd.DataFrame) -> pd.Series:
     return features["sub_position"].map(POSITION_GROUPS)
 
 
-def ability(features: pd.DataFrame, strength: pd.DataFrame, team_effect: float) -> pd.DataFrame:
-    """adj_rating and ability_pct per row (match tier, rated rows only)."""
+def _consecutive_pairs(features: pd.DataFrame, columns: list[str]) -> pd.DataFrame:
+    """The same player in consecutive seasons, 900+ minutes in both (one row
+    per player and season: the league with most minutes)."""
+    r = features[(features["tier"] == "match") & (features["minutes"] >= 900)]
+    r = r[r["rating"].notna() & r[columns].notna().all(axis=1)]
+    r = r.sort_values("minutes").drop_duplicates(["source_player_id", "season"], keep="last")
+    a = r[["source_player_id", "season", "league_key", "rating", "age", *columns]].copy()
+    a["season"] = a["season"].astype(int)
+    for column in ("rating", "age", *columns):
+        a[column] = a[column].astype(float)
+    return a.merge(
+        a.assign(season=a["season"] - 1), on=["source_player_id", "season"], suffixes=("_a", "_b")
+    ).dropna()
+
+
+def elo_terms(features: pd.DataFrame, teams: pd.DataFrame, leagues: pd.DataFrame) -> pd.DataFrame:
+    """Per row, in Elo points / 100: ``elo_league`` (league mean club rating
+    that season minus the Premier League's) and ``elo_team`` (the club's
+    season rating minus its league's). A club missing from the Elo table
+    counts as its league's average."""
+    keys = ["league_key", "season"]
+    lg = leagues[[*keys, "elo"]].copy()
+    epl = lg[lg["league_key"] == "epl"].set_index("season")["elo"]
+    lg["elo_league"] = (lg["elo"] - lg["season"].map(epl)) / 100
+    tm = teams[[*keys, "team_id", "elo"]].rename(columns={"elo": "team_elo"})
+    rows = features[[*keys, "team_id"]].copy()
+    rows["season"] = rows["season"].astype(int)
+    rows["team_id"] = rows["team_id"].astype("Int64")
+    tm = tm.assign(season=tm["season"].astype(int), team_id=tm["team_id"].astype("Int64"))
+    lg = lg.assign(season=lg["season"].astype(int))
+    rows = rows.merge(lg[[*keys, "elo", "elo_league"]], on=keys, how="left")
+    rows = rows.merge(tm, on=[*keys, "team_id"], how="left")
     out = pd.DataFrame(index=features.index)
-    effect = features["league_key"].map(strength.set_index("league_key")["effect"])
-    raw = (
-        features["rating"].astype(float)
-        - effect.astype(float)
-        - team_effect * features["team_gd_per_match"].astype(float).fillna(0)
+    out["elo_league"] = rows["elo_league"].to_numpy()
+    out["elo_team"] = ((rows["team_elo"] - rows["elo"]) / 100).fillna(0).to_numpy()
+    out.loc[out["elo_league"].isna(), "elo_team"] = np.nan
+    return out
+
+
+def elo_league_strength(
+    features: pd.DataFrame,
+    terms: pd.DataFrame,
+    team_column: str = "elo_team",
+    movers_only: bool = True,
+) -> tuple[pd.DataFrame, float, float]:
+    """Rating effect per 100 Elo of league strength (``league_coef``,
+    negative: a stronger league rates its players lower) and of team strength
+    within the league (``team_coef``), fit on the same player pairs as
+    ``league_strength``: rating change = league_coef x league Elo change +
+    team_coef x team Elo change + drift + age term. Returns the per league
+    and season effect against the Premier League, in rating units.
+
+    With ``movers_only`` (the default) the league term counts only for
+    players who changed leagues, as in ``league_strength``: a player who
+    stays sees his league's Elo drift against the Premier League from season
+    to season, but his rating, measured against the same opponents, does
+    not follow, and those pairs pulled the coefficient to half its size
+    (reports/elo.md)."""
+    data = pd.concat([features.drop(columns=terms.columns, errors="ignore"), terms], axis=1)
+    pairs = _consecutive_pairs(data, ["elo_league", team_column])
+    league_change = pairs["elo_league_b"] - pairs["elo_league_a"]
+    if movers_only:
+        league_change = league_change.where(pairs["league_key_a"] != pairs["league_key_b"], 0.0)
+    x = np.column_stack(
+        [
+            league_change,
+            pairs[f"{team_column}_b"] - pairs[f"{team_column}_a"],
+            np.ones(len(pairs)),
+            pairs["age_a"] - 25,
+        ]
     )
+    y = (pairs["rating_b"] - pairs["rating_a"]).to_numpy()
+    coef, *_ = np.linalg.lstsq(x, y, rcond=None)
+    league_coef, team_coef = float(coef[0]), float(coef[1])
+    table = (
+        data[["league_key", "season", "elo_league"]]
+        .dropna()
+        .drop_duplicates(["league_key", "season"])
+        .assign(season=lambda d: d["season"].astype(int))
+    )
+    table["effect"] = league_coef * table["elo_league"]
+    table = table.sort_values(["season", "effect"]).reset_index(drop=True)
+    return table, league_coef, team_coef
+
+
+def ability(features: pd.DataFrame, strength: pd.DataFrame, team_effect: float) -> pd.DataFrame:
+    """adj_rating and ability_pct per row with the transfer based league
+    strength (match tier, rated rows only)."""
+    effect = features["league_key"].map(strength.set_index("league_key")["effect"])
+    team = team_effect * features["team_gd_per_match"].astype(float).fillna(0)
+    return ability_from(features, effect.astype(float), team)
+
+
+def ability_elo(
+    features: pd.DataFrame, terms: pd.DataFrame, league_coef: float, team_coef: float
+) -> pd.DataFrame:
+    """adj_rating and ability_pct with the Elo based league and team terms."""
+    return ability_from(features, league_coef * terms["elo_league"], team_coef * terms["elo_team"])
+
+
+def ability_from(features: pd.DataFrame, effect: pd.Series, team: pd.Series) -> pd.DataFrame:
+    """Rating minus the league term and the team term, shrunk by minutes, as a
+    percentile within position group and season."""
+    out = pd.DataFrame(index=features.index)
+    raw = features["rating"].astype(float) - effect - team
     group = position_group(features)
     minutes = features["minutes"].astype(float).fillna(0)
     usable = raw.notna() & group.notna() & (minutes > 0)
@@ -438,9 +533,21 @@ def trait_table(
 # Assembly
 
 
-def build(features: pd.DataFrame, valuations: pd.DataFrame, data_end: pd.Timestamp):
-    strength, team_effect = league_strength(features)
-    extra = pd.concat([ability(features, strength, team_effect), team_shares(features)], axis=1)
+def build(
+    features: pd.DataFrame,
+    valuations: pd.DataFrame,
+    data_end: pd.Timestamp,
+    strength_source: str = "transfer",
+    elo_tables: tuple[pd.DataFrame, pd.DataFrame] | None = None,
+):
+    if strength_source == "elo":
+        terms = elo_terms(features, *elo_tables)
+        strength, league_coef, team_effect = elo_league_strength(features, terms)
+        scores = ability_elo(features, terms, league_coef, team_effect)
+    else:
+        strength, team_effect = league_strength(features)
+        scores = ability(features, strength, team_effect)
+    extra = pd.concat([scores, team_shares(features)], axis=1)
     data = pd.concat([features, extra], axis=1)
     pct = league_percentiles(data, TRAIT_STATS).add_prefix("pct_")
     data = pd.concat([data, pct], axis=1)
@@ -453,7 +560,7 @@ def build(features: pd.DataFrame, valuations: pd.DataFrame, data_end: pd.Timesta
     return data, strength, team_effect
 
 
-def run_scouting(settings) -> Path:
+def run_scouting(settings, strength_source: str = "transfer") -> Path:
     from scout.providers.transfermarkt import TransfermarktValuationProvider
     from scout.tables import read_feature_table
 
@@ -463,8 +570,13 @@ def run_scouting(settings) -> Path:
     tm = TransfermarktValuationProvider(settings.paths.raw_dir / "transfermarkt")
     valuations = tm.valuations(None)
     valuations = valuations[valuations["source_player_id"].isin(linked)]
-    data_end = pd.Timestamp("2026-06-12")
-    data, strength, team_effect = build(features, valuations, data_end)
+    data_end = tm.data_end()
+    elo_tables = None
+    if strength_source == "elo":
+        from scout.elo import read_tables
+
+        elo_tables = read_tables(settings.paths.processed_dir)
+    data, strength, team_effect = build(features, valuations, data_end, strength_source, elo_tables)
     for column in CATEGORICAL:
         if column in data:
             data[column] = data[column].astype("category")
@@ -503,7 +615,9 @@ def run_scouting(settings) -> Path:
     data[keep + [c for c in data.columns if c.startswith("score_")]].to_parquet(
         out_dir / "scouting.parquet", index=False
     )
-    path = write_report(data, strength, team_effect, results, scored, settings.paths.reports_dir)
+    path = write_report(
+        data, strength, team_effect, results, scored, settings.paths.reports_dir, strength_source
+    )
     log.info("Scouting report: %s", path)
     return path
 
@@ -554,16 +668,27 @@ def _lists(data: pd.DataFrame, size: int = 25) -> dict[str, pd.DataFrame]:
     }
 
 
-def write_report(data, strength, team_effect, results, scored, reports: Path) -> Path:
+def write_report(
+    data, strength, team_effect, results, scored, reports: Path, strength_source="transfer"
+) -> Path:
+    if strength_source == "elo":
+        team_note = (
+            f"Team strength: {team_effect:+.3f} rating per 100 Elo above the league average."
+        )
+        strength = strength[strength["season"] == strength["season"].max()]
+    else:
+        team_note = (
+            f"Team strength: {team_effect:+.3f} rating per goal of goal difference per match."
+        )
     parts = [
         "# Scouting report",
         "",
         "See SCOUTING.md for every decision behind these tables.",
+        f"League and team strength: {strength_source} based.",
         "",
         "## League strength (rating effect against the Premier League)",
         "",
-        f"A positive effect means a player of the same level rates higher there. "
-        f"Team strength: {team_effect:+.3f} rating per goal of goal difference per match.",
+        f"A positive effect means a player of the same level rates higher there. {team_note}",
         "",
         strength.round(3).to_markdown(index=False),
         "",

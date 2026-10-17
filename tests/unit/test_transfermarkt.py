@@ -1,4 +1,5 @@
 import gzip
+import json
 import shutil
 from pathlib import Path
 
@@ -11,6 +12,7 @@ from scout.config import TransfermarktConfig
 from scout.providers.transfermarkt import (
     TransfermarktValuationProvider,
     download_snapshot,
+    refresh_snapshot,
     season_of,
 )
 
@@ -112,3 +114,62 @@ def test_seasons_come_from_the_games_table(tmp_path, epl):
     (tmp_path / "games.csv.gz").write_bytes(gzip.compress(games.encode()))
     result = TransfermarktValuationProvider(tmp_path).league_appearances([epl])
     assert result.set_index("season")["matches"].to_dict() == {2019: 1, 2020: 2}  # 79: by date
+
+
+def test_data_end_is_the_last_valuation(provider):
+    vals = pd.read_csv(FIXTURES / "player_valuations.csv.gz")
+    assert provider.data_end() == pd.Timestamp(vals["date"].max())
+
+
+def test_profiles_repair_impossible_values(provider):
+    profiles = provider.profiles().set_index("source_player_id")
+    assert profiles.loc[910001, "contract_expiry"] == pd.Timestamp("2028-06-30")
+    assert profiles.loc[910001, "agent"] == "Synthetic Sports Ltd"
+    assert profiles.loc[910001, "highest_market_value_eur"] == 30_000_000
+    assert pd.isna(profiles.loc[910003, "contract_expiry"])  # 1900 is an entry error
+    assert pd.isna(profiles.loc[910101, "highest_market_value_eur"])  # -1 is an entry error
+    assert pd.isna(profiles.loc[910002, "agent"])  # blank agent is missing, not ""
+
+
+def _snapshot_routes(etag: str, body: bytes):
+    url = "https://data.example/data/players.csv.gz"
+    headers = {"etag": etag, "last-modified": "Sat, 05 Sep 2026 09:12:22 GMT"}
+    respx.head(url).mock(return_value=httpx.Response(200, headers=headers))
+    return respx.get(url).mock(return_value=httpx.Response(200, content=body, headers=headers))
+
+
+@respx.mock
+def test_refresh_skips_an_unchanged_release(tmp_path):
+    config = TransfermarktConfig(base_url="https://data.example/data", files=["players.csv.gz"])
+    get = _snapshot_routes('"v1"', b"v1 bytes")
+    download_snapshot(config, tmp_path)
+    results = refresh_snapshot(config, tmp_path)
+    assert [r.status for r in results] == ["unchanged"]
+    assert get.call_count == 1
+
+
+@respx.mock
+def test_refresh_archives_the_old_file_and_downloads_the_new(tmp_path):
+    config = TransfermarktConfig(base_url="https://data.example/data", files=["players.csv.gz"])
+    _snapshot_routes('"v1"', b"v1 bytes")
+    download_snapshot(config, tmp_path)
+    respx.reset()
+    _snapshot_routes('"v2"', b"v2 bytes")
+    (result,) = refresh_snapshot(config, tmp_path)
+    folder = tmp_path / "transfermarkt"
+    assert result.status == "updated"
+    assert result.archived_to == folder / "archive" / "2026-09-05"
+    assert (folder / "players.csv.gz").read_bytes() == b"v2 bytes"
+    assert (result.archived_to / "players.csv.gz").read_bytes() == b"v1 bytes"
+    assert (result.archived_to / "players.csv.gz.meta.json").is_file()
+    meta = json.loads((folder / "players.csv.gz.meta.json").read_text())
+    assert meta["headers"]["etag"] == '"v2"'
+
+
+@respx.mock
+def test_refresh_downloads_a_missing_file(tmp_path):
+    config = TransfermarktConfig(base_url="https://data.example/data", files=["players.csv.gz"])
+    _snapshot_routes('"v1"', b"v1 bytes")
+    (result,) = refresh_snapshot(config, tmp_path)
+    assert result.status == "new"
+    assert result.archived_to is None

@@ -9,6 +9,7 @@ and the Transfermarkt snapshot. It spends no API requests. Output under
 | Features | `player_season_features/league=<key>/season=<year>/data.parquet` | 16,264 |
 | Labels | `player_season_labels/league=<key>/season=<year>/data.parquet` | 16,264 |
 | Links | `player_links.parquet` (API Football id to Transfermarkt id) | 7,189 |
+| Profiles | `player_profiles.parquet` (display only, see below) | one per link |
 
 One row per league, season and player with minutes in that league season.
 Key: `league_key`, `season`, `source_player_id`. The `season` value lives in
@@ -187,12 +188,33 @@ Missing for players the API lists no transfers for at all.
 | `value_24m_date`, `value_36m_date` | the date of that value (audit: always after the feature date) |
 | `log_growth_24m`, `log_growth_36m` | log of later value divided by `value_now`: the **growth** targets |
 
-A horizon that lies past the snapshot's last valuation (2026-06-12) is
+A horizon that lies past the snapshot's last valuation (2026-06-12, read
+from the snapshot by `TransfermarktValuationProvider.data_end`) is
 missing, so the newest seasons have no growth labels.
 
 **For the fair value model, leave out every `market_value*` and
 `value_change_1y` column**: `market_value` is the target itself. The growth
 model may use them all.
+
+## Player profile table (display only)
+
+`player_profiles.parquet` has one row per linked player (`af_player_id`,
+`tm_player_id`) with three fields from the Transfermarkt players table:
+
+| Column | Meaning |
+|---|---|
+| `contract_expiry` | contract end date; a year outside 2000 to 2040 is an entry error and missing |
+| `agent` | agent or agency name; blank is missing |
+| `highest_market_value_eur` | the highest value Transfermarkt ever gave him; zero, negative or above 500m is missing |
+| `as_of` | the snapshot's last valuation date; the fields describe the player around then |
+
+These describe the player **today**, not at any feature date, so they are
+for display in the current season's lists only (decision 4 shows contract
+expiry for bargains). They are never model inputs: the feature contract
+rejects a feature table carrying any of them, and the models' column lists
+exclude them (`PRESENT_ONLY_COLUMNS` in `src/scout/contracts/schemas.py`).
+The point in time counterpart of the highest value is the feature
+`market_value_max_to_date`.
 
 ## Known gaps
 
