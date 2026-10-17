@@ -608,3 +608,11 @@ def test_corrupt_fixture_keeps_rows_and_result_but_no_stats(epl, caplog, monkeyp
     assert set(frame["player_name"]) == {"A Synthetic", "B Synthetic"}
     assert any("Fixture 99" in m for m in caplog.messages)
     validate(PLAYER_MATCH_STATS, frame)
+
+
+def test_lineup_and_injury_frames_keep_their_own_columns():
+    # The corrupt fixture rule belongs to player stats only; it once leaked here.
+    from scout.providers.api_football import matches
+
+    assert list(matches.injury_rows_to_frame([]).columns) == matches.INJURY_COLUMNS
+    assert list(matches.lineup_rows_to_frame([]).columns) == matches.LINEUP_COLUMNS

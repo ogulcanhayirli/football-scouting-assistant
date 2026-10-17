@@ -537,14 +537,6 @@ def lineup_rows_to_frame(rows: list[dict]) -> pd.DataFrame:
     frame["kickoff"] = pd.to_datetime(frame["kickoff"], utc=True, errors="coerce").dt.as_unit("ns")
     frame.loc[~frame["position"].isin(["G", "D", "M", "F"]), "position"] = None
     # Same source errors as the player stats: no id, or two players sharing one.
-    corrupt = frame["fixture_id"].isin(list(CORRUPT_FIXTURES))
-    for fixture_id in frame.loc[corrupt, "fixture_id"].unique():
-        log.warning(
-            "Fixture %s: %s; all player stats stored as missing",
-            fixture_id,
-            CORRUPT_FIXTURES[int(fixture_id)],
-        )
-    frame.loc[corrupt, MATCH_NUMERIC_STATS] = pd.NA
     no_id = frame["source_player_id"].isna() | (frame["source_player_id"] <= 0)
     if no_id.any():
         log.warning("Dropping %d lineup rows without a player id", int(no_id.sum()))
@@ -603,14 +595,6 @@ def injury_rows_to_frame(rows: list[dict]) -> pd.DataFrame:
     frame["fixture_date"] = pd.to_datetime(
         frame["fixture_date"], utc=True, errors="coerce"
     ).dt.as_unit("ns")
-    corrupt = frame["fixture_id"].isin(list(CORRUPT_FIXTURES))
-    for fixture_id in frame.loc[corrupt, "fixture_id"].unique():
-        log.warning(
-            "Fixture %s: %s; all player stats stored as missing",
-            fixture_id,
-            CORRUPT_FIXTURES[int(fixture_id)],
-        )
-    frame.loc[corrupt, MATCH_NUMERIC_STATS] = pd.NA
     no_id = frame["source_player_id"].isna() | (frame["source_player_id"] <= 0)
     frame = frame[~no_id]
     dup = frame.duplicated(["fixture_id", "source_player_id"], keep="first")
