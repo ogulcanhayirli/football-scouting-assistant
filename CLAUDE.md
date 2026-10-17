@@ -85,6 +85,7 @@ $C moves                                     # big move model
 $C elo                                       # team Elo from cached fixtures, reports/elo.md
 $C scouting [--strength transfer|elo]        # league strength, ability, 3 targets
 $C sync up | down [--dry-run] [--only raw|processed|reports]
+uv run python scripts/run_extras.py          # sidelined, coaches, events (done 17 October)
 ```
 
 Also `athena "SQL"`, `featurestore ingest | pit --as-of DATE`,
@@ -110,6 +111,9 @@ bucket named by `$SCOUT_S3_BUCKET` (eu-central-1).
 | Per match team stats | `data/processed/team_match_stats/...` | 137,600 rows; xG from 2023/24 |
 | Lineups | `data/processed/match_lineups/...` | 3,944,124 rows |
 | Injuries | `data/processed/injuries/...` | 139,927 rows, from 2020 |
+| Sidelined periods | `data/processed/sidelined/sidelined.parquet` | 88,046 injury and suspension periods for 20,791 players, mostly 2010 to September 2025 (the API adds almost nothing after); a snapshot of 2026, so use only periods started by the feature date |
+| Coach spells | `data/processed/coaches/coach_spells.parquet` | 22,383 spells, 6,549 coaches, dates to the month; a missing end means still in charge |
+| Match events | `data/processed/fixture_events/...` | 1,609,653 goals, cards, substitutions and VAR events for all 107,409 fixtures with player stats |
 | Transfers | `data/processed/transfers/transfers.parquet` | 285,797 moves |
 | Player links | `data/processed/features/player_links.parquet` | 33,875 linked players |
 | Player profiles | `data/processed/features/player_profiles.parquet` | contract expiry, agent, highest value per link; display only, never a model input |
