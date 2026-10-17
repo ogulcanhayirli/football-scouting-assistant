@@ -554,3 +554,23 @@ def test_more_successful_dribbles_than_attempts_become_missing(epl, caplog):
     assert pd.isna(frame.loc[0, "dribbles_success"])
     assert pd.isna(frame.loc[0, "dribbles_attempts"])
     assert any("Dribbles success" in m for m in caplog.messages)
+
+
+def test_impossible_match_minutes_become_missing(epl, caplog):
+    # Serie B 2020, Venezia against Empoli: 1,306 minutes for the starters.
+    payload = players_payload([player(10, "Luca Synthetic", minutes=1306)], [player(20, "Ok")])
+    with caplog.at_level(logging.WARNING):
+        frame = match_rows_to_frame(parse_fixture_players(fixture(99), payload, epl))
+    by_name = frame.set_index("player_name")
+    assert pd.isna(by_name.loc["Luca Synthetic", "minutes"])
+    assert by_name.loc["Ok", "minutes"] == 90
+    assert any("Minutes=1306" in m for m in caplog.messages)
+    validate(PLAYER_MATCH_STATS, frame)
+
+
+def test_contract_rejects_impossible_match_minutes(epl):
+    payload = players_payload([player(10, "Luca Synthetic")], [])
+    frame = match_rows_to_frame(parse_fixture_players(fixture(99), payload, epl))
+    frame.loc[0, "minutes"] = 1306  # what the adapter repairs, the contract must still catch
+    with pytest.raises(pandera.errors.SchemaErrors):
+        validate(PLAYER_MATCH_STATS, frame)

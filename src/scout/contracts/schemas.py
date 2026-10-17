@@ -5,7 +5,11 @@ import pandera.pandas as pa
 from pandera.pandas import Check, Column, DataFrameSchema
 
 from scout.providers.api_football.adapter import NUMERIC_STATS
-from scout.providers.api_football.matches import MATCH_NUMERIC_STATS, TEAM_NUMERIC
+from scout.providers.api_football.matches import (
+    MATCH_NUMERIC_STATS,
+    MAX_MATCH_MINUTES,
+    TEAM_NUMERIC,
+)
 
 MAX_SEASON_MINUTES = 5000  # 38 league matches of 90 minutes is 3,420; leaves room for stoppage
 RATIO_PAIRS = [
@@ -87,7 +91,6 @@ VALUATIONS = DataFrameSchema(
 )
 
 
-MAX_MATCH_MINUTES = 150  # extra time plus long stoppages (World Cup 2022 ran past 130)
 MATCH_RATIO_PAIRS = [
     ("shots_on", "shots_total"),
     ("duels_won", "duels_total"),

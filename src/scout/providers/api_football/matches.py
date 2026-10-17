@@ -27,6 +27,7 @@ log = logging.getLogger(__name__)
 # Statuses of a match that was played to the end. Postponed, cancelled,
 # abandoned and awarded matches have no player stats.
 FINISHED = {"FT", "AET", "PEN"}
+MAX_MATCH_MINUTES = 150  # extra time plus long stoppages (World Cup 2022 ran past 130)
 
 MATCH_STAT_FIELDS: dict[str, tuple[str, str]] = {
     "position": ("games", "position"),
@@ -179,7 +180,9 @@ def _fix_source_errors(frame: pd.DataFrame) -> pd.DataFrame:
       becomes missing, because either number could be the wrong one;
     * more successful dribbles than attempts (Brasileirão 2022, two players):
       both counts become missing, because either could be the wrong one;
-    * a position other than G, D, M or F ("SUB", "-") becomes missing.
+    * a position other than G, D, M or F ("SUB", "-") becomes missing;
+    * minutes above ``MAX_MATCH_MINUTES`` become missing (Serie B 2020, Venezia
+      against Empoli: 1,306 minutes for the starters, 90 plus a constant 1,216).
     """
     no_id = frame["source_player_id"].isna() | (frame["source_player_id"] <= 0)
     for _, row in frame[no_id].iterrows():
@@ -236,6 +239,16 @@ def _fix_source_errors(frame: pd.DataFrame) -> pd.DataFrame:
             frame.at[idx, "fixture_id"],
         )
     frame.loc[bad_dribbles, ["dribbles_success", "dribbles_attempts"]] = pd.NA
+    too_long = (frame["minutes"] > MAX_MATCH_MINUTES).fillna(False)
+    for idx in frame.index[too_long]:
+        log.warning(
+            "Minutes=%s for %s in fixture %s exceed %s; stored as missing",
+            frame.at[idx, "minutes"],
+            frame.at[idx, "player_name"],
+            frame.at[idx, "fixture_id"],
+            MAX_MATCH_MINUTES,
+        )
+    frame.loc[too_long, "minutes"] = pd.NA
     unknown = frame["position"].notna() & ~frame["position"].isin(["G", "D", "M", "F"])
     frame.loc[unknown, "position"] = None  # "SUB" and "-" are placeholders, not positions
     return frame.reset_index(drop=True)
