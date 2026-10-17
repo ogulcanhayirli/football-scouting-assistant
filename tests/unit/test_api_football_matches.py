@@ -593,3 +593,18 @@ def test_contract_rejects_more_accurate_passes_than_passes(epl):
     frame.loc[0, "passes_accurate"] = 50  # 50 of 40: the adapter repairs it, the contract must not
     with pytest.raises(pandera.errors.SchemaErrors):
         validate(PLAYER_MATCH_STATS, frame)
+
+
+def test_corrupt_fixture_keeps_rows_and_result_but_no_stats(epl, caplog, monkeypatch):
+    from scout.providers.api_football import matches
+
+    monkeypatch.setitem(matches.CORRUPT_FIXTURES, 99, "test")
+    payload = players_payload([player(10, "A Synthetic", goals=1)], [player(20, "B Synthetic")])
+    with caplog.at_level(logging.WARNING):
+        frame = match_rows_to_frame(parse_fixture_players(fixture(99), payload, epl))
+    assert len(frame) == 2
+    assert frame[matches.MATCH_NUMERIC_STATS].isna().all().all()
+    assert frame["team_goals"].notna().all()
+    assert set(frame["player_name"]) == {"A Synthetic", "B Synthetic"}
+    assert any("Fixture 99" in m for m in caplog.messages)
+    validate(PLAYER_MATCH_STATS, frame)

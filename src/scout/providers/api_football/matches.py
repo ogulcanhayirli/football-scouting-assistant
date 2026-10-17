@@ -67,6 +67,14 @@ MATCH_NUMERIC_STATS = [
     c for c in MATCH_STAT_FIELDS if c not in {"position", "shirt_number", "captain", "substitute"}
 ] + ["offsides"]
 
+# Matches whose player stats are wrong throughout, not just in the values the
+# contract catches. Their rows keep the players and the result; every stat is missing.
+CORRUPT_FIXTURES = {
+    # Ekstraklasa 2023, Korona Kielce against Rakow: 154 minutes, more accurate
+    # passes than passes, and implausible values in the rest of the match.
+    1035823: "player stats wrong throughout",
+}
+
 MATCH_ID_COLUMNS = [
     "source",
     "fixture_id",
@@ -182,9 +190,19 @@ def _fix_source_errors(frame: pd.DataFrame) -> pd.DataFrame:
       or more accurate passes than passes (Ekstraklasa 2023, fixture 1035823):
       both counts become missing, because either could be the wrong one;
     * a position other than G, D, M or F ("SUB", "-") becomes missing;
+    * every stat of a match in ``CORRUPT_FIXTURES`` becomes missing; the rows,
+      players and result stay;
     * minutes above ``MAX_MATCH_MINUTES`` become missing (Serie B 2020, Venezia
       against Empoli: 1,306 minutes for the starters, 90 plus a constant 1,216).
     """
+    corrupt = frame["fixture_id"].isin(list(CORRUPT_FIXTURES))
+    for fixture_id in frame.loc[corrupt, "fixture_id"].unique():
+        log.warning(
+            "Fixture %s: %s; all player stats stored as missing",
+            fixture_id,
+            CORRUPT_FIXTURES[int(fixture_id)],
+        )
+    frame.loc[corrupt, MATCH_NUMERIC_STATS] = pd.NA
     no_id = frame["source_player_id"].isna() | (frame["source_player_id"] <= 0)
     for _, row in frame[no_id].iterrows():
         log.warning(
@@ -519,6 +537,14 @@ def lineup_rows_to_frame(rows: list[dict]) -> pd.DataFrame:
     frame["kickoff"] = pd.to_datetime(frame["kickoff"], utc=True, errors="coerce").dt.as_unit("ns")
     frame.loc[~frame["position"].isin(["G", "D", "M", "F"]), "position"] = None
     # Same source errors as the player stats: no id, or two players sharing one.
+    corrupt = frame["fixture_id"].isin(list(CORRUPT_FIXTURES))
+    for fixture_id in frame.loc[corrupt, "fixture_id"].unique():
+        log.warning(
+            "Fixture %s: %s; all player stats stored as missing",
+            fixture_id,
+            CORRUPT_FIXTURES[int(fixture_id)],
+        )
+    frame.loc[corrupt, MATCH_NUMERIC_STATS] = pd.NA
     no_id = frame["source_player_id"].isna() | (frame["source_player_id"] <= 0)
     if no_id.any():
         log.warning("Dropping %d lineup rows without a player id", int(no_id.sum()))
@@ -577,6 +603,14 @@ def injury_rows_to_frame(rows: list[dict]) -> pd.DataFrame:
     frame["fixture_date"] = pd.to_datetime(
         frame["fixture_date"], utc=True, errors="coerce"
     ).dt.as_unit("ns")
+    corrupt = frame["fixture_id"].isin(list(CORRUPT_FIXTURES))
+    for fixture_id in frame.loc[corrupt, "fixture_id"].unique():
+        log.warning(
+            "Fixture %s: %s; all player stats stored as missing",
+            fixture_id,
+            CORRUPT_FIXTURES[int(fixture_id)],
+        )
+    frame.loc[corrupt, MATCH_NUMERIC_STATS] = pd.NA
     no_id = frame["source_player_id"].isna() | (frame["source_player_id"] <= 0)
     frame = frame[~no_id]
     dup = frame.duplicated(["fixture_id", "source_player_id"], keep="first")
