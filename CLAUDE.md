@@ -127,6 +127,15 @@ tournaments and qualifiers) used only as context for league rows. The league
 list in `infra/scout_infra/data_stack.py` must match the config (a test checks
 it). Per league and season coverage is in `reports/*coverage_report.md`.
 
+Expansion (decision 6), downloaded 16 and 17 October 2026: 20 more leagues
+(feeder leagues and the second tiers of the big five) and 5 youth competitions
+in `configs/backfill.expansion.yaml`, with season totals, player stats per match
+and lineups; 143,554, 1,689,866 and 2,599,541 rows, per season in
+`configs/expansion_rows.md`. Run with `scripts/run_expansion.py` (order, daily
+cap, S3 upload after each competition, `--restore` on a fresh container). Not
+yet in `backfill.ultra.yaml`, the features or Glue; `region` for North America,
+Asia and Saudi Arabia is unsettled. Current seasons wait for the 6 November pull.
+
 ## Models
 
 All live in `src/scout/models/` and `src/scout/scouting.py`, use LightGBM

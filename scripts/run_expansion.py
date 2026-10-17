@@ -30,16 +30,22 @@ import os
 import re
 import time
 from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from scout.backfill import run_backfill
-from scout.backfill.matches import LINEUP_LEVEL, PLAYER_LEVEL, run_match_backfill
+from scout.backfill.matches import (
+    LINEUP_LEVEL,
+    PLAYER_LEVEL,
+    _backfill_match_season,
+    run_match_backfill,
+)
 from scout.cli import build_client
 from scout.config import LeagueConfig, Settings, load_settings
 from scout.fsutil import atomic_write_text
 from scout.providers.api_football import ApiFootballStatsProvider, QuotaExceededError
-from scout.providers.api_football.matches import ApiFootballMatchProvider
+from scout.providers.api_football.matches import ApiFootballMatchProvider, finished_fixtures
 from scout.ratelimit import DailyQuotaExhaustedError
 
 log = logging.getLogger("run_expansion")
@@ -166,6 +172,42 @@ def _cache_player_pages(provider: ApiFootballStatsProvider, comp: LeagueConfig) 
     return None
 
 
+def _ended_tournament_seasons(client, stats, comp: LeagueConfig) -> list[int]:
+    """Seasons the API still calls current although they are over: a tournament's
+    latest edition stays current until the next one (U21 2025, Olympics 2024).
+    Over means the end date has passed and every listed fixture is finished, so
+    the cached responses are final."""
+    today = datetime.now(UTC).date()
+    ended = []
+    for s in stats.list_seasons(comp):
+        if not s.current or s.end is None or s.end >= today:
+            continue
+        params = {"league": comp.api_football_id, "season": s.season}
+        fixtures = client.get("fixtures", params).payload.get("response") or []
+        if fixtures and len(finished_fixtures({"response": fixtures})) == len(fixtures):
+            ended.append(s.season)
+    return ended
+
+
+def _fetch_ended_seasons(settings, client, stats, matches, comp) -> tuple[dict, str | None]:
+    summary: dict[str, Any] = {}
+    try:
+        for season in _ended_tournament_seasons(client, stats, comp):
+            for _ in stats.iter_player_pages(comp, season):
+                pass
+            player = _backfill_match_season(
+                matches, comp, season, settings, PLAYER_LEVEL, probe_first=False
+            )
+            lineup = _backfill_match_season(matches, comp, season, settings, LINEUP_LEVEL)
+            summary[str(season)] = {
+                "player_match": {"status": player.status, "rows": player.rows},
+                "lineup": {"status": lineup.status, "rows": lineup.rows},
+            }
+    except (DailyQuotaExhaustedError, QuotaExceededError) as exc:
+        return summary, f"quota: {exc}"
+    return summary, None
+
+
 def run_competition(settings, client, key: str, check_deadline) -> tuple[bool, str | None, dict]:
     """Returns (complete, stop reason, per step summary)."""
     stats = ApiFootballStatsProvider(client)
@@ -200,6 +242,18 @@ def run_competition(settings, client, key: str, check_deadline) -> tuple[bool, s
         complete &= result.complete
         if result.stopped_reason:
             return False, result.stopped_reason, summary
+    if youth:
+        check_deadline()
+        summary["ended_current"], stop = _fetch_ended_seasons(
+            settings, client, stats, matches, comp
+        )
+        if stop:
+            return False, stop, summary
+        complete &= all(
+            v[level]["status"] in {"complete", "no_player_data"}
+            for v in summary["ended_current"].values()
+            for level in ("player_match", "lineup")
+        )
     return complete, None, summary
 
 
