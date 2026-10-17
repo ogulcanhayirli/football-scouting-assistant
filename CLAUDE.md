@@ -225,7 +225,8 @@ Settle them with the owner rather than guessing.
   the README status table does not list them.
 * The three scouting targets have no baseline next to the model, against
   rule 3.
-* `processed/` and `reports/` in S3 were synced on 2026-10-16 and matched the
+* `processed/` and `reports/` in S3 were synced on 2026-10-17 (adding the Elo
+  tables, `reports/elo.md` and `reports/scouting_elo.md`) and matched the
   local files then; any rebuild since needs another `sync up`.
 * Decision 7 adds FBref, but README.md (Data sources and attribution) says no
   site is scraped; FBref's terms and access method need checking first.
