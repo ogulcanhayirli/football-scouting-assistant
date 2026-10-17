@@ -178,7 +178,8 @@ def _fix_source_errors(frame: pd.DataFrame) -> pd.DataFrame:
       often in this frame is kept, the other dropped;
     * a player credited with more goals than the team scored: the goal count
       becomes missing, because either number could be the wrong one;
-    * more successful dribbles than attempts (Brasileirão 2022, two players):
+    * more successful dribbles than attempts (Brasileirão 2022, two players),
+      or more accurate passes than passes (Ekstraklasa 2023, fixture 1035823):
       both counts become missing, because either could be the wrong one;
     * a position other than G, D, M or F ("SUB", "-") becomes missing;
     * minutes above ``MAX_MATCH_MINUTES`` become missing (Serie B 2020, Venezia
@@ -239,6 +240,16 @@ def _fix_source_errors(frame: pd.DataFrame) -> pd.DataFrame:
             frame.at[idx, "fixture_id"],
         )
     frame.loc[bad_dribbles, ["dribbles_success", "dribbles_attempts"]] = pd.NA
+    bad_passes = (frame["passes_accurate"] > frame["passes_total"]).fillna(False)
+    for idx in frame.index[bad_passes]:
+        log.warning(
+            "Accurate passes %s exceed passes %s for %s in fixture %s; both missing",
+            frame.at[idx, "passes_accurate"],
+            frame.at[idx, "passes_total"],
+            frame.at[idx, "player_name"],
+            frame.at[idx, "fixture_id"],
+        )
+    frame.loc[bad_passes, ["passes_accurate", "passes_total"]] = pd.NA
     too_long = (frame["minutes"] > MAX_MATCH_MINUTES).fillna(False)
     for idx in frame.index[too_long]:
         log.warning(

@@ -574,3 +574,22 @@ def test_contract_rejects_impossible_match_minutes(epl):
     frame.loc[0, "minutes"] = 1306  # what the adapter repairs, the contract must still catch
     with pytest.raises(pandera.errors.SchemaErrors):
         validate(PLAYER_MATCH_STATS, frame)
+
+
+def test_more_accurate_passes_than_passes_become_missing(epl, caplog):
+    # Ekstraklasa 2023, fixture 1035823: 14 accurate passes out of 10.
+    payload = players_payload([player(10, "Yev Synthetic", passes=(10, 14))], [])
+    with caplog.at_level(logging.WARNING):
+        frame = match_rows_to_frame(parse_fixture_players(fixture(99), payload, epl))
+    assert pd.isna(frame.loc[0, "passes_accurate"])
+    assert pd.isna(frame.loc[0, "passes_total"])
+    assert any("Accurate passes" in m for m in caplog.messages)
+    validate(PLAYER_MATCH_STATS, frame)
+
+
+def test_contract_rejects_more_accurate_passes_than_passes(epl):
+    payload = players_payload([player(10, "Yev Synthetic")], [])
+    frame = match_rows_to_frame(parse_fixture_players(fixture(99), payload, epl))
+    frame.loc[0, "passes_accurate"] = 50  # 50 of 40: the adapter repairs it, the contract must not
+    with pytest.raises(pandera.errors.SchemaErrors):
+        validate(PLAYER_MATCH_STATS, frame)
