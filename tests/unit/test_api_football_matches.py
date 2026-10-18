@@ -553,7 +553,7 @@ def test_more_successful_dribbles_than_attempts_become_missing(epl, caplog):
     validate(PLAYER_MATCH_STATS, frame)
     assert pd.isna(frame.loc[0, "dribbles_success"])
     assert pd.isna(frame.loc[0, "dribbles_attempts"])
-    assert any("Dribbles success" in m for m in caplog.messages)
+    assert any("dribbles_success=3" in m for m in caplog.messages)
 
 
 def test_impossible_match_minutes_become_missing(epl, caplog):
@@ -583,7 +583,7 @@ def test_more_accurate_passes_than_passes_become_missing(epl, caplog):
         frame = match_rows_to_frame(parse_fixture_players(fixture(99), payload, epl))
     assert pd.isna(frame.loc[0, "passes_accurate"])
     assert pd.isna(frame.loc[0, "passes_total"])
-    assert any("Accurate passes" in m for m in caplog.messages)
+    assert any("passes_accurate=14" in m for m in caplog.messages)
     validate(PLAYER_MATCH_STATS, frame)
 
 
@@ -593,6 +593,76 @@ def test_contract_rejects_more_accurate_passes_than_passes(epl):
     frame.loc[0, "passes_accurate"] = 50  # 50 of 40: the adapter repairs it, the contract must not
     with pytest.raises(pandera.errors.SchemaErrors):
         validate(PLAYER_MATCH_STATS, frame)
+
+
+def test_successes_without_attempts_become_missing(epl, caplog):
+    # Eerste Divisie 2020: a duel won with the duels left blank.
+    payload = players_payload([player(10, "Tim Synthetic", duels__won=1, duels__total=None)], [])
+    with caplog.at_level(logging.WARNING):
+        frame = match_rows_to_frame(parse_fixture_players(fixture(99), payload, epl))
+    assert pd.isna(frame.loc[0, "duels_won"])
+    assert pd.isna(frame.loc[0, "duels_total"])
+    assert any("duels_won=1" in m for m in caplog.messages)
+    validate(PLAYER_MATCH_STATS, frame)
+
+
+def test_contract_rejects_successes_without_attempts(epl):
+    payload = players_payload([player(10, "Tim Synthetic")], [])
+    frame = match_rows_to_frame(parse_fixture_players(fixture(99), payload, epl))
+    frame.loc[0, "duels_won"] = 1
+    frame.loc[0, "duels_total"] = pd.NA
+    with pytest.raises(pandera.errors.SchemaErrors):
+        validate(PLAYER_MATCH_STATS, frame)
+
+
+def _season_of_two_players_on_one_id(epl):
+    """Id 7 plays for club 1 and club 3 on alternating weekends (Segunda
+    División 2016: a Lugo defender and an Oviedo keeper)."""
+    rows = []
+    for week in range(6):
+        fid = 100 + week
+        club = (1, "Test Town") if week % 2 == 0 else (3, "Other Town")
+        name = "Carlos" if week % 2 == 0 else "Juan Carlos"
+        fix = fixture(fid, home=club)
+        fix["fixture"]["date"] = f"2016-09-{week * 4 + 1:02d}T14:00:00+00:00"
+        mine = [player(7, name)] if week < 5 else []
+        payload = players_payload([*mine, player(20 + week, "Ok")], [], home=club)
+        rows += parse_fixture_players(fix, payload, epl)
+    return rows
+
+
+def test_two_players_on_one_id_keep_only_the_main_club(epl, caplog):
+    rows = _season_of_two_players_on_one_id(epl)
+    with caplog.at_level(logging.WARNING):
+        frame = match_rows_to_frame(rows)
+    mine = frame[frame["source_player_id"] == 7]
+    assert set(mine["team_id"]) == {1}
+    assert len(mine) == 3
+    assert (frame["source_player_id"] != 7).sum() == 6  # nobody else touched
+    assert any("switches clubs" in m for m in caplog.messages)
+    validate(PLAYER_MATCH_STATS, frame)
+
+
+def test_contract_rejects_two_players_on_one_id(epl, monkeypatch):
+    from scout.providers.api_football import matches
+
+    monkeypatch.setattr(matches, "_drop_shared_ids", lambda frame: frame)
+    frame = match_rows_to_frame(_season_of_two_players_on_one_id(epl))
+    with pytest.raises(pandera.errors.SchemaErrors):
+        validate(PLAYER_MATCH_STATS, frame)
+
+
+def test_a_loan_and_a_recall_are_not_a_shared_id(epl):
+    rows = []
+    for week, club in enumerate([1, 1, 3, 3, 1, 1]):
+        home = (club, f"Club {club}")
+        fix = fixture(200 + week, home=home)
+        fix["fixture"]["date"] = f"2016-10-{week * 4 + 1:02d}T14:00:00+00:00"
+        payload = players_payload([player(7, "Carlos")], [], home=home)
+        rows += parse_fixture_players(fix, payload, epl)
+    frame = match_rows_to_frame(rows)
+    assert len(frame) == 6
+    validate(PLAYER_MATCH_STATS, frame)
 
 
 def test_corrupt_fixture_keeps_rows_and_result_but_no_stats(epl, caplog, monkeypatch):

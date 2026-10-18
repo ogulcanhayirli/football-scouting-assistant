@@ -18,7 +18,28 @@ def test_committed_configs_load(name):
     assert len({lg.api_football_id for lg in settings.leagues}) == len(keys)
     assert settings.league("super_lig").api_football_id == 203
     if name == "backfill.ultra.yaml":
-        assert len(keys) == 17
+        assert len(keys) == 37
+        regions = {lg.key: lg.region for lg in settings.leagues}
+        assert regions["mls"] == regions["liga_mx"] == "north_america"
+        assert regions["j1_league"] == regions["saudi_pro_league"] == "asia"
+        assert regions["colombian_primera_a"] == "south_america"
+        assert regions["austrian_bundesliga"] == regions["ligue_2"] == "europe"
+
+
+def test_ultra_config_holds_the_expansion_leagues():
+    ultra = load_settings(CONFIGS / "backfill.ultra.yaml")
+    expansion = load_settings(CONFIGS / "backfill.expansion.yaml")
+    by_key = {lg.key: lg for lg in ultra.leagues}
+    for league in expansion.leagues:
+        mine = by_key[league.key]
+        assert (mine.api_football_id, mine.transfermarkt_id, mine.region, mine.calendar_year) == (
+            league.api_football_id,
+            league.transfermarkt_id,
+            league.region,
+            league.calendar_year,
+        )
+    youth = {c.key for c in ultra.competitions if c.kind == "youth"}
+    assert youth == {c.key for c in expansion.competitions}
 
 
 def test_free_config_matches_free_tier_limits():
@@ -64,5 +85,5 @@ def test_competitions_are_separate_from_leagues():
         lg.api_football_id for lg in settings.leagues
     ]
     assert len(ids) == len(set(ids))
-    assert {c.kind for c in settings.competitions} == {"club", "national"}
+    assert {c.kind for c in settings.competitions} == {"club", "national", "youth"}
     assert load_settings(CONFIGS / "backfill.free.yaml").competitions == []

@@ -66,8 +66,8 @@ after the last match when that is later: Brasileirão 2020 ended in February
 
 Audit columns let the contract check the rule on every build:
 `last_match_date` and `value_date` must not be after `feature_date`;
-`prev_feature_date`, `last_comp_match_date`, `last_injury_date` and
-`last_transfer_date` must be before it.
+`prev_feature_date`, `last_comp_match_date`, `last_injury_date`,
+`last_coach_change_date` and `last_transfer_date` must be before it.
 Transfermarkt's contract expiry, international caps and current value are
 not used at all: they describe 2026, not the feature date.
 
@@ -142,10 +142,15 @@ blank.
 | `club_cup_ga_per90_12m`, `club_cup_rating_12m` | goals plus assists per 90 and minute weighted rating in them |
 | `ucl_minutes_12m` | Champions League minutes alone |
 | `intl_minutes_12m`, `intl_matches_12m`, `intl_ga_12m` | national team: tournaments, qualifiers, Nations League, friendlies |
+| `youth_minutes_12m`, `youth_matches_12m` | youth tournaments: U21 Euro, U20 and U17 World Cups, Olympics; not counted as caps |
 
 Missing (not 0) until the data covers the whole window: European cups from
-2015, South American cups from 2019 (by the league's `region`), national
-teams from the first match in the data. National team data has gaps the API
+2015, South American cups from 2019 (by the league's `region`, the
+confederation; no club cups are held for `north_america` and `asia`, so MLS,
+Liga MX, J1, K League 1 and the Saudi Pro League always miss them), national
+teams and youth tournaments from the first match of their kind in the data
+(youth: the U21 Euro of March 2021). The UEFA Youth League has lineups but
+no player minutes in the API and adds nothing yet. National team data has gaps the API
 leaves: no Euro qualifiers at all, and no qualifiers for the 2026 World Cup,
 so recent seasons undercount international minutes for everyone.
 
@@ -163,9 +168,31 @@ so recent seasons undercount international minutes for everyone.
 |---|---|
 | `injury_matches_missed_12m` | matches missed injured ("Missing Fixture"); suspensions and absences left out |
 | `injury_spells_12m` | separate spells: more than 30 days between missed matches starts a new one |
+| `injury_source` | `injuries` or `sidelined`; audit only, not a model input |
 
-Missing where the row's own league season has no injury data (before
-2020/21, and some leagues only from 2025).
+Two sources. The `injuries` table (one row per missed fixture) is used when
+the row's own league season has injury data and the window starts on or
+after 6 April 2021, when the table starts. Otherwise the `sidelined` periods
+fill in: the matches the row's club played (league and club cups, from the
+Elo match table) while the player was out. Only periods started before the
+feature date count, and an end date on or after it is never used (the
+period counts as running at the feature date). Sidelined windows must lie
+between July 2010 and September 2025, its coverage. Missing outside both.
+How the two agree where both cover a row: `reports/injury_sources.md`.
+
+**Coach (`coach_spells`), the row's club and league season**
+
+| Column | Meaning |
+|---|---|
+| `new_coach` | 1 when a spell started after the month of the club's last league match of the previous season and by the month of its first league match of this one |
+| `coach_changed_in_season` | 1 when a spell started after the month of the first league match and by the month of the last |
+| `last_coach_change_date` | the latest of those starts (audit) |
+
+Month level, because spell dates are months: an appointment in the month of
+the first match counts as new for the season, not as a change during it.
+Caretakers count. When the club's previous season is not held, the two
+months before its first match stand for the off season. Missing for clubs
+without a spell starting by the end of the season.
 
 **Transfers (API Football `/transfers`), moves dated before the feature date**
 

@@ -28,6 +28,17 @@ log = logging.getLogger(__name__)
 # abandoned and awarded matches have no player stats.
 FINISHED = {"FT", "AET", "PEN"}
 MAX_MATCH_MINUTES = 150  # extra time plus long stoppages (World Cup 2022 ran past 130)
+# A loan and a recall make two club switches in a season; three or more, back
+# and forth between the same clubs, is two players sharing one id.
+MAX_CLUB_SWITCHES = 2
+# Success counts and their attempts: successes above attempts, or successes
+# with no attempts recorded, can't both be right.
+SUCCESS_PAIRS = {
+    "shots_on": "shots_total",
+    "passes_accurate": "passes_total",
+    "duels_won": "duels_total",
+    "dribbles_success": "dribbles_attempts",
+}
 
 MATCH_STAT_FIELDS: dict[str, tuple[str, str]] = {
     "position": ("games", "position"),
@@ -186,9 +197,16 @@ def _fix_source_errors(frame: pd.DataFrame) -> pd.DataFrame:
       often in this frame is kept, the other dropped;
     * a player credited with more goals than the team scored: the goal count
       becomes missing, because either number could be the wrong one;
-    * more successful dribbles than attempts (Brasileirão 2022, two players),
-      or more accurate passes than passes (Ekstraklasa 2023, fixture 1035823):
-      both counts become missing, because either could be the wrong one;
+    * more successes than attempts (dribbles, Brasileirão 2022, two players;
+      passes, Ekstraklasa 2023, fixture 1035823), or successes with the
+      attempts left blank (duels and shots, Eerste Divisie and Allsvenskan
+      2020): both counts become missing, because either could be the wrong
+      one; filling the blank attempts with 0 would give rates above 1;
+    * one id switching clubs back and forth more than ``MAX_CLUB_SWITCHES``
+      times within the frame (a league season) belongs to two players
+      (Segunda División 2016: a Lugo defender and an Oviedo keeper, 70
+      matches): the rows of every club but the one with most rows are
+      dropped, since the other player can't be linked to anyone;
     * a position other than G, D, M or F ("SUB", "-") becomes missing;
     * every stat of a match in ``CORRUPT_FIXTURES`` becomes missing; the rows,
       players and result stay;
@@ -248,26 +266,21 @@ def _fix_source_errors(frame: pd.DataFrame) -> pd.DataFrame:
             frame.at[idx, "fixture_id"],
         )
     frame.loc[too_many.fillna(False), "goals"] = pd.NA
-    bad_dribbles = (frame["dribbles_success"] > frame["dribbles_attempts"]).fillna(False)
-    for idx in frame.index[bad_dribbles]:
-        log.warning(
-            "Dribbles success %s exceeds attempts %s for %s in fixture %s; both missing",
-            frame.at[idx, "dribbles_success"],
-            frame.at[idx, "dribbles_attempts"],
-            frame.at[idx, "player_name"],
-            frame.at[idx, "fixture_id"],
-        )
-    frame.loc[bad_dribbles, ["dribbles_success", "dribbles_attempts"]] = pd.NA
-    bad_passes = (frame["passes_accurate"] > frame["passes_total"]).fillna(False)
-    for idx in frame.index[bad_passes]:
-        log.warning(
-            "Accurate passes %s exceed passes %s for %s in fixture %s; both missing",
-            frame.at[idx, "passes_accurate"],
-            frame.at[idx, "passes_total"],
-            frame.at[idx, "player_name"],
-            frame.at[idx, "fixture_id"],
-        )
-    frame.loc[bad_passes, ["passes_accurate", "passes_total"]] = pd.NA
+    for success, attempts in SUCCESS_PAIRS.items():
+        made, tried = frame[success], frame[attempts]
+        bad = ((made > tried) | ((made > 0) & tried.isna())).fillna(False)
+        for idx in frame.index[bad]:
+            log.warning(
+                "%s=%s with %s=%s for %s in fixture %s; both missing",
+                success,
+                frame.at[idx, success],
+                attempts,
+                frame.at[idx, attempts],
+                frame.at[idx, "player_name"],
+                frame.at[idx, "fixture_id"],
+            )
+        frame.loc[bad, [success, attempts]] = pd.NA
+    frame = _drop_shared_ids(frame)
     too_long = (frame["minutes"] > MAX_MATCH_MINUTES).fillna(False)
     for idx in frame.index[too_long]:
         log.warning(
@@ -281,6 +294,36 @@ def _fix_source_errors(frame: pd.DataFrame) -> pd.DataFrame:
     unknown = frame["position"].notna() & ~frame["position"].isin(["G", "D", "M", "F"])
     frame.loc[unknown, "position"] = None  # "SUB" and "-" are placeholders, not positions
     return frame.reset_index(drop=True)
+
+
+def _drop_shared_ids(frame: pd.DataFrame) -> pd.DataFrame:
+    """Rows of an id that switches clubs back and forth: see ``_fix_source_errors``."""
+    if frame.empty:
+        return frame
+    ordered = frame.sort_values("kickoff")
+    switches = ordered.groupby("source_player_id")["team_id"].agg(
+        lambda teams: int((teams != teams.shift()).sum()) - 1
+    )
+    shared = switches[switches > MAX_CLUB_SWITCHES].index
+    drop = pd.Series(False, index=frame.index)
+    for player in shared:
+        mine = frame["source_player_id"] == player
+        counts = frame.loc[mine, "team_id"].value_counts()
+        keep = counts.index[0]
+        others = mine & (frame["team_id"] != keep)
+        log.warning(
+            "Id %s switches clubs %d times: %s keeps the %d rows for team %s, "
+            "%d rows for other teams (%s) dropped",
+            player,
+            switches[player],
+            frame.loc[mine & (frame["team_id"] == keep), "player_name"].mode().iloc[0],
+            int(counts.iloc[0]),
+            keep,
+            int(others.sum()),
+            ", ".join(sorted(set(frame.loc[others, "player_name"].dropna()))),
+        )
+        drop |= others
+    return frame[~drop]
 
 
 class ApiFootballMatchProvider:

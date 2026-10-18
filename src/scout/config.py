@@ -20,12 +20,17 @@ class LeagueConfig(BaseModel):
     name: str
     api_football_id: int
     transfermarkt_id: str = Field(description="Transfermarkt competition code, e.g. GB1, TR1.")
-    region: Literal["europe", "south_america"] = Field(
-        default="europe", description="Decides which club cups cover its players."
+    region: Literal["europe", "south_america", "north_america", "asia"] = Field(
+        default="europe",
+        description="Confederation; decides which club cups cover its players.",
     )
     calendar_year: bool = Field(
         default=False,
         description="Season runs within one calendar year (Brazil, Argentina), not August to May.",
+    )
+    skip_seasons: list[int] = Field(
+        default_factory=list,
+        description="Seasons left out of the features, e.g. a short transitional season.",
     )
 
 
@@ -95,12 +100,12 @@ class BackfillConfig(BaseModel):
 
 
 class CompetitionConfig(LeagueConfig):
-    """A cup or national team competition. Its matches add columns to the players'
-    league rows (European and international minutes, form); it never gets rows of
-    its own."""
+    """A cup, national team or youth competition. Its matches add columns to the
+    players' league rows (European, international and youth minutes); it never
+    gets rows of its own."""
 
     transfermarkt_id: str = ""
-    kind: Literal["club", "national"]
+    kind: Literal["club", "national", "youth"]
 
 
 class Settings(BaseModel):

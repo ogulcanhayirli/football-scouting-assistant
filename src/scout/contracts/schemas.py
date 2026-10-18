@@ -8,6 +8,7 @@ from scout.providers.api_football.adapter import NUMERIC_STATS
 from scout.providers.api_football.extras import MAX_ELAPSED as MAX_EVENT_MINUTE
 from scout.providers.api_football.matches import (
     MATCH_NUMERIC_STATS,
+    MAX_CLUB_SWITCHES,
     MAX_MATCH_MINUTES,
     TEAM_NUMERIC,
 )
@@ -27,6 +28,24 @@ def _not_greater(part: str, whole: str) -> Check:
         return ~both | (df[part] <= df[whole])
 
     return Check(check, name=f"{part}_le_{whole}", error=f"{part} must not exceed {whole}")
+
+
+def _with_attempts(part: str, whole: str) -> Check:
+    """Successes need their attempts: 1 duel won with the duels left blank
+    becomes more than all duels once the blank is read as 0."""
+
+    def check(df: pd.DataFrame) -> pd.Series:
+        return ~((df[part] > 0) & df[whole].isna()).fillna(False)
+
+    return Check(check, name=f"{part}_has_{whole}", error=f"{part} without {whole}")
+
+
+def _one_player_per_id(df: pd.DataFrame) -> bool:
+    ordered = df.sort_values("kickoff")
+    switches = ordered.groupby(["league_key", "season", "source_player_id"])["team_id"].agg(
+        lambda teams: int((teams != teams.shift()).sum()) - 1
+    )
+    return bool((switches <= MAX_CLUB_SWITCHES).all())
 
 
 _count = {"nullable": True, "checks": Check.ge(0)}
@@ -118,7 +137,15 @@ PLAYER_MATCH_STATS = DataFrameSchema(
         "minutes": Column("Float64", Check.in_range(0, MAX_MATCH_MINUTES), nullable=True),
         "rating": Column("Float64", Check.in_range(0, 10), nullable=True),
     },
-    checks=[_not_greater(p, w) for p, w in MATCH_RATIO_PAIRS],
+    checks=[
+        *[_not_greater(p, w) for p, w in MATCH_RATIO_PAIRS],
+        *[_with_attempts(p, w) for p, w in MATCH_RATIO_PAIRS if w != "team_goals"],
+        Check(
+            _one_player_per_id,
+            name="one_player_per_id",
+            error="an id switches clubs back and forth: two players share it",
+        ),
+    ],
     unique=["fixture_id", "source_player_id"],
     strict=False,
     coerce=False,
@@ -192,6 +219,7 @@ PLAYER_SEASON_FEATURES = DataFrameSchema(
         _before("last_comp_match_date", "feature_date"),
         _before("last_injury_date", "feature_date"),
         _before("last_transfer_date", "feature_date"),
+        _before("last_coach_change_date", "feature_date"),
         Check(
             _no_present_only_columns,
             name="no_present_only_columns",

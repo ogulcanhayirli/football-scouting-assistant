@@ -87,6 +87,9 @@ class Inputs:
     comp_matches: pd.DataFrame = field(default_factory=pd.DataFrame)  # cups, national teams
     team_stats: pd.DataFrame = field(default_factory=pd.DataFrame)  # team_match_stats, leagues
     injuries: pd.DataFrame = field(default_factory=pd.DataFrame)
+    sidelined: pd.DataFrame = field(default_factory=pd.DataFrame)  # injury periods, 2010 on
+    club_calendar: pd.DataFrame = field(default_factory=pd.DataFrame)  # context.club_calendar
+    coaches: pd.DataFrame = field(default_factory=pd.DataFrame)  # coach spells
     transfers: pd.DataFrame = field(default_factory=pd.DataFrame)
     comps: dict = field(default_factory=dict)  # competition key -> (kind, region)
     league_regions: dict = field(default_factory=dict)  # league key -> region
@@ -553,7 +556,8 @@ def build_features(inputs: Inputs) -> tuple[pd.DataFrame, pd.DataFrame]:
 
 
 def add_context(rows: pd.DataFrame, inputs: Inputs, dates: pd.DataFrame) -> pd.DataFrame:
-    """Cup and national team minutes, team strength, injuries and transfers."""
+    """Cup, national team and youth minutes, team strength, injuries, coach
+    changes and transfers."""
     keys = ["league_key", "season", "team_id"]
     strength = context.team_strength(inputs.team_stats, dates)
     strength["season"] = strength["season"].astype("Int64")
@@ -562,17 +566,17 @@ def add_context(rows: pd.DataFrame, inputs: Inputs, dates: pd.DataFrame) -> pd.D
         season=rows["season"].astype("Int64"), team_id=rows["team_id"].astype("Int64")
     )
     rows = rows.merge(strength, on=keys, how="left").reset_index(drop=True)
-    covered = set()
-    if not inputs.injuries.empty:
-        pairs = inputs.injuries[["league_key", "season"]].drop_duplicates()
-        covered = {(lg, int(se)) for lg, se in pairs.itertuples(index=False)}
+    covered = context.injury_coverage(inputs.injuries)
     return pd.concat(
         [
             rows,
             context.competition_features(
                 rows, inputs.comp_matches, inputs.comps, inputs.league_regions
             ),
-            context.injury_features(rows, inputs.injuries, covered),
+            context.injury_features(
+                rows, inputs.injuries, covered, inputs.sidelined, inputs.club_calendar
+            ),
+            context.coach_features(rows, inputs.coaches, inputs.club_calendar),
             context.transfer_features(rows, inputs.transfers),
         ],
         axis=1,
@@ -609,5 +613,6 @@ def _order(frame: pd.DataFrame) -> pd.DataFrame:
     frame["link_rule"] = frame["link_rule"].astype("string")
     frame["prev_league"] = frame["prev_league"].astype("string")
     frame["last_move_kind"] = frame["last_move_kind"].astype("string")
+    frame["injury_source"] = frame["injury_source"].astype("string")
     frame["career_seasons"] = frame["career_seasons"].astype("Int64")
     return frame.sort_values(["league_key", "season", "source_player_id"]).reset_index(drop=True)

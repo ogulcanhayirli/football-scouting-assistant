@@ -29,6 +29,11 @@ from scout.contracts import (
     validate,
 )
 from scout.features.build import Inputs, build_features
+from scout.features.context import (
+    club_calendar,
+    injury_coverage,
+    injury_source_agreement,
+)
 from scout.fsutil import atomic_write_text
 from scout.matching import match_players
 from scout.providers.transfermarkt import TransfermarktValuationProvider
@@ -89,17 +94,38 @@ def _split(frame: pd.DataFrame, keys: set[str]) -> tuple[pd.DataFrame, pd.DataFr
     return frame[mine].reset_index(drop=True), frame[~mine].reset_index(drop=True)
 
 
+def _configured(frame: pd.DataFrame, settings: Settings) -> pd.DataFrame:
+    """Rows of the configured leagues, without their skipped seasons. The
+    processed folders also hold leagues downloaded but not yet configured."""
+    if frame.empty:
+        return frame
+    skip = {(lg.key, s) for lg in settings.leagues for s in lg.skip_seasons}
+    keep = frame["league_key"].isin({lg.key for lg in settings.leagues})
+    if skip:
+        pairs = zip(frame["league_key"], frame["season"].astype(int), strict=True)
+        keep &= ~pd.Series([p in skip for p in pairs], index=frame.index)
+    return frame[keep].reset_index(drop=True)
+
+
+def _read_optional(path: Path) -> pd.DataFrame:
+    return pd.read_parquet(path) if path.exists() else pd.DataFrame()
+
+
 def load_inputs(settings: Settings) -> Inputs:
     processed = settings.paths.processed_dir
     league_keys = {lg.key for lg in settings.leagues}
     comp_keys = {c.key for c in settings.competitions}
-    season_stats = _read_partitions(processed / "player_season_stats")
+    season_stats = _configured(_read_partitions(processed / "player_season_stats"), settings)
     match_stats, comp_matches = _split(
         _read_partitions(processed / "player_match_stats"), league_keys
     )
+    match_stats = _configured(match_stats, settings)
     comp_matches = comp_matches[comp_matches["league_key"].isin(comp_keys)]
     team_stats, _ = _split(_read_partitions(processed / "team_match_stats"), league_keys)
     injuries = _read_partitions(processed / "injuries")
+    sidelined = _read_optional(processed / "sidelined" / "sidelined.parquet")
+    coaches = _read_optional(processed / "coaches" / "coach_spells.parquet")
+    calendar = club_calendar(_read_optional(processed / "elo" / "elo_matches.parquet"))
     transfers_file = transfers_path(settings)
     transfers = pd.read_parquet(transfers_file) if transfers_file.exists() else pd.DataFrame()
     tm = TransfermarktValuationProvider(settings.paths.raw_dir / "transfermarkt")
@@ -112,12 +138,15 @@ def load_inputs(settings: Settings) -> Inputs:
     log.info("Transfermarkt valuations end on %s", data_end.date())
     log.info(
         "Inputs: %d season rows, %d league and %d cup match rows, %d team rows, "
-        "%d injuries, %d transfers, %d links, %d valuations",
+        "%d injuries, %d sidelined periods, %d coach spells, %d transfers, %d links, "
+        "%d valuations",
         len(season_stats),
         len(match_stats),
         len(comp_matches),
         len(team_stats),
         len(injuries),
+        len(sidelined),
+        len(coaches),
         len(transfers),
         len(links),
         len(valuations),
@@ -132,6 +161,9 @@ def load_inputs(settings: Settings) -> Inputs:
         comp_matches=comp_matches,
         team_stats=team_stats,
         injuries=injuries,
+        sidelined=sidelined,
+        club_calendar=calendar,
+        coaches=coaches,
         transfers=transfers,
         comps={c.key: (c.kind, c.region) for c in settings.competitions},
         league_regions={lg.key: lg.region for lg in settings.leagues},
@@ -176,6 +208,7 @@ def run_features(settings: Settings) -> tuple[pd.DataFrame, pd.DataFrame]:
     n = _write_partitioned(features, out / "player_season_features")
     _write_partitioned(label_table, out / "player_season_labels")
     write_feature_report(features, label_table, settings.paths.reports_dir)
+    write_injury_report(features, inputs, settings.paths.reports_dir)
     log.info("Wrote %d feature rows in %d league seasons to %s", len(features), n, out)
     return features, label_table
 
@@ -204,6 +237,39 @@ def write_feature_report(features: pd.DataFrame, label_table: pd.DataFrame, repo
         path,
         "# Feature build report\n\nShares are percentages of all players with minutes.\n\n"
         + table.to_markdown(index=False)
+        + "\n",
+    )
+    return path
+
+
+def write_injury_report(features: pd.DataFrame, inputs: Inputs, reports: Path) -> Path:
+    """Where the injury columns come from per season, and how the two sources
+    agree on the rows both cover (reports/injury_sources.md)."""
+    source = features["injury_source"].fillna("none")
+    coverage = pd.crosstab(features["season"], source, normalize="index").mul(100).round(1)
+    coverage.columns = [f"{c} %" for c in coverage.columns]
+    agreement = injury_source_agreement(
+        features,
+        inputs.injuries,
+        injury_coverage(inputs.injuries),
+        inputs.sidelined,
+        inputs.club_calendar,
+    )
+    for column in ("injured_injuries", "injured_sidelined", "agree"):
+        if column in agreement:
+            agreement[column] = (agreement[column] * 100).round(1)
+    path = reports / "injury_sources.md"
+    atomic_write_text(
+        path,
+        "# Injury sources\n\n"
+        "Share of feature rows per season whose injury columns come from the "
+        "injuries table, the sidelined periods, or neither.\n\n"
+        + coverage.reset_index().to_markdown(index=False)
+        + "\n\n## Agreement where both sources cover a row\n\n"
+        "Injured: one spell or more in the 12 months before the feature date "
+        "(percent of rows). Missed: mean matches missed. Agree: percent of rows "
+        "where both sources say injured or both say not.\n\n"
+        + (agreement.round(3).to_markdown(index=False) if len(agreement) else "No overlap.")
         + "\n",
     )
     return path

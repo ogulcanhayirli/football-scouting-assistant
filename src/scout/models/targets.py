@@ -43,6 +43,8 @@ NOT_FEATURES = {
     "last_comp_match_date",
     "last_injury_date",
     "last_transfer_date",
+    "last_coach_change_date",
+    "injury_source",
     "season",
 }
 CATEGORICAL = [

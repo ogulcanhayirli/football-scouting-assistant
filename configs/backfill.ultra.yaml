@@ -89,6 +89,33 @@ leagues:
     region: south_america
     calendar_year: true
 
+  # Expansion (owner decision 6), downloaded 16 and 17 October 2026: feeder
+  # leagues and the second tiers of the big five. Region is the confederation
+  # (owner, 18 October). Transfermarkt codes checked against games.csv.gz where
+  # the snapshot has games; ids and coverage in configs/expansion_probe.md.
+  - {key: austrian_bundesliga, name: Austrian Bundesliga, api_football_id: 218, transfermarkt_id: A1}
+  - {key: swiss_super_league, name: Swiss Super League, api_football_id: 207, transfermarkt_id: C1}
+  - {key: croatian_hnl, name: Croatian HNL, api_football_id: 210, transfermarkt_id: KR1}
+  - {key: serbian_superliga, name: Serbian SuperLiga, api_football_id: 286, transfermarkt_id: SER1}
+  - {key: czech_first_league, name: Czech First League, api_football_id: 345, transfermarkt_id: TS1}
+  - {key: norwegian_eliteserien, name: Eliteserien, api_football_id: 103, transfermarkt_id: NO1, calendar_year: true}
+  - {key: swedish_allsvenskan, name: Allsvenskan, api_football_id: 113, transfermarkt_id: SE1, calendar_year: true}
+  - {key: polish_ekstraklasa, name: Ekstraklasa, api_football_id: 106, transfermarkt_id: PL1}
+  - {key: liga_mx, name: Liga MX, api_football_id: 262, transfermarkt_id: MEX1, region: north_america}
+  - {key: mls, name: Major League Soccer, api_football_id: 253, transfermarkt_id: MLS1, region: north_america, calendar_year: true}
+  - {key: colombian_primera_a, name: Colombian Primera A, api_football_id: 239, transfermarkt_id: COL1, region: south_america, calendar_year: true}
+  - {key: uruguayan_primera, name: Uruguayan Primera División, api_football_id: 268, transfermarkt_id: URU1, region: south_america, calendar_year: true}
+  # J1 lists 2026 as a short season (February to June) and 2027 as the first
+  # autumn to spring one; 2026 is left out until that change is handled.
+  - {key: j1_league, name: J1 League, api_football_id: 98, transfermarkt_id: JAP1, region: asia, calendar_year: true, skip_seasons: [2026]}
+  - {key: k_league_1, name: K League 1, api_football_id: 292, transfermarkt_id: RSK1, region: asia, calendar_year: true}
+  - {key: saudi_pro_league, name: Saudi Pro League, api_football_id: 307, transfermarkt_id: SA1, region: asia}
+  - {key: bundesliga_2, name: 2. Bundesliga, api_football_id: 79, transfermarkt_id: L2}
+  - {key: segunda_division, name: Segunda División, api_football_id: 141, transfermarkt_id: ES2}
+  - {key: serie_b, name: Serie B, api_football_id: 136, transfermarkt_id: IT2}
+  - {key: ligue_2, name: Ligue 2, api_football_id: 62, transfermarkt_id: FR2}
+  - {key: eerste_divisie, name: Eerste Divisie, api_football_id: 89, transfermarkt_id: NL2}
+
 # Cups and national team competitions: per match player and team stats only.
 # They add columns to the players' league rows, counted by match date.
 competitions:
@@ -111,6 +138,13 @@ competitions:
   - {key: wc_qual_concacaf, name: World Cup Qualification CONCACAF, api_football_id: 31, kind: national}
   - {key: euro_qual, name: Euro Championship Qualification, api_football_id: 960, kind: national}
   - {key: friendlies, name: International Friendlies, api_football_id: 10, kind: national}
+  # Youth (expansion): own columns, not caps. The Youth League has no player
+  # minutes in the API, so it adds nothing to the features yet.
+  - {key: uefa_youth_league, name: UEFA Youth League, api_football_id: 14, kind: youth}
+  - {key: uefa_u21_championship, name: UEFA U21 Championship, api_football_id: 38, kind: youth}
+  - {key: fifa_u20_world_cup, name: FIFA U20 World Cup, api_football_id: 490, kind: youth}
+  - {key: fifa_u17_world_cup, name: FIFA U17 World Cup, api_football_id: 587, kind: youth}
+  - {key: olympics_men, name: Olympic football (men), api_football_id: 480, kind: youth}
 
 backfill:
   seasons: all

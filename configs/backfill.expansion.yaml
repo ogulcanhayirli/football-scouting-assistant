@@ -4,8 +4,9 @@
 # scripts/run_expansion.py, which keeps the competition order and syncs raw
 # files to S3 after each one.
 #
-# Kept apart from backfill.ultra.yaml until the features are built for these
-# leagues: the Glue league list must match that file (tests/unit/test_infra_config.py).
+# Since 18 October the same leagues and youth competitions are also in
+# backfill.ultra.yaml, which the feature build uses; this file stays for the
+# download scripts.
 api_football:
   plan: ultra
   quota:
@@ -16,8 +17,7 @@ api_football:
 
 # Transfermarkt codes checked against games.csv.gz of the snapshot where it has
 # games (2024 on); Colombia, Uruguay and the second tiers have none there.
-# region: only europe and south_america exist. North America, Asia and Saudi
-# Arabia keep the default for now; settle this before building their features.
+# region is the confederation (owner, 18 October).
 leagues:
   - {key: austrian_bundesliga, name: Austrian Bundesliga, api_football_id: 218, transfermarkt_id: A1}
   - {key: swiss_super_league, name: Swiss Super League, api_football_id: 207, transfermarkt_id: C1}
@@ -27,14 +27,14 @@ leagues:
   - {key: norwegian_eliteserien, name: Eliteserien, api_football_id: 103, transfermarkt_id: NO1, calendar_year: true}
   - {key: swedish_allsvenskan, name: Allsvenskan, api_football_id: 113, transfermarkt_id: SE1, calendar_year: true}
   - {key: polish_ekstraklasa, name: Ekstraklasa, api_football_id: 106, transfermarkt_id: PL1}
-  - {key: liga_mx, name: Liga MX, api_football_id: 262, transfermarkt_id: MEX1}
-  - {key: mls, name: Major League Soccer, api_football_id: 253, transfermarkt_id: MLS1, calendar_year: true}
+  - {key: liga_mx, name: Liga MX, api_football_id: 262, transfermarkt_id: MEX1, region: north_america}
+  - {key: mls, name: Major League Soccer, api_football_id: 253, transfermarkt_id: MLS1, region: north_america, calendar_year: true}
   - {key: colombian_primera_a, name: Colombian Primera A, api_football_id: 239, transfermarkt_id: COL1, region: south_america, calendar_year: true}
   - {key: uruguayan_primera, name: Uruguayan Primera División, api_football_id: 268, transfermarkt_id: URU1, region: south_america, calendar_year: true}
   # J1 lists 2026 as a short season and 2027 as the first autumn to spring one.
-  - {key: j1_league, name: J1 League, api_football_id: 98, transfermarkt_id: JAP1, calendar_year: true}
-  - {key: k_league_1, name: K League 1, api_football_id: 292, transfermarkt_id: RSK1, calendar_year: true}
-  - {key: saudi_pro_league, name: Saudi Pro League, api_football_id: 307, transfermarkt_id: SA1}
+  - {key: j1_league, name: J1 League, api_football_id: 98, transfermarkt_id: JAP1, region: asia, calendar_year: true}
+  - {key: k_league_1, name: K League 1, api_football_id: 292, transfermarkt_id: RSK1, region: asia, calendar_year: true}
+  - {key: saudi_pro_league, name: Saudi Pro League, api_football_id: 307, transfermarkt_id: SA1, region: asia}
   - {key: bundesliga_2, name: 2. Bundesliga, api_football_id: 79, transfermarkt_id: L2}
   - {key: segunda_division, name: Segunda División, api_football_id: 141, transfermarkt_id: ES2}
   - {key: serie_b, name: Serie B, api_football_id: 136, transfermarkt_id: IT2}
