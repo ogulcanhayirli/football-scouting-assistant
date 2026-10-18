@@ -86,6 +86,7 @@ $C elo                                       # team Elo from cached fixtures, re
 $C scouting [--strength transfer|elo]        # league strength, ability, 3 targets
 $C sync up | down [--dry-run] [--only raw|processed|reports]
 uv run python scripts/run_extras.py          # sidelined, coaches, events (done 17 October)
+uv run python scripts/rebuild_match_seasons.py --from-s3 serie_b:2016  # re-parse partitions offline after an adapter repair
 ```
 
 Also `athena "SQL"`, `featurestore ingest | pit --as-of DATE`,
@@ -106,39 +107,48 @@ bucket named by `$SCOUT_S3_BUCKET` (eu-central-1).
 |---|---|---|
 | API Football raw cache | `data/raw/api_football/<endpoint>/<param>=<value>/....json` | 254,398 responses, each with a `.meta.json` |
 | Transfermarkt snapshot | `data/raw/transfermarkt/*.csv.gz` | release of 2026-09-05 (latest on 2026-10-16; upstream paused), values end 2026-06-12; replaced files go to `archive/<date>/` |
-| Season totals | `data/processed/player_season_stats/league=<key>/season=<year>.parquet` | 183,482 rows |
-| Per match player stats | `data/processed/player_match_stats/...` | 2,226,071 rows, from 2015 |
+| Season totals | `data/processed/player_season_stats/league=<key>/season=<year>.parquet` | 327,036 rows, 37 leagues |
+| Per match player stats | `data/processed/player_match_stats/...` | 3,915,740 rows (leagues, cups, youth), from 2015; 23 partitions re-parsed on 18 October after the shared id and missing attempts repairs |
 | Per match team stats | `data/processed/team_match_stats/...` | 137,600 rows; xG from 2023/24 |
 | Lineups | `data/processed/match_lineups/...` | 3,944,124 rows |
 | Injuries | `data/processed/injuries/...` | 139,927 rows, from 2020 |
-| Sidelined periods | `data/processed/sidelined/sidelined.parquet` | 88,046 injury and suspension periods for 20,791 players, mostly 2010 to September 2025 (the API adds almost nothing after); a snapshot of 2026, so use only periods started by the feature date |
-| Coach spells | `data/processed/coaches/coach_spells.parquet` | 22,383 spells, 6,549 coaches, dates to the month; a missing end means still in charge |
+| Sidelined periods | `data/processed/sidelined/sidelined.parquet` | 88,046 injury and suspension periods for 20,791 players (all 86,250 players asked for), mostly 2010 to September 2025 (the API adds almost nothing after); a snapshot of 2026, so only periods started by the feature date are used; tracked well only in some league seasons (FEATURES.md) |
+| Coach spells | `data/processed/coaches/coach_spells.parquet` | 22,383 spells, 6,549 coaches, dates mostly to the month (a few carry a day); a missing end means still in charge; from July 2025 sitting coaches are listed again under new ids |
 | Match events | `data/processed/fixture_events/...` | 1,609,653 goals, cards, substitutions and VAR events for all 107,409 fixtures with player stats |
 | Transfers | `data/processed/transfers/transfers.parquet` | 285,797 moves |
-| Player links | `data/processed/features/player_links.parquet` | 33,875 linked players |
+| Player links | `data/processed/features/player_links.parquet` | 41,224 linked players |
 | Player profiles | `data/processed/features/player_profiles.parquet` | contract expiry, agent, highest value per link; display only, never a model input |
-| Features | `data/processed/features/player_season_features/league=<key>/season=<year>/data.parquet` | 130,631 rows |
+| Features | `data/processed/features/player_season_features/league=<key>/season=<year>/data.parquet` | 233,272 rows (130,631 in the original 17 leagues), 135 columns |
 | Labels | `data/processed/features/player_season_labels/...` | value now, 24 and 36 months |
 | Team Elo | `data/processed/elo/*.parquet` | per match pre match ratings, club and league seasons |
 | Model outputs | `data/processed/models/*.parquet` | backtest predictions, labels |
 | Quota state, log | `data/state/` | |
 
-Coverage: 17 leagues in `configs/backfill.ultra.yaml` (the big five,
-Championship, Süper Lig, Eredivisie, Portugal, Belgium, Scotland, Denmark,
-Greece, Russia, Ukraine, Brazil, Argentina), seasons 2010 to 2025 where the
-API has them, and 19 competitions (UEFA and CONMEBOL club cups, national team
-tournaments and qualifiers) used only as context for league rows. The league
-list in `infra/scout_infra/data_stack.py` must match the config (a test checks
-it). Per league and season coverage is in `reports/*coverage_report.md`.
+Coverage: 37 leagues in `configs/backfill.ultra.yaml`, seasons 2010 to 2025
+where the API has them. The original 17: the big five, Championship, Süper
+Lig, Eredivisie, Portugal, Belgium, Scotland, Denmark, Greece, Russia,
+Ukraine, Brazil, Argentina. The expansion 20 (decision 6, downloaded 16 and
+17 October 2026, in the features since 18 October): Austria, Switzerland,
+Croatia, Serbia, Czech Republic, Norway, Sweden, Poland, Liga MX, MLS,
+Colombia, Uruguay, J1, K League 1, Saudi Pro League, 2. Bundesliga, Segunda
+División, Serie B, Ligue 2, Eerste Divisie. `region` is the confederation
+(owner, 18 October): `europe`, `south_america`, `north_america` (MLS, Liga
+MX), `asia` (J1, K League 1, Saudi Pro League); no club cups are held for the
+last two, so their cup columns stay missing. 24 competitions add context
+columns to league rows: UEFA and CONMEBOL club cups, national team
+tournaments and qualifiers, and 5 youth competitions (`kind: youth`, own
+columns; the UEFA Youth League has no player minutes and adds nothing). The
+league list in `infra/scout_infra/data_stack.py` must match the config (a
+test checks it). Per league and season coverage is in
+`reports/*coverage_report.md`.
 
-Expansion (decision 6), downloaded 16 and 17 October 2026: 20 more leagues
-(feeder leagues and the second tiers of the big five) and 5 youth competitions
-in `configs/backfill.expansion.yaml`, with season totals, player stats per match
-and lineups; 143,554, 1,689,866 and 2,599,541 rows, per season in
-`configs/expansion_rows.md`. Run with `scripts/run_expansion.py` (order, daily
-cap, S3 upload after each competition, `--restore` on a fresh container). Not
-yet in `backfill.ultra.yaml`, the features or Glue; `region` for North America,
-Asia and Saudi Arabia is unsettled. Current seasons wait for the 6 November pull.
+Expansion gaps: no team match stats (team strength columns missing), no
+injuries table (only sidelined, where tracked), transfers only for players
+who also passed through a club of the original 17 leagues; Uruguay has
+season totals for 2020 only; J1 2026 (a short spring season before the move
+to autumn to spring) is left out by `skip_seasons`. `configs/backfill.expansion.yaml`
+stays for `scripts/run_expansion.py` (order, daily cap, S3 upload, `--restore`).
+Current seasons wait for the 6 November pull.
 
 ## Models
 
@@ -160,9 +170,12 @@ and builds the ability score (rating adjusted for league and team strength,
 shrunk by minutes, percentile within the position group). Results as of
 October 2026, from MODELS.md and `reports/`:
 
-* Fair value is good (MAE 0.391 on the original EPL and Süper Lig test rows,
-  baseline 0.835). Growth barely beats its baseline; age carries most of it.
-* Big move: AUC 0.905 against 0.780; 39% of each season's top 50 moved.
+* Fair value is good: MAE 0.395 over all 37 leagues against 0.780 for the
+  baseline (0.396 against 0.837 on the original 17, 0.393 against 0.675 on
+  the new 20; 0.402 before the expansion). Growth barely beats its baseline;
+  age carries most of it.
+* Big move: AUC 0.928 against 0.803 over 37 leagues (0.907 against 0.780 on
+  the original 17, 0.905 before); 38.5% of each season's top 50 moved.
 * Elite AUC 0.88, step up 0.91, performance 0.81 (backtest, 2 seasons ahead).
   The models rank who makes it but do not predict collapses.
 * Automatic model tuning in SageMaker was run once, for growth 24m only.
@@ -229,9 +242,21 @@ Settle them with the owner rather than guessing.
   the README status table does not list them.
 * The three scouting targets have no baseline next to the model, against
   rule 3.
-* `processed/` and `reports/` in S3 were synced on 2026-10-17 (adding the Elo
-  tables, `reports/elo.md` and `reports/scouting_elo.md`) and matched the
-  local files then; any rebuild since needs another `sync up`.
+* `processed/` and `reports/` in S3 were synced on 2026-10-18. The build of
+  18 October (37 leagues) rewrote the features, labels, model outputs,
+  `reports/backtest_fair_value.md`, `reports/moves.md`,
+  `reports/features_report.md`, the new `reports/injury_sources.md`, and 23
+  `player_match_stats` partitions repaired by the adapter; none of that is
+  in S3 until the owner runs `sync up`.
+* The Transfermarkt dataset (dcaribou) has been paused since its 5 September
+  2026 release, with valuations ending 12 June 2026. Live lists would freeze
+  at June 2026 values, so a replacement value source is needed before the
+  weekly pipeline (decision 9) is worth running.
+* Shared player ids: the adapter now drops the rows of the minority club when
+  one id switches clubs back and forth within a league season (two players
+  on one id). When the id's real owner is the minority, his rows go
+  (Gabriel Barbosa's 11 Santos matches in Brasileirão 2016). Lineups and
+  season totals are not repaired the same way yet.
 * Decision 7 adds FBref, but README.md (Data sources and attribution) says no
   site is scraped; FBref's terms and access method need checking first.
 * Decision 9 replaces the planned AWS shape in README.md (Lambda, API Gateway,
@@ -240,8 +265,9 @@ Settle them with the owner rather than guessing.
   the snapshot describes 2026. It now lives in `player_profiles.parquet` with
   agent and highest value, for the current season's lists only; the feature
   contract and `NOT_FEATURES` both block those columns from models.
-* The Glue schema is regenerated for 129 feature columns but `ScoutData` is
-  not redeployed, and the Feature Store group predates the context features.
+* The Glue schema is regenerated (18 October: 37 leagues, the youth, injury
+  source and coach columns) but `ScoutData` is not redeployed, and the
+  Feature Store group predates the context features.
 * API gaps: no Euro qualifier data at all and no 2026 World Cup qualifiers,
   so recent international minutes are undercounted for everyone; Liga
   Profesional 2023 has no season totals (the API returns the Copa de la Liga).
@@ -254,5 +280,10 @@ Settle them with the owner rather than guessing.
   predicts the targets at least as well, which is not yet checked.
 * The `pyproject.toml` description still names only the Premier League and the
   Süper Lig.
+* The scouting targets and the ability score were not rerun on the 37 league
+  features; `reports/scouting*.md` still describe the 17 leagues. League
+  strength (transfer based and Elo) needs no code change: both are fitted
+  from the feature rows and the Elo tables, which already hold the
+  expansion leagues.
 * The work branch is `claude/gifted-brown-nwtnj0`; it is not merged into
   `main`, and CI runs on pull requests and pushes to `main`.

@@ -177,7 +177,12 @@ fill in: the matches the row's club played (league and club cups, from the
 Elo match table) while the player was out. Only periods started before the
 feature date count, and an end date on or after it is never used (the
 period counts as running at the feature date). Sidelined windows must lie
-between July 2010 and September 2025, its coverage. Missing outside both.
+between July 2010 and September 2025, its coverage, and the league season
+must be one the endpoint tracked: at least 30% of its rows with a spell (the
+injuries table finds about 45%; untracked seasons show 0 to 10%). That keeps
+the EPL from 2011, La Liga, Ligue 1 and the Eredivisie from 2012, the
+Bundesliga from 2018 and a few leagues in recent seasons; elsewhere a 0
+would mean "not tracked", so the columns stay missing.
 How the two agree where both cover a row: `reports/injury_sources.md`.
 
 **Coach (`coach_spells`), the row's club and league season**
@@ -189,8 +194,12 @@ How the two agree where both cover a row: `reports/injury_sources.md`.
 | `last_coach_change_date` | the latest of those starts (audit) |
 
 Month level, because spell dates are months: an appointment in the month of
-the first match counts as new for the season, not as a change during it.
-Caretakers count. When the club's previous season is not held, the two
+the first match counts as new for the season, not as a change during it; a
+start dated after the feature date is never used. Caretakers count. From
+July 2025 the API lists sitting coaches again under a new id and their full
+name (J. Neestrup, then Jacob Neestrup at FC Copenhagen); a spell of the same
+person (first initial and surname) while an earlier one at the club is still
+running is no change. When the club's previous season is not held, the two
 months before its first match stand for the off season. Missing for clubs
 without a spell starting by the end of the season.
 

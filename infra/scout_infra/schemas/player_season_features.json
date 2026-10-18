@@ -460,6 +460,14 @@
   "type": "double"
  },
  {
+  "name": "youth_minutes_12m",
+  "type": "double"
+ },
+ {
+  "name": "youth_matches_12m",
+  "type": "double"
+ },
+ {
   "name": "last_comp_match_date",
   "type": "timestamp"
  },
@@ -473,6 +481,22 @@
  },
  {
   "name": "last_injury_date",
+  "type": "timestamp"
+ },
+ {
+  "name": "injury_source",
+  "type": "string"
+ },
+ {
+  "name": "new_coach",
+  "type": "double"
+ },
+ {
+  "name": "coach_changed_in_season",
+  "type": "double"
+ },
+ {
+  "name": "last_coach_change_date",
   "type": "timestamp"
  },
  {

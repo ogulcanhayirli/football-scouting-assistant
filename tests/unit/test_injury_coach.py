@@ -192,10 +192,26 @@ def test_sidelined_missing_outside_its_coverage_or_without_club_fixtures():
             ("epl", 2018, 1, "2019-06-30", 77),  # club not in the calendar
             ("epl", 2018, 1, "2019-06-30", 10),
         ),
-        pd.DataFrame([period(5, "2018-09-01", "2018-09-10")]),
+        pd.DataFrame([period(1, "2018-09-01", "2018-09-10")]),
         calendar,
     )
     assert out["injury_spells_12m"].isna().tolist() == [True, True, True, False]
+
+
+def test_sidelined_missing_in_league_seasons_it_barely_tracks():
+    calendar = club_calendar(weekly(10, "2018-08-04", "2019-05-25"))
+    sidelined = pd.DataFrame([period(1, "2018-09-01", "2018-09-20")])
+    tracked = rows(*[("epl", 2018, p, "2019-06-30", 10) for p in (1, 2, 3)])
+    barely = rows(*[("k_league_1", 2018, p, "2019-06-30", 10) for p in range(1, 5)])
+    # One injured in three is tracked; one in four (25%) is below the 30% bar.
+    assert sidelined_injury_features(tracked, sidelined, calendar)[
+        "injury_spells_12m"
+    ].tolist() == [
+        1,
+        0,
+        0,
+    ]
+    assert sidelined_injury_features(barely, sidelined, calendar)["injury_spells_12m"].isna().all()
 
 
 def test_injuries_table_wins_from_april_2021_and_sidelined_fills_the_rest():
@@ -212,20 +228,25 @@ def test_injuries_table_wins_from_april_2021_and_sidelined_fills_the_rest():
         }
     )
     sidelined = pd.DataFrame(
-        [period(1, "2020-09-01", "2020-09-14"), period(1, "2021-09-01", "2021-12-01")]
+        [
+            period(1, "2020-09-01", "2020-09-14"),
+            period(1, "2021-09-01", "2021-12-01"),
+            period(2, "2019-10-01", "2019-10-10"),
+        ]
     )
     out = injury_features(
         rows(
             ("epl", 2019, 1, "2020-07-27", 10),  # no table: sidelined
             ("epl", 2020, 1, "2021-06-30", 10),  # table starts mid window: sidelined
             ("epl", 2021, 1, "2022-06-30", 10),  # table
+            ("epl", 2019, 2, "2020-07-27", 10),  # so 2019/20 shows an injury
         ),
         injuries,
         {("epl", 2020), ("epl", 2021)},
         sidelined,
         calendar,
     )
-    assert out["injury_source"].tolist() == ["sidelined", "sidelined", "injuries"]
+    assert out["injury_source"].tolist() == ["sidelined", "sidelined", "injuries", "sidelined"]
     assert out.loc[0, "injury_matches_missed_12m"] == 0
     assert out.loc[1, "injury_matches_missed_12m"] == 2  # 5 and 12 September 2020
     assert out.loc[2, "injury_matches_missed_12m"] == 1  # the table's one row, not 13
@@ -259,9 +280,10 @@ def test_agreement_report_compares_rows_both_sources_cover():
 # Coaches
 
 
-def coach(team, start, end=None):
+def coach(team, start, end=None, name=None):
     return {
         "coach_id": hash((team, start)) % 10**6 + 1,
+        "coach_name": name or f"Coach {team} {start}",
         "team_id": team,
         "start_date": pd.Timestamp(start),
         "end_date": pd.Timestamp(end) if end else pd.NaT,
@@ -324,6 +346,40 @@ def test_coach_start_after_the_feature_date_is_unknown_even_in_the_same_month():
     out = coach_features(rows(("epl", 2017, 1, "2018-05-16", 10)), coaches, calendar)
     assert out.loc[0, "coach_changed_in_season"] == 0
     assert pd.isna(out.loc[0, "last_coach_change_date"])
+
+
+def test_a_coach_listed_again_under_a_new_id_is_no_change():
+    # FC Copenhagen: J. Neestrup since 2022, Jacob Neestrup again from July 2025.
+    calendar = club_calendar(
+        pd.concat(
+            [weekly(10, "2024-07-20", "2025-05-25"), weekly(10, "2025-07-19", "2026-05-24")],
+            ignore_index=True,
+        )
+    )
+    coaches = pd.DataFrame(
+        [
+            coach(10, "2022-09-01", name="J. Neestrup"),
+            coach(10, "2025-07-01", "2026-03-01", name="Jacob Neestrup"),
+            coach(10, "2025-09-01", name="Bo Svensson"),
+        ]
+    )
+    out = coach_features(rows(("epl", 2025, 1, "2026-06-30", 10)), coaches, calendar)
+    assert out.loc[0, "new_coach"] == 0
+    assert out.loc[0, "coach_changed_in_season"] == 1  # Svensson
+    assert out.loc[0, "last_coach_change_date"] == pd.Timestamp("2025-09-01")
+
+
+def test_a_coach_returning_after_a_gap_is_a_change():
+    calendar = club_calendar(weekly(10, "2018-08-11", "2019-05-11"))
+    coaches = pd.DataFrame(
+        [
+            coach(10, "2015-01-01", "2017-05-01", name="A. Smith"),
+            coach(10, "2017-06-01", "2018-05-01", name="B. Jones"),
+            coach(10, "2018-07-01", name="Alan Smith"),
+        ]
+    )
+    out = coach_features(rows(("epl", 2018, 1, "2019-06-30", 10)), coaches, calendar)
+    assert out.loc[0, "new_coach"] == 1
 
 
 # Pipeline

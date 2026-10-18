@@ -13,6 +13,8 @@ for is unknown, not fit.
 
 from __future__ import annotations
 
+import unicodedata
+
 import numpy as np
 import pandas as pd
 
@@ -51,6 +53,10 @@ INJURIES_START = pd.Timestamp("2021-04-06")
 SIDELINED_START = pd.Timestamp("2010-07-01")
 SIDELINED_END = pd.Timestamp("2025-10-01")
 SPELL_GAP = pd.Timedelta(days=30)  # missed matches further apart start a new spell
+# The sidelined endpoint tracks some league seasons only in part: 0 to 10% of
+# the rows injured, where the injuries table finds about 45%. A league season
+# takes its injuries from it only when at least this share has a spell.
+SIDELINED_MIN_INJURED = 0.30
 COACH_COLUMNS = ["new_coach", "coach_changed_in_season"]
 OFF_SEASON_MONTHS = 2  # when the club's previous season is not held
 TRANSFER_COLUMNS = [
@@ -339,8 +345,10 @@ def sidelined_injury_features(
     and an end date on or after the feature date is never used: the period
     counts as still running at the feature date. Every player in the
     processed tables was asked for, so a player without periods is fit, but
-    only for windows inside ``SIDELINED_START`` to ``SIDELINED_END``; outside
-    them, and for clubs without fixtures, the columns stay missing."""
+    only for windows inside ``SIDELINED_START`` to ``SIDELINED_END`` and in
+    league seasons the endpoint tracked (``SIDELINED_MIN_INJURED``); outside
+    them, and for clubs without fixtures, the columns stay missing. The gate
+    uses only periods started before the season's feature date."""
     out = pd.DataFrame(index=rows.index, columns=INJURY_COLUMNS, dtype=float)
     out["last_injury_date"] = pd.Series(pd.NaT, index=rows.index, dtype="datetime64[ns]")
     if rows.empty or sidelined.empty or calendar.empty:
@@ -367,6 +375,9 @@ def sidelined_injury_features(
     team_ids = pd.to_numeric(rows["team_id"], errors="coerce")
     has_club = team_ids.isin(set(calendar["team_id"]))
     known = in_range & has_club
+    hurt = (out["injury_spells_12m"].fillna(0) > 0).where(known)
+    share = hurt.groupby([rows["league_key"], rows["season"]]).transform("mean")
+    known &= share >= SIDELINED_MIN_INJURED
     for column in INJURY_COLUMNS:
         out[column] = out[column].fillna(0).where(known)
     out.loc[~known, "last_injury_date"] = pd.NaT
@@ -431,7 +442,9 @@ def coach_features(
 
     Spell dates have month precision, so both flags compare months; a coach
     appointed in the month of the first match counts as new for the season,
-    not as an in season change. Caretakers count. Only start dates are read,
+    not as an in season change. Caretakers count; a spell that only
+    re-lists the coach already in charge does not (``_coach_changes``).
+    Only start dates are read for the flags,
     and every start used falls on or before the month of the last league
     match and before the feature date; ``last_coach_change_date`` keeps the
     latest one for the contract. Missing for clubs with no spell starting by
@@ -469,8 +482,7 @@ def coach_features(
         keys["prev_last_m"].notna() & (keys["prev_last_m"] < keys["first_m"]), fallback
     )
 
-    spells = coaches.dropna(subset=["team_id", "start_date"])[["team_id", "start_date"]]
-    spells = spells.astype({"team_id": "int64"}).drop_duplicates()
+    spells = _coach_changes(coaches)
     spells["start_m"] = spells["start_date"].dt.to_period("M")
     pairs = keys.merge(spells, on="team_id")
     # Month level for the flags, but a start dated after the feature date is
@@ -481,6 +493,8 @@ def coach_features(
     ]
     new = (pairs["start_m"] > pairs["prev_last_m"]) & (pairs["start_m"] <= pairs["first_m"])
     during = (pairs["start_m"] > pairs["first_m"]) & (pairs["start_m"] <= pairs["last_m"])
+    new &= pairs["change"]
+    during &= pairs["change"]
     pairs = pairs.assign(new=new, during=during)
     grouped = pairs.groupby("row")
     out["new_coach"] = grouped["new"].any().astype(float)
@@ -488,6 +502,43 @@ def coach_features(
     used = pairs[new | during]
     out["last_coach_change_date"] = used.groupby("row")["start_date"].max()
     return out
+
+
+def _person(name: object, coach_id: object) -> str:
+    """First initial and surname, without accents: "J. Neestrup" and "Jacob
+    Neestrup" are one person. The id stands in when the name is missing."""
+    if not isinstance(name, str) or not name.strip():
+        return f"id:{coach_id}"
+    plain = unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode().lower()
+    parts = plain.replace(".", " ").split()
+    return f"{parts[0][0]} {parts[-1]}" if parts else f"id:{coach_id}"
+
+
+def _coach_changes(coaches: pd.DataFrame) -> pd.DataFrame:
+    """team_id, start_date and ``change`` per spell. From July 2025 the API
+    lists coaches already in charge again under a new id and their full name
+    (FC Copenhagen: J. Neestrup since September 2022, Jacob Neestrup from
+    July 2025), which would read as an appointment at almost every club. A
+    spell is no change when the same person already has a spell at the club
+    that started earlier and had not ended a month before this one began."""
+    spells = coaches.dropna(subset=["team_id", "start_date"]).copy()
+    spells["team_id"] = spells["team_id"].astype("int64")
+    spells["person"] = [
+        _person(n, c) for n, c in zip(spells["coach_name"], spells["coach_id"], strict=True)
+    ]
+    spells = spells.reset_index(drop=True)
+    earlier = spells.reset_index(names="spell").merge(
+        spells[["team_id", "person", "start_date", "end_date"]],
+        on=["team_id", "person"],
+        suffixes=("", "_before"),
+    )
+    running = (earlier["start_date_before"] < earlier["start_date"]) & (
+        earlier["end_date_before"].isna()
+        | (earlier["end_date_before"] >= earlier["start_date"] - pd.DateOffset(months=1))
+    )
+    continued = set(earlier.loc[running, "spell"])
+    spells["change"] = ~spells.index.isin(continued)
+    return spells[["team_id", "start_date", "change"]].drop_duplicates()
 
 
 # Transfers
