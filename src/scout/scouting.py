@@ -70,10 +70,15 @@ ELITE_RANK = 100
 STEP_UP_RANK = 500
 STEP_UP_FACTOR = 3.0
 ELITE_REACH = 1000  # elite candidates start here; further away it is too rare to learn
+# The elite pool (chance table, fall back, the list) is also 23 or under at
+# the feature date (prompt 12). The model learns from every candidate: trained
+# on the young alone it fell below its baseline (AUC 0.762 against 0.777).
+ELITE_MAX_AGE = 23
 FALL_BACK_FACTOR = 2.0  # an elite candidate whose value rank is twice as bad at the end
 PERF_RISE = 20.0  # the next two seasons average this many percentiles above now
 PERF_LEVEL = 70.0  # and both are at least this good: a rise that holds, not one lucky season
 RISER_MIN_SHARE = 0.5  # decision 3: risers play at least half of team minutes now
+RISER_LEVEL = 70.0  # and end at the 70th percentile of their position or better (prompt 12)
 SHRINK_MINUTES = 900  # an ability score from 900 minutes is half data, half position average
 MIN_MOVES = 50  # league strength from fewer moves is pulled towards the prior
 LABEL_TOLERANCE = pd.Timedelta(days=31)  # a value from 12 June 2026 stands for 30 June 2026
@@ -578,14 +583,23 @@ def rank_after(
     return _rank_of(found, rows["season"].astype(int) + years, table), when["_t"]
 
 
-def fall_back_label(value_rank: pd.Series, end_rank: pd.Series, reachable: pd.Series) -> pd.Series:
+def elite_pool(value_rank: pd.Series, age: pd.Series) -> pd.Series:
+    """The elite pool: value rank #101 to #1,000 and 23 or under at the
+    feature date. The elite chance table, its evaluation and the fall back
+    tables all use this pool; the elite model trains on every candidate."""
+    young = age.astype(float) < ELITE_MAX_AGE + 1
+    return value_rank.between(ELITE_RANK + 1, ELITE_REACH) & young.fillna(False)
+
+
+def fall_back_label(
+    value_rank: pd.Series, end_rank: pd.Series, reachable: pd.Series, age: pd.Series
+) -> pd.Series:
     """1 when an elite candidate's value rank at the end of the window is at
-    least ``FALL_BACK_FACTOR`` times worse; missing outside the candidates or
+    least ``FALL_BACK_FACTOR`` times worse; missing outside the elite pool or
     when the end lies past the data."""
-    within_reach = value_rank.between(ELITE_RANK + 1, ELITE_REACH)
     known = reachable & end_rank.notna() & value_rank.notna()
     fell = end_rank >= FALL_BACK_FACTOR * value_rank
-    return fell.astype(float).where(known & within_reach)
+    return fell.astype(float).where(known & elite_pool(value_rank, age))
 
 
 def fall_back_after(
@@ -595,7 +609,8 @@ def fall_back_after(
     rows = features[["season", "feature_date", "tm_player_id"]].copy()
     value_rank = value_ranks(features)
     end_rank, when = rank_after(rows, valuations, value_table(features), years)
-    return fall_back_label(value_rank, end_rank, when <= data_end + LABEL_TOLERANCE)
+    reachable = when <= data_end + LABEL_TOLERANCE
+    return fall_back_label(value_rank, end_rank, reachable, features["age"])
 
 
 def targets(
@@ -626,7 +641,7 @@ def targets(
     out["elite"] = (best <= ELITE_RANK).astype(float).where(known & within_reach)
     step = (best <= STEP_UP_RANK) & (out["value_rank"] / best >= STEP_UP_FACTOR)
     out["step_up"] = step.astype(float).where(known & (out["value_rank"] > ELITE_RANK))
-    out["fall_back"] = fall_back_label(out["value_rank"], rank, reachable)
+    out["fall_back"] = fall_back_label(out["value_rank"], rank, reachable, features["age"])
 
     # Performance: a rise that holds. Half of all one season rises were gone a
     # season later (the score's season to season correlation is 0.53), so both
@@ -680,13 +695,15 @@ def riser_target(
     """Decision 3, on the one season ability score (version 2 not pooled):
     a riser's next season beats the best of his current and previous one
     season scores by ``PERF_RISE`` percentiles, and the season after stays
-    at that level. Only players with at least half of team minutes in the
-    current season. Returns ``riser_base`` (the best of the two seasons,
-    known at the feature date) and ``riser``."""
+    at that level; both are at ``RISER_LEVEL`` or better, so a rise from the
+    20th to the 40th percentile does not count. Only players with at least
+    half of team minutes in the current season. Returns ``riser_base`` (the
+    best of the two seasons, known at the feature date) and ``riser``."""
     scores, seen = season_scores(features, one_season, [-1, 0, 1, 2])
     base = scores[[-1, 0]].max(axis=1).where(scores[0].notna())
     later = scores[[1, 2]].fillna(0.0)  # a season not rated as a regular breaks the rise
-    rose = later.min(axis=1) >= base + PERF_RISE
+    held = later.min(axis=1)
+    rose = (held >= base + PERF_RISE) & (held >= RISER_LEVEL)
     complete = features["season"].astype(int) + HORIZON_SEASONS <= int(features["season"].max())
     floor = minutes_share.astype(float) >= RISER_MIN_SHARE
     known = base.notna() & seen & complete & floor
@@ -779,7 +796,7 @@ def backtest(data: pd.DataFrame, columns: list[str], models: dict | None = None)
         test = data[folds == fold.test_season]
         train = train[train["label_date"] <= test["feature_date"].min()]
         check_no_leak(train, test, _Horizon())
-        frame = test[[*KEYS, "player_name", "age", "feature_date", "y"]].copy()
+        frame = test[[*KEYS, "player_name", "age", "value_rank", "feature_date", "y"]].copy()
         for name, model in models.items():
             frame[f"score_{name}"] = model(train, test, columns)
         out.append(frame)
@@ -942,6 +959,8 @@ def run_scouting(settings, strength_source: str = DEFAULT_STRENGTH) -> Path:
     log.info("scouting: %d rows, %d model columns", len(data), len(columns))
 
     results, scored = {}, {}
+    out_dir = settings.paths.processed_dir / "models"
+    out_dir.mkdir(parents=True, exist_ok=True)
     models = {"baseline": rank_rate, "lightgbm": classifier()}
     for target in SCOUTING_TARGETS:
         if not data[target].notna().any():
@@ -951,7 +970,12 @@ def run_scouting(settings, strength_source: str = DEFAULT_STRENGTH) -> Path:
         predictions = backtest(rows, use, models)
         results[target] = evaluate(predictions)
         results[f"{target} (baseline)"] = evaluate(predictions, score="score_baseline")
+        if target == "elite":
+            young = pool_predictions(predictions)
+            results["elite, 23 and under"] = evaluate(young)
+            results["elite, 23 and under (baseline)"] = evaluate(young, score="score_baseline")
         scored[target] = predictions
+        predictions.to_parquet(out_dir / f"backtest_{target}.parquet", index=False)
         log.info("%s: %s", target, {k: round(v, 3) for k, v in results[target].items()})
         newest = data[
             (data["season"] == data["season"].max()) & data["regular"].astype(bool)
@@ -965,15 +989,21 @@ def run_scouting(settings, strength_source: str = DEFAULT_STRENGTH) -> Path:
     )
     profiled = candidate_profiles(data, scored["elite"])
     data = data.join(profiled)
-    out_dir = settings.paths.processed_dir / "models"
-    out_dir.mkdir(parents=True, exist_ok=True)
     keep = [
         *KEYS,
         "player_name",
         "team_name",
         "group",
         "age",
+        "feature_date",
+        "team_id",
+        "position",
+        "sub_position",
+        "market_value",
         "value_rank",
+        "minutes_share",
+        "injury_matches_missed_12m",
+        "value_change_1y",
         "adj_rating",
         "ability_pct",
         "ability_pct_1s",
@@ -997,20 +1027,30 @@ def run_scouting(settings, strength_source: str = DEFAULT_STRENGTH) -> Path:
     )
     log.info("Scouting report: %s", path)
     path = candidates.write_report(
-        data, scored["elite"], data.loc[profiled.index], settings.paths.reports_dir
+        data,
+        pool_predictions(scored["elite"]),
+        data.loc[profiled.index],
+        settings.paths.reports_dir,
     )
     log.info("Candidates report: %s", path)
     return path
 
 
+def pool_predictions(predictions: pd.DataFrame) -> pd.DataFrame:
+    """The elite backtest predictions of the elite pool."""
+    return predictions[elite_pool(predictions["value_rank"], predictions["age"])]
+
+
 def candidate_profiles(data: pd.DataFrame, elite_predictions: pd.DataFrame) -> pd.DataFrame:
     """Elite chance, fall back risk and flags for the newest season's elite
     candidates (decision 2)."""
-    tables = candidates.risk_tables(elite_predictions, candidates.fall_back_rows(data))
+    tables = candidates.risk_tables(
+        pool_predictions(elite_predictions), candidates.fall_back_rows(data)
+    )
     current = data[
         (data["season"] == data["season"].max())
         & data["regular"].astype(bool)
-        & data["value_rank"].between(ELITE_RANK + 1, ELITE_REACH)
+        & elite_pool(data["value_rank"], data["age"])
         & data["score_elite"].notna()
     ]
     return candidates.profiles(current, "score_elite", tables)
@@ -1029,7 +1069,7 @@ def _lists(data: pd.DataFrame, size: int = 25) -> dict[str, pd.DataFrame]:
         "value_rank",
         "ability_pct",
     ]
-    elite = newest[newest["value_rank"].between(ELITE_RANK + 1, ELITE_REACH)]
+    elite = newest[elite_pool(newest["value_rank"], newest["age"])]
     elite = elite.sort_values("score_elite", ascending=False)
     step = newest[newest["value_rank"] > STEP_UP_RANK].sort_values("score_step_up", ascending=False)
     bargains = newest[(newest["ability_pct"] >= 85) & (newest["value_rank"] > 1000)]
@@ -1050,7 +1090,7 @@ def _lists(data: pd.DataFrame, size: int = 25) -> dict[str, pd.DataFrame]:
         return frame[show + extra].head(size).round(rounding)
 
     lists = {
-        "Investment: likely to enter the top 100 (now #101 to #1,000)": fmt(
+        "Investment: likely to enter the top 100 (now #101 to #1,000, 23 or under)": fmt(
             elite, ["score_elite", "score_step_up"]
         ),
         "Investment: likely big step up (now outside the top 500)": fmt(

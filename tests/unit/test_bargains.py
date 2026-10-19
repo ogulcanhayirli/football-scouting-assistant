@@ -44,14 +44,16 @@ def test_eligible_filters_and_ranks_the_ratio_within_position_group():
     data.loc[0, "ability_pct"] = 69.0  # below the ability floor
     data.loc[1, "minutes_share"] = 0.4  # below half of team minutes
     data.loc[2, "age"] = 31.0
+    data.loc[3, "age"] = 34.0  # too old for either list
+    data.loc[4, "age"] = 33.9  # 33 is still listed
     rows = eligible(data)
-    assert not rows["source_player_id"].isin([1, 2]).any()
+    assert not rows["source_player_id"].isin([1, 2, 4]).any()
     # keepers are cheaper in absolute terms, yet each group has its own 0 to 100 scale
     cheapest = rows.sort_values("ratio_pct").groupby("group").head(1)
     assert set(cheapest["group"]) == {"centre_back", "goalkeeper"}
     assert rows.groupby("group")["ratio_pct"].max().round(6).eq(100).all()
-    assert rows.loc[rows["source_player_id"] == 3, "list"].item() == "experienced"
-    assert (rows.loc[rows["source_player_id"] != 3, "age"] < 30).all()
+    assert rows.loc[rows["source_player_id"].isin([3, 5]), "list"].eq("experienced").all()
+    assert (rows.loc[~rows["source_player_id"].isin([3, 5]), "age"] < 30).all()
 
 
 def test_eligible_keeps_one_row_per_player_and_season():
@@ -62,22 +64,19 @@ def test_eligible_keeps_one_row_per_player_and_season():
     assert rows.loc[rows["source_player_id"] == 1, "league_key"].item() == "epl"
 
 
-def test_warning_flags_carry_their_raw_numbers():
+def test_warning_flags_are_the_shared_core_flags_plus_two_tags():
     data = _rows(n=2)
-    data.loc[0, ["injury_matches_missed_12m", "value_change_1y", "prev_minutes"]] = [
-        12.0,
-        0.5,
-        np.nan,
-    ]
+    data.loc[0, ["injury_matches_missed_12m", "value_change_1y", "on_loan"]] = [12.0, 0.5, 1.0]
     data.loc[0, "value_date"] = pd.Timestamp("2020-06-01")
     flags = warning_flags(data)
-    assert flags["flag_count"].tolist() == [4, 0]
+    assert flags["flag_count"].tolist() == [2, 0]  # tags are never counted
     text = flags.loc[0, "flags"]
-    assert "12 matches missed" in text
-    assert "0.50x" in text
-    assert "no previous season" in text
-    assert "stale value" in text
-    assert flags.loc[1, "flags"] == ""
+    assert "12 matches missed injured" in text
+    assert "value -50% on a year before" in text
+    assert flags.loc[1, "flags"] == "none"
+    assert flags["on_loan"].tolist() == [True, False]
+    assert flags["stale_value"].tolist() == [True, False]
+    assert flags.loc[0, "stale_days"] == 394
 
 
 def test_outcomes_find_a_move_to_a_stronger_club_and_value_growth():

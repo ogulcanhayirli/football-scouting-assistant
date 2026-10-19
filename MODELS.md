@@ -284,6 +284,9 @@ better. It is (0.858 against 0.503; AUC +0.001 and +0.002), so
 
 ## Fall back risk and the candidate tables (decisions 1, 2)
 
+As first built; the pool, the flags and the buckets changed after the
+owner's review (next to last section, "Fixes after the owner's review").
+
 Built on 19 October 2026 on all 37 leagues with ability score version 2
 (`src/scout/candidates.py`, `reports/candidates.md`, written by
 `scout scouting`). No earlier code defined a fall back, so this is the
@@ -368,6 +371,9 @@ them up a level more often than their peers. Per season tables in
 
 ## Performance risers (decision 3)
 
+As first built; a level floor was added after the owner's review (next
+section).
+
 Built on 19 October 2026 on all 37 leagues. The old performance target
 asked for both of the next two seasons at the 70th percentile of the two
 season score and their average 20 above now; measured against one season,
@@ -398,6 +404,105 @@ include Bounou (2018, before Sevilla), Elmas and Ndicka (2018), Djed Spence
 20th to the 40th percentile counts, and the current list leans to such low
 starting scores (many goalkeepers and centre backs, whose composites are
 the weakest). Adding a level floor is for the owner to decide.
+
+## Fixes after the owner's review (19 October 2026)
+
+Five fixes to decisions 1 to 4, all 37 leagues, ability score version 2.
+
+**1. Fall back pool.** The elite target had no age limit, so the elite pool
+(`elite_pool` in `src/scout/scouting.py`) is now value rank #101 to #1,000
+**and 23 or under at the feature date**, for the elite chance and the fall
+back tables alike. The definition is unchanged (value rank at least twice as
+bad two seasons later). Seasons 2015 to 2023:
+
+| | Before (#101 to #1,000, any age) | After (also 23 or under) |
+|---|---|---|
+| candidates | 7,842 | 2,511 |
+| fall back rate | 37.7% | 17.2% |
+| under 47% of team minutes | x1.18 (30.5% raised) | x1.40 (35.0%) |
+| 5 or more matches missed injured | x1.39 (21.9%) | x1.33 (17.1%) |
+| value lower than a year before | x1.79 (32.4%) | x1.35 (15.1%) |
+| ability below the 55th percentile | x1.00 (17.0%) | x1.26 (19.9%) |
+
+Young candidates fall back far less often (a rising 20 year old keeps his
+price longer than a 28 year old), and value falling, the strongest flag
+before, matters less among them. **The ability flag fails the owner's rule**
+(it must raise the risk 1.3 times; 1.26), so it left the count and the
+ability percentile is a plain column. Below the 50th percentile it would pass
+(x1.33, and x1.36 below the 40th), but picking the threshold after seeing the
+result is the selection the rule exists to avoid; it is retested every run
+in `reports/candidates.md`. At three years (check only) it raises the risk
+1.40 times.
+
+Fall back rate by flag count, three flags (four flags before):
+
+| Flags | 0 | 1 | 2 | 3 or more |
+|---|---|---|---|---|
+| before, four flags | 25% (2,909) | 40% (2,659) | 50% (1,566) | 55% (708) |
+| after, three flags | 15% (1,318) | 20% (788) | 25% (314) | 20% (91) |
+
+The count still orders the risk up to two flags; three or more is no worse
+than two (91 players).
+
+**The elite model** still learns from every candidate ranked #101 to #1,000;
+the pool only decides where it is evaluated and listed. Trained on the 23 and
+under rows alone it fell below its baseline, so that variant was not kept.
+Out of sample, 2013 to 2023:
+
+| Elite | Rows | Hits | AUC | Average precision | Top 50 precision |
+|---|---|---|---|---|---|
+| all ages, model (before) | 9,579 | 606 | 0.881 | 0.334 | 0.404 |
+| all ages, baseline (before) | | | 0.874 | 0.295 | 0.367 |
+| 23 and under, model trained on all | 2,925 | 394 | **0.774** | **0.344** | 0.342 |
+| 23 and under, baseline | | | 0.771 | 0.320 | **0.349** |
+| 23 and under, model trained on the young only (dropped) | | | 0.762 | 0.323 | 0.316 |
+
+Among young candidates the value rank and age baseline is almost as good as
+the model: the model ranks slightly better overall (AUC, average precision)
+and slightly worse at the very top. Much of the earlier lead came from
+telling young from old players, which the baseline also knows.
+
+**2. Elite chance in deciles.** Ten buckets of the out of sample score within
+each season instead of five; the lowest deciles merge until each bucket holds
+30 players (`merge_low`). Pooled, every decile holds about 290 players, so
+none merged: deciles 1 to 10 give under 5%, under 5%, 5%, 5%, 5%, 10%, 15%,
+20%, 25%, 40% (before, quintiles on all ages: 0%, under 5%, under 5%, 5%,
+25%).
+
+**3. Riser floor.** A riser now also ends at the 70th percentile of his
+position or better on the one season score: both of the next two seasons at
+least 20 above the best of this and last season, and at least 70.
+
+| Riser | Risers | Base rate | AUC (baseline) | Top 50 precision | Top 50, baseline |
+|---|---|---|---|---|---|
+| before, no floor | 1,077 | 0.043 | 0.821 (0.632) | 0.263 | 0.113 |
+| after, 70th floor | 432 | 0.017 | 0.799 (0.610) | 0.093 | 0.027 |
+
+Per test season, top 50 precision after the floor (base rate in brackets):
+2018 0.14 (0.021), 2019 0.02 (0.019), 2020 0.06 (0.019), 2021 0.14 (0.018),
+2022 0.10 (0.016), 2023 0.10 (0.013). The floor makes the target rarer and
+harder: the list still beats the base rate about five times over and the
+baseline about three times, but not in 2019, where it only matches the base
+rate. The current list no longer leans to low starting scores.
+
+**4. One flag set** (`src/scout/flags.py`): the three core flags above, used
+by the candidates and the bargains, plus two context tags shown on the
+bargains only and never counted: on loan, and stale value (market value
+dated more than 180 days before the feature date). The bargains' own flags
+went: injured at 8 matches and value down a quarter (replaced by the core
+thresholds, 5 matches and any fall), short record, lost his place and age 33
+or over. Bargains need half of team minutes, so the minutes flag never fires
+on them; playing time there is already a filter.
+
+**5. Experienced bargains: 30 to 33.** Players of 34 and over are no longer
+listed or used as matched peers. Pooled backtest, 2015 to 2023:
+
+| List | Outcome | Before: rate / matched | After: rate / matched |
+|---|---|---|---|
+| prime | value up after 24 months | 0.618 / 0.431 | 0.632 / 0.433 |
+| prime | club with higher Elo | 0.398 / 0.415 | 0.398 / 0.418 |
+| experienced | value up after 24 months | 0.119 / 0.044 | 0.110 / 0.045 |
+| experienced | club with higher Elo | 0.182 / 0.175 | 0.187 / 0.191 |
 
 ## Next
 

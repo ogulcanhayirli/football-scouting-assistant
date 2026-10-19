@@ -1,71 +1,44 @@
 """Elite chance and fall back risk for the elite candidates (decisions 1, 2).
 
-Each candidate (value rank #101 to #1,000, a regular player) is shown with
+The elite pool (``scout.scouting.elite_pool``): regular players ranked #101
+to #1,000 by value and 23 or under at the feature date. Each candidate is
+shown with
 
-* **elite chance:** the share of past candidates in the same quintile of
-  the elite model's score (out of sample, from the season by season
-  backtest) who entered the top 100 within 2 seasons;
+* **elite chance:** the share of past candidates in the same decile of the
+  elite model's score (out of sample, from the season by season backtest)
+  who entered the top 100 within 2 seasons;
 * **fall back risk:** the share of past candidates with the same number of
   warning flags whose value rank was at least twice as bad 2 seasons later
   (``fall_back`` in ``scout.scouting``);
-* **the flags** with their raw numbers.
+* **the flags** with their raw numbers (``scout.flags``).
 
 Rates are historical frequencies, not model probabilities: a bucket with
-fewer than 30 players is never shown, every rate is rounded to the nearest
-5%, and the number of players behind it is carried along. Flags are counted
-only from 2015, when per match data (minutes share, ability) starts; a
-missing raw number raises no flag. The three year fall back is a check run
-once, never shipped (decision 1).
+fewer than 30 players is never shown (the lowest deciles are merged until
+each holds 30), every rate is rounded to the nearest 5%, and the number of
+players behind it is carried along. Flags are counted only from 2015, when
+per match data (minutes share, ability) starts; a missing raw number raises
+no flag. The three year fall back is a check run once, never shipped
+(decision 1).
 """
 
 from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
-from scout.fsutil import atomic_write_text
+from scout.flags import ABILITY, ABILITY_MIN_RATIO, FLAGS, describe, warning_flags
 
 log = logging.getLogger(__name__)
 
 MIN_BUCKET = 30
 ROUND_TO = 5
-QUINTILES = 5
+DECILES = 10
 FLAG_START = 2015  # minutes share and ability come from per match data
 COUNT_BUCKETS = ["0", "1", "2", "3+"]
 ABILITY_SCAN = [20, 30, 40, 50, 55, 60, 70]
-
-
-@dataclass(frozen=True)
-class Flag:
-    column: str
-    above: bool  # True: raised at or above the threshold; False: below it
-    threshold: float
-    rule: str
-
-    def raised(self, values: pd.Series) -> pd.Series:
-        values = values.astype(float)
-        hit = values >= self.threshold if self.above else values < self.threshold
-        return hit & values.notna()
-
-
-# Under ability score version 2 the ability flag does not change the risk at
-# any percentile (reports/candidates.md); it stays at 55 for the owner to
-# decide, and the count table is also shown without it.
-FLAGS = {
-    "low_minutes": Flag("minutes_share", False, 0.47, "under 47% of team minutes"),
-    "low_ability": Flag("ability_pct", False, 55.0, "ability below the 55th percentile"),
-    "injured": Flag("injury_matches_missed_12m", True, 5.0, "5 or more matches missed injured"),
-    "value_falling": Flag("value_change_1y", False, 1.0, "value lower than a year before"),
-}
-
-
-def warning_flags(data: pd.DataFrame, flags: dict[str, Flag] = FLAGS) -> pd.DataFrame:
-    """One boolean column per flag."""
-    return pd.DataFrame({name: f.raised(data[f.column]) for name, f in flags.items()})
 
 
 def count_bucket(count: pd.Series) -> pd.Series:
@@ -114,9 +87,10 @@ def wide(table: pd.DataFrame, buckets: list[str]) -> pd.DataFrame:
     return out.reindex(order)
 
 
-def flag_effects(y: pd.Series, flags: pd.DataFrame) -> pd.DataFrame:
+def flag_effects(y: pd.Series, flags: pd.DataFrame, rules: dict[str, str] | None = None):
     """Per flag: how often it is raised and the fall back rate with and
     without it."""
+    rules = rules or {name: f.rule for name, f in FLAGS.items()} | {"low_ability": ABILITY.rule}
     rows = []
     for name in flags.columns:
         on = flags[name]
@@ -124,7 +98,7 @@ def flag_effects(y: pd.Series, flags: pd.DataFrame) -> pd.DataFrame:
         rows.append(
             {
                 "flag": name,
-                "rule": FLAGS[name].rule if name in FLAGS else name,
+                "rule": rules.get(name, name),
                 "players_with": int(on.sum()),
                 "share_with": on.mean(),
                 "rate_with": with_,
@@ -141,60 +115,111 @@ def ability_scan(y: pd.Series, ability: pd.Series, thresholds=ABILITY_SCAN) -> p
     return flag_effects(y, flags).drop(columns="rule")
 
 
-def score_quintiles(score: pd.Series, season: pd.Series) -> pd.Series:
-    """1 (lowest score) to 5 (highest) within each season."""
+def ability_decision(y: pd.Series, ability: pd.Series) -> tuple[float, bool]:
+    """The ability flag's risk ratio and whether it passes the owner's rule."""
+    ratio = flag_effects(y, pd.DataFrame({"low_ability": ABILITY.raised(ability)}))["ratio"].iloc[0]
+    return float(ratio), bool(ratio >= ABILITY_MIN_RATIO)
+
+
+def score_deciles(score: pd.Series, season: pd.Series) -> pd.Series:
+    """1 (lowest score) to 10 (highest) within each season."""
     pct = score.groupby(season).rank(pct=True, method="first")
-    return np.ceil(pct * QUINTILES).clip(1, QUINTILES).astype(int)
+    return np.ceil(pct * DECILES).clip(1, DECILES).astype(int)
+
+
+def merge_low(counts: pd.Series) -> dict[int, str]:
+    """Bucket label per decile: the lowest deciles are merged until each
+    bucket holds ``MIN_BUCKET`` players ("1 to 3"); a short top remainder
+    joins the bucket below it."""
+    groups: list[list[int]] = []
+    current: list[int] = []
+    total = 0
+    for decile in range(1, DECILES + 1):
+        current.append(decile)
+        total += int(counts.get(decile, 0))
+        if total >= MIN_BUCKET:
+            groups.append(current)
+            current, total = [], 0
+    if current:
+        if groups:
+            groups[-1] += current
+        else:
+            groups.append(current)
+    return {d: str(g[0]) if len(g) == 1 else f"{g[0]} to {g[-1]}" for g in groups for d in g}
+
+
+@dataclass
+class ChanceTable:
+    """Historical rate per score decile, merged at the bottom."""
+
+    mapping: dict[int, str]  # decile -> bucket label
+    table: pd.DataFrame  # rate_table rows, per season and pooled
+
+    @property
+    def pooled(self) -> pd.DataFrame:
+        return self.table[self.table["season"] == "all"].set_index("bucket")
+
+    @property
+    def buckets(self) -> list[str]:
+        return list(dict.fromkeys(self.mapping[d] for d in range(1, DECILES + 1)))
+
+    def lookup(self, deciles: pd.Series) -> pd.DataFrame:
+        """bucket, rate, pct and players for each decile."""
+        bucket = deciles.map(self.mapping)
+        pooled = self.pooled
+        return pd.DataFrame(
+            {
+                "bucket": bucket,
+                "rate": bucket.map(pooled["rate"]),
+                "pct": bucket.map(pooled["pct"]),
+                "players": bucket.map(pooled["players"]).fillna(0).astype(int),
+            },
+            index=deciles.index,
+        )
+
+
+def chance_table(predictions: pd.DataFrame, score: str = "score") -> ChanceTable:
+    """From backtest predictions (``y``, ``season`` and the score column)."""
+    deciles = score_deciles(predictions[score], predictions["season"])
+    mapping = merge_low(deciles.value_counts())
+    table = rate_table(predictions["y"], deciles.map(mapping), predictions["season"])
+    return ChanceTable(mapping, table)
 
 
 @dataclass
 class RiskTables:
-    elite: pd.DataFrame  # pooled rate_table rows by score quintile
+    elite: ChanceTable
     fall_back: pd.DataFrame  # pooled rate_table rows by flag count bucket
-
-    @staticmethod
-    def pooled(table: pd.DataFrame) -> pd.DataFrame:
-        return table[table["season"] == "all"].set_index("bucket")
 
 
 def risk_tables(elite_predictions: pd.DataFrame, fall_back_rows: pd.DataFrame) -> RiskTables:
-    """Pooled tables from the elite backtest predictions (``y``, ``score``,
-    ``season``) and the candidates with a known fall back label and their
-    flag columns."""
-    q = score_quintiles(elite_predictions["score"], elite_predictions["season"])
-    elite = rate_table(elite_predictions["y"], q.astype(str), elite_predictions["season"])
+    """From the elite backtest predictions (``y``, ``score``, ``season``) and
+    the candidates with a known fall back label and their flag columns."""
     count = warning_flags(fall_back_rows).sum(axis=1)
     fall = rate_table(fall_back_rows["fall_back"], count_bucket(count), fall_back_rows["season"])
-    return RiskTables(RiskTables.pooled(elite), RiskTables.pooled(fall))
+    return RiskTables(
+        chance_table(elite_predictions), fall[fall["season"] == "all"].set_index("bucket")
+    )
 
 
 def _bucket_entry(table: pd.DataFrame, bucket: str) -> dict:
     if bucket not in table.index:
-        return {"pct": None, "players": 0, "text": show_rate(None, 0)}
+        return {"pct": None, "rate": None, "players": 0, "text": show_rate(None, 0)}
     row = table.loc[bucket]
     shown = pd.notna(row["rate"])
     return {
         "pct": int(row["pct"]) if shown else None,
+        "rate": float(row["rate"]) if shown else None,
         "players": int(row["players"]),
         "text": show_rate(row["rate"] if shown else None, int(row["players"])),
     }
 
 
-def _raw_text(name: str, value: float) -> str:
-    if pd.isna(value):
-        return "unknown"
-    if name == "low_minutes":
-        return f"{value:.0%} of team minutes"
-    if name == "low_ability":
-        return f"ability percentile {value:.0f}"
-    if name == "injured":
-        return f"{value:.0f} matches missed injured"
-    return f"value {value - 1:+.0%} on a year before"
-
-
-def candidate_profile(candidate: pd.Series | dict, quintile: int, tables: RiskTables) -> dict:
-    """Elite chance from the candidate's score quintile, fall back risk from
+def candidate_profile(candidate: pd.Series | dict, decile: int, tables: RiskTables) -> dict:
+    """Elite chance from the candidate's score decile, fall back risk from
     his flag count, and every flag with its raw number."""
+    from scout.flags import raw_text
+
     row = pd.Series(candidate)
     flags = []
     for name, flag in FLAGS.items():
@@ -205,41 +230,49 @@ def candidate_profile(candidate: pd.Series | dict, quintile: int, tables: RiskTa
                 "rule": flag.rule,
                 "value": None if pd.isna(value) else float(value),
                 "raised": bool(flag.raised(pd.Series([value])).iloc[0]),
-                "text": _raw_text(name, value),
+                "text": raw_text(name, value),
             }
         )
     count = sum(f["raised"] for f in flags)
     bucket = count_bucket(pd.Series([count])).iloc[0]
+    elite_bucket = tables.elite.mapping[int(decile)]
     return {
-        "elite_chance": {"quintile": int(quintile), **_bucket_entry(tables.elite, str(quintile))},
+        "elite_chance": {
+            "decile": int(decile),
+            "bucket": elite_bucket,
+            **_bucket_entry(tables.elite.pooled, elite_bucket),
+        },
         "fall_back_risk": {"flags": count, **_bucket_entry(tables.fall_back, bucket)},
         "flags": flags,
     }
 
 
 def profiles(candidates: pd.DataFrame, score: str, tables: RiskTables) -> pd.DataFrame:
-    """``candidate_profile`` for every row, flattened for tables and Parquet."""
-    quintile = score_quintiles(candidates[score], candidates["season"])
-    rows = []
-    for (_, row), q in zip(candidates.iterrows(), quintile, strict=True):
-        p = candidate_profile(row, q, tables)
-        raised = [f"{f['rule']} ({f['text']})" for f in p["flags"] if f["raised"]]
-        rows.append(
-            {
-                "elite_quintile": q,
-                "elite_chance_pct": p["elite_chance"]["pct"],
-                "elite_chance_n": p["elite_chance"]["players"],
-                "flag_count": p["fall_back_risk"]["flags"],
-                "fall_back_pct": p["fall_back_risk"]["pct"],
-                "fall_back_n": p["fall_back_risk"]["players"],
-                "elite_chance": f"Q{q}: {p['elite_chance']['text']}",
-                "fall_back_risk": f"{p['fall_back_risk']['flags']} "
-                f"flag{'' if p['fall_back_risk']['flags'] == 1 else 's'}: "
-                f"{p['fall_back_risk']['text']}",
-                "flags": "; ".join(raised) or "none",
-            }
-        )
-    return pd.DataFrame(rows, index=candidates.index)
+    """Elite chance, fall back risk and flags for every candidate, flat."""
+    decile = score_deciles(candidates[score], candidates["season"])
+    elite = tables.elite.lookup(decile)
+    flags = describe(candidates)
+    fall = count_bucket(flags["flag_count"]).map(lambda b: _bucket_entry(tables.fall_back, b))
+    return pd.DataFrame(
+        {
+            "elite_decile": decile,
+            "elite_bucket": elite["bucket"],
+            "elite_chance_rate": elite["rate"],
+            "elite_chance_pct": elite["pct"],
+            "elite_chance_n": elite["players"],
+            "flag_count": flags["flag_count"],
+            "fall_back_rate": fall.map(lambda e: e["rate"]),
+            "fall_back_pct": fall.map(lambda e: e["pct"]),
+            "fall_back_n": fall.map(lambda e: e["players"]),
+            "flags": flags["flags"],
+        },
+        index=candidates.index,
+    )
+
+
+def fall_back_rows(data: pd.DataFrame, label: str = "fall_back") -> pd.DataFrame:
+    rows = data[data[label].notna() & data["regular"].astype(bool) & (data["season"] >= FLAG_START)]
+    return rows.assign(fall_back=rows[label])
 
 
 # Report
@@ -253,32 +286,42 @@ def _effects_md(effects: pd.DataFrame) -> str:
     return out.to_markdown(index=False)
 
 
-def fall_back_rows(data: pd.DataFrame, label: str = "fall_back") -> pd.DataFrame:
-    rows = data[data[label].notna() & data["regular"].astype(bool) & (data["season"] >= FLAG_START)]
-    return rows.assign(fall_back=rows[label])
+def pool_summary(data: pd.DataFrame) -> dict:
+    """The fall back pool, its base rate, the flag effects and the count
+    table, with the ability flag retested against the owner's rule."""
+    rows = fall_back_rows(data)
+    y = rows["fall_back"]
+    flags = warning_flags(rows)
+    with_ability = flags.assign(low_ability=ABILITY.raised(rows[ABILITY.column]))
+    ratio, passes = ability_decision(y, rows[ABILITY.column])
+    return {
+        "rows": rows,
+        "y": y,
+        "effects": flag_effects(y, with_ability),
+        "count": rate_table(y, count_bucket(flags.sum(axis=1)), rows["season"]),
+        "count_with_ability": rate_table(y, count_bucket(with_ability.sum(axis=1)), rows["season"]),
+        "ability_ratio": ratio,
+        "ability_passes": passes,
+    }
 
 
 def write_report(
     data: pd.DataFrame,
     elite_predictions: pd.DataFrame,
     current: pd.DataFrame,
-    reports: Path,
+    reports,
     size: int = 25,
-) -> Path:
+):
     """``reports/candidates.md``: flag retest, rate tables, the three year
     check and the current candidates with their profiles. ``data`` carries
     ``fall_back`` and ``fall_back_3y``; ``current`` the profiled candidates."""
-    rows = fall_back_rows(data)
-    y = rows["fall_back"]
-    flags = warning_flags(rows)
-    count = flags.sum(axis=1)
-    no_ability = flags.drop(columns="low_ability").sum(axis=1)
-    elite_q = score_quintiles(elite_predictions["score"], elite_predictions["season"])
-    elite_table = rate_table(
-        elite_predictions["y"], elite_q.astype(str), elite_predictions["season"]
-    )
+    from scout.fsutil import atomic_write_text
+
+    s = pool_summary(data)
+    rows, y = s["rows"], s["y"]
+    elite = chance_table(elite_predictions)
     three = fall_back_rows(data, "fall_back_3y")
-    flags3 = warning_flags(three)
+    flags3 = warning_flags(three).assign(low_ability=ABILITY.raised(three[ABILITY.column]))
     injury_known = rows[FLAGS["injured"].column].notna()
     show = [
         "player_name",
@@ -286,47 +329,71 @@ def write_report(
         "team_name",
         "age",
         "value_rank",
+        "ability_pct",
         "elite_chance",
         "fall_back_risk",
         "flags",
     ]
     listed = current.sort_values("score_elite", ascending=False).head(size)
+    listed = listed.assign(
+        elite_chance=[
+            f"decile {int(d)}: {show_rate(r if pd.notna(r) else None, int(n))}"
+            for d, r, n in zip(
+                listed["elite_decile"],
+                listed["elite_chance_rate"],
+                listed["elite_chance_n"],
+                strict=True,
+            )
+        ],
+        fall_back_risk=[
+            f"{int(c)} flag{'' if c == 1 else 's'}: {show_rate(r if pd.notna(r) else None, int(n))}"
+            for c, r, n in zip(
+                listed["flag_count"], listed["fall_back_rate"], listed["fall_back_n"], strict=True
+            )
+        ],
+    )
+    verdict = "passes" if s["ability_passes"] else "fails"
     parts = [
         "# Elite candidates: elite chance and fall back risk",
         "",
-        "Decisions 1 and 2; code in `src/scout/candidates.py`. Candidates are regular",
-        "players ranked #101 to #1,000 by value, the pool of the elite target.",
-        "**Fall back:** two seasons later the value rank is at least twice as bad",
-        "(#300 becomes #600 or worse). Ability score version 2. Flags from",
-        f"{FLAG_START} (per match data); a missing raw number raises no flag",
-        f"(injury history known for {injury_known.mean():.0%} of these players).",
-        f"Buckets under {MIN_BUCKET} players are not shown; rates rounded to the nearest 5%.",
+        "Decisions 1 and 2; code in `src/scout/candidates.py` and `src/scout/flags.py`.",
+        "Candidates are regular players ranked #101 to #1,000 by value and 23 or under",
+        "at the feature date, the pool of the elite target. **Fall back:** two seasons",
+        "later the value rank is at least twice as bad (#300 becomes #600 or worse).",
+        f"Ability score version 2. Flags from {FLAG_START} (per match data); a missing raw",
+        f"number raises no flag (injury history known for {injury_known.mean():.0%} of these",
+        f"players). Buckets under {MIN_BUCKET} players are not shown; rates rounded to the",
+        "nearest 5%.",
         "",
         f"Pool: {len(rows):,} candidates, seasons {int(rows['season'].min())} to "
         f"{int(rows['season'].max())}, fall back rate {y.mean():.1%}.",
         "",
-        "## The four flags, 2 years",
+        "## The flags, 2 years",
         "",
-        _effects_md(flag_effects(y, flags)),
+        _effects_md(s["effects"]),
+        "",
+        f"The ability flag raises the risk {s['ability_ratio']:.2f} times; the owner's rule "
+        f"needs {ABILITY_MIN_RATIO}, so it {verdict}. It is "
+        + ("counted." if s["ability_passes"] else "left out of the count and shown as a column."),
         "",
         "## The ability flag at other percentiles (version 2)",
         "",
-        _effects_md(ability_scan(y, rows["ability_pct"])),
+        _effects_md(ability_scan(y, rows[ABILITY.column])),
         "",
         "## Fall back rate by flag count, 2 years",
         "",
-        wide(rate_table(y, count_bucket(count), rows["season"]), COUNT_BUCKETS).to_markdown(),
+        wide(s["count"], COUNT_BUCKETS).to_markdown(),
         "",
-        "Without the ability flag (three flags):",
+        "With the ability flag as a fourth flag (check):",
         "",
-        wide(rate_table(y, count_bucket(no_ability), rows["season"]), COUNT_BUCKETS).to_markdown(),
+        wide(s["count_with_ability"], COUNT_BUCKETS).to_markdown(),
         "",
-        "## Elite rate by model score quintile (5 is the highest score)",
+        "## Elite rate by model score decile (10 is the highest score)",
         "",
         "Out of sample scores from the season by season backtest of the elite model;",
-        "quintiles within each season.",
+        f"deciles within each season, the lowest merged until each holds {MIN_BUCKET} players.",
         "",
-        wide(elite_table, [str(q) for q in range(1, QUINTILES + 1)]).to_markdown(),
+        wide(elite.table, elite.buckets).to_markdown(),
         "",
         "## Check only: 3 years (not shipped)",
         "",
@@ -334,14 +401,9 @@ def write_report(
         "",
         _effects_md(flag_effects(three["fall_back"], flags3)),
         "",
-        wide(
-            rate_table(three["fall_back"], count_bucket(flags3.sum(axis=1)), three["season"]),
-            COUNT_BUCKETS,
-        ).to_markdown(),
-        "",
         f"## Current candidates, top {size} by elite model score",
         "",
-        listed[show].round({"age": 1}).to_markdown(index=False),
+        listed[show].round({"age": 1, "ability_pct": 0}).to_markdown(index=False),
         "",
     ]
     path = reports / "candidates.md"
