@@ -282,6 +282,32 @@ better. It is (0.858 against 0.503; AUC +0.001 and +0.002), so
 `scout scouting` now uses `--strength v2` by default; `transfer` (version
 1), `elo` and `transfer_elo` stay selectable.
 
+## Bargains (decision 4, `scout bargains`)
+
+Score: market value divided by the fair value model's out of time
+prediction, ranked as a percentile within position group and season among
+eligible players (ability version 2 at the 70th percentile or better, half of
+team minutes or more). Two lists: prime (29 and under) and experienced (30
+and over). Contract expiry from `player_profiles.parquet`, shown only when it
+ends after the Transfermarkt release date (5 September 2026); never an input.
+Warning flags (injured, short record, value falling, lost his place, on loan,
+stale value, age 33+) are the module's own until the fall back flags exist.
+
+Backtest, seasons 2015 to 2023: each season's top 50 of each list against
+the other eligible players of the same season, ability band and age band.
+
+| list | outcome | players | rate | matched | z |
+|---|---|---:|---:|---:|---:|
+| prime | value up after 24 months | 390 | 0.618 | 0.431 | 8.1 |
+| prime | club with higher Elo within 2 seasons | 450 | 0.398 | 0.415 | -0.7 |
+| experienced | value up after 24 months | 360 | 0.119 | 0.044 | 7.1 |
+| experienced | club with higher Elo within 2 seasons | 450 | 0.182 | 0.175 | 0.4 |
+
+The market does catch up on the cheap players (part of that is a low price
+correcting itself, so it overstates a buyer's gain), but clubs did not sign
+them up a level more often than their peers. Per season tables in
+`reports/bargains.md`.
+
 ## Next
 
 1. The clean check above: tune on earlier seasons, score on later ones.
