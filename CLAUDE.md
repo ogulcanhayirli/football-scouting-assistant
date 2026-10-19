@@ -167,7 +167,8 @@ through the native API, and model only regular players (450+ minutes).
 | Step up | `scouting` | value rank at least 3 times better, ending in the top 500, within 2 seasons | `rank_rate` | as above |
 | Fall back | `scouting` | elite candidate whose value rank is at least twice as bad after 2 seasons | flag count rates | rate with and without each flag (`reports/candidates.md`) |
 | Bargains | `bargains` | ratio of value to the fair value prediction, ranked within position group; top 50 per season | other eligible players of the same season, ability band and age band | share whose value rose in 24 months, share who joined a club with higher Elo within 2 seasons |
-| Performance | `scouting` | both next two seasons at the 70th ability percentile or better, average 20 above now | `rank_rate` | as above |
+| Performance (old) | `scouting` | both next two seasons at the 70th ability percentile or better, average 20 above now | `rank_rate` | as above |
+| Riser (decision 3) | `scouting` | one season ability: next season 20 above the best of this and last season and holding; half of team minutes now | `rank_rate` | as above, plus top 50 precision per season against the base rate |
 
 `scouting` also estimates league strength from players who changed leagues
 and builds the ability score. Since 19 October the default is version 2
@@ -188,6 +189,9 @@ October 2026, from MODELS.md and `reports/`:
   0.927 (0.912), performance 0.809 (2 seasons ahead). The value rank and age
   baseline carries most of it. The models rank who makes it but do not
   predict collapses.
+* Riser (decision 3): AUC 0.821 (baseline 0.632), top 50 precision 0.263
+  against a base rate of 0.043; the old performance target 0.180 against
+  0.029.
 * Fall back (decisions 1, 2): 37.7% of elite candidates; value falling
   raises the risk 1.79 times, injuries 1.39, low minutes 1.18, low ability
   1.00 (MODELS.md, `reports/candidates.md`).
@@ -249,7 +253,7 @@ Owner decisions of 2026-10-16. Each one line; details in the code and docs once 
 
 1. Fall back risk horizon: two years, the same pool and seasons as the elite target; three years is run once as a check only and not shipped. **Built 19 October:** fall back = value rank at the end of the 2 seasons at least twice as bad (no earlier definition existed); 37.7% of 7,842 candidates (2015 to 2023). At 3 years (check) 53.2%, every flag weaker.
 2. List format: each candidate shows elite chance from the model score quintile and fall back risk from the flag count, with the flags and their raw numbers; no bucket with fewer than 30 players, rounded to the nearest 5%, count shown. **Built 19 October** (`src/scout/candidates.py`, `candidate_profile`, `reports/candidates.md`): flag counts 0 to 3+ give 25%, 40%, 50%, 55%; elite quintiles 0%, <5%, <5%, 5%, 25%. No flag doubles the risk; the ability flag (55th percentile) has no effect under version 2 at any threshold, so it is unchanged and awaits the owner (MODELS.md).
-3. Performance risers: baseline is the best of the player's last two seasons, with a floor of half of team minutes in the current season; the list is kept only if the fixed version beats the base rate in the backtest.
+3. Performance risers: baseline is the best of the player's last two seasons, with a floor of half of team minutes in the current season; the list is kept only if the fixed version beats the base rate in the backtest. **Outcome (19 October): kept.** Defined on the one season version 2 score: the next season at least 20 percentiles above the best of this and last season, the season after still there, half of team minutes now (`riser_target`). Top 50 precision 0.263 against a base rate of 0.043 (baseline 0.113), better in every test season 2018 to 2023; the old definition 0.180 against 0.029. The riser list replaces the old performance list in `reports/scouting.md`; `performance` stays in the backtest for comparison. Without the old 70th percentile floor the current list leans to low starting scores (bases near the 20th percentile, many goalkeepers and centre backs): a floor is the owner's call.
 4. Bargains: score is actual value divided by the current value model's prediction, ranked within position; ability at or above the 70th percentile within position and at least half of team minutes; split into prime (29 and under) and experienced (30 and over); contract expiry shown.
 5. Simplify: two user facing tables, candidates and bargains; keep the value model, big move, elite and step up; retire the growth model; performance risers only if decision 3 passes.
 6. Data before 7 November: yes; feeder leagues first (Austria, Switzerland, Croatia, Serbia, Czech Republic, Norway, Sweden, Poland, Mexico, MLS, Colombia, Uruguay, Japan, South Korea, Saudi Arabia, then the second tiers of the big five), then the sidelined endpoint per player, match events, youth competitions, coaches, and a final pull of the current season on 6 November.
@@ -306,11 +310,11 @@ Settle them with the owner rather than guessing.
   team's expected) would need xG, which the API has only from 2023/24.
 * The `pyproject.toml` description still names only the Premier League and the
   Süper Lig.
-* `scouting` was rerun on the 37 league features on 19 October with version 2
-  (`reports/scouting.md`, `data/processed/models/scouting.parquet`);
-  `reports/scouting_elo.md` is still the 17 league Elo run. These and
-  `reports/ability.md` were synced up to S3 on 19 October; `processed/` and
-  `reports/` then matched the local files.
+* `scouting` was rerun on the 37 league features on 19 October with version 2,
+  after the fall back and riser work (`reports/scouting.md`,
+  `reports/candidates.md`, `data/processed/models/scouting.parquet`); those
+  three are not yet synced to S3. `reports/scouting_elo.md` is still the 17
+  league Elo run.
 * `reports/scouting.md` still ends with the old bargains list (ability top
   15%, value outside the top 1,000); `reports/bargains.md` replaces it
   (decision 4). The bargains warning flags are their own until the fall back

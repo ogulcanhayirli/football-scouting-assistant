@@ -1090,6 +1090,7 @@ def season_precision(predictions: pd.DataFrame, k: int = 50) -> pd.DataFrame:
 def riser_comparison(old: pd.DataFrame, new: pd.DataFrame) -> pd.DataFrame:
     both = pd.concat({"old": season_precision(old), "new": season_precision(new)}, axis=1).round(3)
     both.index = both.index.astype(str)
+    both.columns = [f"{a} {b}" for a, b in both.columns]
     return both
 
 

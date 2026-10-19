@@ -366,6 +366,39 @@ correcting itself, so it overstates a buyer's gain), but clubs did not sign
 them up a level more often than their peers. Per season tables in
 `reports/bargains.md`.
 
+## Performance risers (decision 3)
+
+Built on 19 October 2026 on all 37 leagues. The old performance target
+asked for both of the next two seasons at the 70th percentile of the two
+season score and their average 20 above now; measured against one season,
+it found dips (Bernardo Silva). The new riser is measured on the **one
+season** version 2 score (not pooled): the next season at least 20
+percentiles above the best of this season and the last, and the season
+after still at least that high, for players with at least half of team
+minutes this season (`riser_target`). A season not rated as a regular
+breaks the rise. The riser model gets the one season score and the base
+as extra columns. Backtest season by season, 2 seasons ahead:
+
+| Season | old: players | base rate | top 50 | top 50 baseline | new: players | base rate | top 50 | top 50 baseline |
+|---|---|---|---|---|---|---|---|---|
+| 2018 | 4,632 | 0.032 | 0.16 | 0.14 | 2,515 | 0.043 | 0.28 | 0.08 |
+| 2019 | 6,854 | 0.035 | 0.20 | 0.14 | 3,767 | 0.051 | 0.22 | 0.10 |
+| 2020 | 7,839 | 0.031 | 0.14 | 0.06 | 4,361 | 0.046 | 0.18 | 0.14 |
+| 2021 | 9,057 | 0.026 | 0.14 | 0.06 | 4,729 | 0.041 | 0.20 | 0.04 |
+| 2022 | 9,511 | 0.026 | 0.24 | 0.04 | 4,870 | 0.038 | 0.40 | 0.14 |
+| 2023 | 9,865 | 0.027 | 0.20 | 0.06 | 5,090 | 0.039 | 0.30 | 0.18 |
+| mean | 47,758 | 0.030 | 0.180 | 0.083 | 25,332 | 0.043 | 0.263 | 0.113 |
+
+AUC 0.821 against 0.632 for the value rank and age baseline (old: 0.809
+against 0.608). The new list beats its base rate about six times over in
+every season, so it is kept and replaces the old performance list; the old
+target stays in the backtest table. Caught in their season's top 10
+include Bounou (2018, before Sevilla), Elmas and Ndicka (2018), Djed Spence
+(2020). **Caveat:** without the old 70th percentile floor, a rise from the
+20th to the 40th percentile counts, and the current list leans to such low
+starting scores (many goalkeepers and centre backs, whose composites are
+the weakest). Adding a level floor is for the owner to decide.
+
 ## Next
 
 1. The clean check above: tune on earlier seasons, score on later ones.
