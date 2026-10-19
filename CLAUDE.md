@@ -85,6 +85,7 @@ $C moves                                     # big move model
 $C elo                                       # team Elo from cached fixtures, reports/elo.md
 $C scouting [--strength v2|transfer|elo|transfer_elo]  # league strength, ability, 3 targets
 $C ability                                  # ability versions: stability, backtest (reports/ability.md)
+$C bargains                                 # decision 4 lists and backtest (reports/bargains.md); run after backtest and scouting
 $C sync up | down [--dry-run] [--only raw|processed|reports]
 uv run python scripts/run_extras.py          # sidelined, coaches, events (done 17 October)
 uv run python scripts/rebuild_match_seasons.py --from-s3 serie_b:2016  # re-parse partitions offline after an adapter repair
@@ -165,6 +166,7 @@ through the native API, and model only regular players (450+ minutes).
 | Elite | `scouting` | enters the 100 most valuable players within 2 seasons, from #101 to #1,000 now | `rank_rate` (value rank band, age band) | AUC, average precision, top 50 precision |
 | Step up | `scouting` | value rank at least 3 times better, ending in the top 500, within 2 seasons | `rank_rate` | as above |
 | Fall back | `scouting` | elite candidate whose value rank is at least twice as bad after 2 seasons | flag count rates | rate with and without each flag (`reports/candidates.md`) |
+| Bargains | `bargains` | ratio of value to the fair value prediction, ranked within position group; top 50 per season | other eligible players of the same season, ability band and age band | share whose value rose in 24 months, share who joined a club with higher Elo within 2 seasons |
 | Performance | `scouting` | both next two seasons at the 70th ability percentile or better, average 20 above now | `rank_rate` | as above |
 
 `scouting` also estimates league strength from players who changed leagues
@@ -202,8 +204,15 @@ October 2026, from MODELS.md and `reports/`:
   year to year (0.498 against 0.489); transfer league effect plus Elo team
   term is the most stable (0.537). Details in `reports/elo.md`.
 
+* Bargains (19 October, 37 leagues, seasons 2015 to 2023): the top 50 gained
+  value far more often than matched peers (prime 61.8% against 43.1%,
+  experienced 11.9% against 4.4%), but moved to a club with higher Elo no
+  more often (39.8% against 41.5%; 18.2% against 17.5%). MODELS.md.
+
 Outputs: `reports/backtest_<target>.md`, `reports/moves.md`,
-`reports/scouting.md`, `reports/candidates.md`, predictions under `data/processed/models/`.
+`reports/scouting.md`, `reports/candidates.md`, `reports/bargains.md`, predictions under
+`data/processed/models/` (`bargains_prime.parquet`,
+`bargains_experienced.parquet`, `bargains_backtest.parquet`).
 
 ## AWS
 
@@ -302,5 +311,12 @@ Settle them with the owner rather than guessing.
   `reports/scouting_elo.md` is still the 17 league Elo run. These and
   `reports/ability.md` were synced up to S3 on 19 October; `processed/` and
   `reports/` then matched the local files.
+* `reports/scouting.md` still ends with the old bargains list (ability top
+  15%, value outside the top 1,000); `reports/bargains.md` replaces it
+  (decision 4). The bargains warning flags are their own until the fall back
+  flags of decision 2 exist; then one set should serve both lists. The
+  experienced list's top is mostly players of 33 and over whose value the
+  market has written off; the age flag marks them. The bargains outputs of
+  19 October are not synced to S3 yet.
 * The work branch is `claude/gifted-brown-nwtnj0`; it is not merged into
   `main`, and CI runs on pull requests and pushes to `main`.

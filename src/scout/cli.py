@@ -234,6 +234,13 @@ def cmd_scouting(settings: Settings, args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_bargains(settings: Settings, args: argparse.Namespace) -> int:
+    from scout.bargains import run_bargains
+
+    print(run_bargains(settings))
+    return 0
+
+
 def cmd_elo(settings: Settings, args: argparse.Namespace) -> int:
     from scout.elo_compare import run_elo_comparison
 
@@ -473,6 +480,12 @@ def main(argv: list[str] | None = None) -> int:
         "need the Elo tables (run `elo` first)",
     )
     scouting.set_defaults(func=cmd_scouting)
+
+    bargains = sub.add_parser(
+        "bargains",
+        help="Bargains lists (prime, experienced) and their backtest (reports/bargains.md)",
+    )
+    bargains.set_defaults(func=cmd_bargains)
 
     elo = sub.add_parser(
         "elo",

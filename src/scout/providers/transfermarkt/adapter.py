@@ -284,6 +284,16 @@ class TransfermarktValuationProvider:
         dates = pd.to_datetime(self._read("player_valuations.csv.gz")["date"], errors="coerce")
         return dates.max().normalize()
 
+    def snapshot_date(self) -> pd.Timestamp | None:
+        """Publication date of the cached ``players.csv.gz`` (the release the
+        profiles describe), from the Last-Modified header in its sidecar."""
+        meta = self.data_dir / "players.csv.gz.meta.json"
+        if not meta.is_file():
+            return None
+        headers = {k.lower(): v for k, v in json.loads(meta.read_text()).get("headers", {}).items()}
+        stamp = headers.get("last-modified")
+        return pd.Timestamp(stamp).tz_localize(None).normalize() if stamp else None
+
     def profiles(self) -> pd.DataFrame:
         """Contract expiry, agent and highest market value, as the snapshot states them.
 
