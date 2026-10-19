@@ -14,16 +14,18 @@ from scout.models.backtest import (
     run_backtest,
     summarize,
 )
-from scout.models.estimators import group_median, make_lightgbm, no_change
-from scout.models.targets import TARGETS, VALUE_COLUMNS, build_dataset
+from scout.models.estimators import group_median, make_lightgbm
+from scout.models.targets import TARGETS, VALUE_COLUMNS, Target, build_dataset
 
-FAIR, GROWTH = TARGETS["fair_value"], TARGETS["growth_24m"]
+FAIR = TARGETS["fair_value"]
+# A label observed two seasons later, like the big move and scouting targets.
+TWO_YEARS = Target("two_years", "log_growth_24m", 2, "value_24m_date", True)
 
 
 def test_folds_leave_a_gap_as_long_as_the_label_horizon():
     seasons = list(range(2010, 2020))
     fair = {f.test_season: f.train_seasons for f in expanding_folds(seasons, FAIR)}
-    growth = {f.test_season: f.train_seasons for f in expanding_folds(seasons, GROWTH)}
+    growth = {f.test_season: f.train_seasons for f in expanding_folds(seasons, TWO_YEARS)}
     assert fair[2013] == [2010, 2011, 2012]  # first fold: three seasons of history
     assert min(fair) == 2013
     assert growth[2015] == [2010, 2011, 2012, 2013]  # 2014's labels are not known yet
@@ -49,10 +51,10 @@ def test_purge_drops_labels_observed_after_the_test_date_and_the_check_agrees():
     )
     test = _rows(2021, "2022-06-30")
     with pytest.raises(LeakError, match="3 training labels"):
-        check_no_leak(train, test, GROWTH)
-    kept = purge(train, test, GROWTH)
+        check_no_leak(train, test, TWO_YEARS)
+    kept = purge(train, test, TWO_YEARS)
     assert kept["season"].tolist() == [2018] * 3
-    check_no_leak(kept, test, GROWTH)
+    check_no_leak(kept, test, TWO_YEARS)
 
 
 def test_leak_check_rejects_training_rows_from_the_test_season():
@@ -105,7 +107,7 @@ def test_folds_follow_the_feature_date_so_january_rows_sit_with_the_season_befor
     assert fold_season(dates).tolist() == [2023, 2019, 2023, 2023, 2024]
 
 
-def test_growth_backtest_with_a_calendar_year_league_purges_only_its_own_rows():
+def test_two_year_backtest_with_a_calendar_year_league_purges_only_its_own_rows():
     data = _dataset(seasons=range(2010, 2020))
     data["value_24m_date"] = data["feature_date"] + pd.DateOffset(months=24)
     # A calendar year league: its season 2016 ends in December, feature date January 2017.
@@ -115,7 +117,7 @@ def test_growth_backtest_with_a_calendar_year_league_purges_only_its_own_rows():
     brazil["value_24m_date"] = brazil["feature_date"] + pd.DateOffset(months=24)
     both = pd.concat([data, brazil], ignore_index=True)
     both["league_key"] = both["league_key"].astype("category")
-    predictions = run_backtest(both, ["age", "skill"], GROWTH, {"group_median": group_median})
+    predictions = run_backtest(both, ["age", "skill"], TWO_YEARS, {"group_median": group_median})
     european = predictions[predictions["league_key"] != "brasileirao"]
     assert sorted(european["season"].unique()) == list(range(2013, 2020))
     # Test 2016 (dated June 2017): all European seasons up to 2014 (5 x 120) and
@@ -168,16 +170,16 @@ def test_build_dataset_keeps_value_features_out_of_fair_value():
     assert fair.loc[0, "y"] == pytest.approx(np.log(1e6))
     assert not set(VALUE_COLUMNS) & set(fair_cols)
     assert "player_name" not in fair_cols
-    growth, growth_cols = build_dataset(features, labels, GROWTH)
-    assert growth["source_player_id"].tolist() == [1, 2]
-    assert set(VALUE_COLUMNS) <= set(growth_cols)
+    two, two_cols = build_dataset(features, labels, TWO_YEARS)
+    assert two["source_player_id"].tolist() == [1, 2]
+    assert set(VALUE_COLUMNS) <= set(two_cols)  # a later label may use the value now
 
 
 def test_metrics_are_relative_and_constant_predictions_have_no_rank():
     y = pd.Series([0.0, 1.0, 2.0, 3.0])
     with warnings.catch_warnings():
         warnings.simplefilter("error")
-        m = metrics(y, pd.Series(no_change(None, y, [])))
+        m = metrics(y, pd.Series(np.zeros(len(y))))
     assert np.isnan(m["spearman"])
     assert m["mae_log"] == pytest.approx(1.5)
     exact = metrics(y, y + np.log(1.1))

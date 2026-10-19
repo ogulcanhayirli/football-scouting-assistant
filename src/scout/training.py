@@ -87,7 +87,7 @@ TUNING_RANGES = {
     ],
 }
 
-SHORT = {"fair_value": "fv", "growth_24m": "g24", "growth_36m": "g36"}
+SHORT = {"fair_value": "fv"}
 
 
 def build_source_package(root: Path = ROOT) -> tuple[bytes, str]:

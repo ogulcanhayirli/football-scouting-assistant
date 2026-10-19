@@ -281,16 +281,16 @@ def run_move_backtest(data: pd.DataFrame, columns: list[str], models: dict) -> p
     return pd.concat(out, ignore_index=True)
 
 
-def shortlist(
+def current_scores(
     features: pd.DataFrame,
     labels: pd.DataFrame,
     data: pd.DataFrame,
     columns: list[str],
     model,
-    size: int = 50,
 ) -> pd.DataFrame:
     """Score the newest season's rows, whose windows are still open, with a
-    model trained on every labelled row: the current candidates."""
+    model trained on every labelled row: every regular player not at a top
+    club, highest score first."""
     newest = features["season"].max()
     pool = features.merge(labels[[*KEYS, "at_top_club", "move_to", "move_date"]], on=KEYS)
     pool = pool[(pool["season"] == newest) & pool["regular"].astype(bool) & ~pool["at_top_club"]]
@@ -306,8 +306,8 @@ def shortlist(
         pool["move_to"] + " (" + pool["move_date"].dt.strftime("%Y-%m-%d") + ")",
     )
     show = [
+        *KEYS,
         "player_name",
-        "league_key",
         "team_name",
         "age",
         "position",
@@ -315,7 +315,7 @@ def shortlist(
         "score",
         "moved_since",
     ]
-    return pool.sort_values("score", ascending=False)[show].head(size).reset_index(drop=True)
+    return pool.sort_values("score", ascending=False)[show].reset_index(drop=True)
 
 
 def write_move_report(
@@ -399,7 +399,9 @@ def run_moves(settings) -> pd.DataFrame:
     out_dir.mkdir(parents=True, exist_ok=True)
     predictions.to_parquet(out_dir / "backtest_big_move_24m.parquet", index=False)
     labels.to_parquet(out_dir / "big_move_labels.parquet", index=False)
-    short = shortlist(features, labels, data, columns, models["lightgbm"])
+    current = current_scores(features, labels, data, columns, models["lightgbm"])
+    current.to_parquet(out_dir / "big_move_current.parquet", index=False)
+    short = current.drop(columns=KEYS[1:]).head(50)
     settings.paths.reports_dir.mkdir(parents=True, exist_ok=True)
     path = write_move_report(predictions, top, short, settings.paths.reports_dir)
     log.info("Move report: %s", path)

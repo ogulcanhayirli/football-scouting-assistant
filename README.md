@@ -25,11 +25,16 @@ that is reported even when it wins.
 | Point in time feature and label tables (`FEATURES.md`) | Done: 16,264 player seasons, 87 feature columns, contracts check the point in time rule |
 | Glue and Athena over the features (`infra/`, CDK) | Deployed to eu-central-1 (stack `ScoutData`); `scout athena "SQL"` queries it |
 | SageMaker Feature Store (`ScoutFeatureStore` stack) | Deployed: 16,264 records, offline store (Iceberg); its point in time answers match our tables exactly |
-| Expanding window backtest, baselines, first LightGBM (`MODELS.md`) | Done: fair value clearly beats the baseline; growth does not yet |
-| Automatic model tuning in SageMaker (`ScoutTraining` stack) | Done for 24 month growth: 20 jobs, about 7 cents; tuned model beats the baseline narrowly (0.558 against 0.564) |
+| Expanding window backtest, baselines, first LightGBM (`MODELS.md`) | Done: fair value clearly beats the baseline (37 leagues: error 0.395 against 0.780); the growth model never did and is retired (decision 5) |
+| Automatic model tuning in SageMaker (`ScoutTraining` stack) | Done once, for the retired 24 month growth model: 20 jobs, about 7 cents; `train` and `tune` now take fair value only |
 | 17 leagues, 19 cups and national team competitions, team stats, lineups, injuries, transfers | Done: about 245,000 requests on the Ultra plan; 2.2 million player match rows, 285,797 transfers; all in S3 |
 | Features on all leagues plus cup, team, injury and transfer context | Done: 130,631 player seasons, 129 columns; fair value error 0.536 to 0.391 on the original EPL and Süper Lig test rows |
-| Big move model (`scout moves`) | Done: AUC 0.905; 39% of each season's top 50 join a top 20 club within two years (base rate 2.3%) |
+| Big move model (`scout moves`) | Done: AUC 0.928 against 0.803 for the baseline over 37 leagues; 38.5% of each season's top 50 join a top 20 club within two years (base rate 1.4%) |
+| 37 leagues (20 added: feeder leagues, Americas, Asia, second tiers), sidelined, coaches, match events | Done 16 to 18 October; features on all 37 leagues, 233,272 player seasons |
+| Ability score version 2 (`scout ability`) | Done: per 90 composite, more stable year to year (0.858 against 0.503), elite and step up AUC as good |
+| Elite, step up and riser models (`scout scouting`) | Done: elite AUC 0.774 against 0.771 on the 23 and under pool; step up 0.927 against 0.912; riser top 50 precision 0.093 against a base rate of 0.017 |
+| Fall back risk and warning flags (`src/scout/flags.py`) | Done: 17.2% of the elite pool fall back; three flags, each raising the risk 1.33 to 1.40 times |
+| The two tables, candidates and bargains (`scout lists`) | Done: Parquet, CSV and a data dictionary in `data/processed/lists/`; one report, `reports/candidates.md` |
 | Athena, Feature Store and tuning on the new data | Not yet: Glue schema regenerated, redeploy pending |
 | Similarity search, agent, rest of the AWS stack | Not started |
 
@@ -140,13 +145,16 @@ cd infra && CDK_DEFAULT_ACCOUNT=<account id> npx aws-cdk@2 deploy ScoutData && c
 uv run scout featurestore ingest
 uv run scout featurestore pit --as-of 2023-01-01
 
-# Expanding window backtest of the baselines and LightGBM, all targets
-uv run scout backtest
+# The models, then the two user facing tables (decision 5)
+uv run scout backtest      # fair value, against its baseline
+uv run scout moves         # big move
+uv run scout scouting      # ability score, elite, step up, riser
+uv run scout lists         # candidates and bargains tables, reports/candidates.md
 
-# Run the backtest in SageMaker: one training job, or automatic model tuning
-uv run scout train --target growth_24m
-uv run scout tune --target growth_24m --max-jobs 20 --parallel 2
-uv run scout backtest --target growth_24m --tuning-job <tuning job name>
+# Run the fair value backtest in SageMaker: one training job, or automatic model tuning
+uv run scout train
+uv run scout tune --max-jobs 20 --parallel 2
+uv run scout backtest --tuning-job <tuning job name>
 
 # Query the feature tables in Athena, as the read only scout-analyst role
 uv run scout athena "SELECT player_name, goals_per90 FROM player_season_features

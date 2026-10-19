@@ -159,8 +159,7 @@ def _table(frame: pd.DataFrame, columns: list[str]) -> str:
 def write_report(reports: Path, stab, results, late, details, chosen, notes) -> Path:
     shown = ["target", "version", "rows", "successes", "base_rate", "auc", "average_precision"]
     shown.append("precision_top50")
-    market = results[results["target"].isin(["elite", "step_up"])]
-    performance = results[results["target"] == "performance"]
+    market = results[results["target"].isin(TARGET_NAMES)]
     _, _, v2 = details["v2"]
     prior = pd.Series(v2["prior_minutes"], name="prior_minutes").round(0).to_frame()
     parts = [
@@ -202,13 +201,6 @@ def write_report(reports: Path, stab, results, late, details, chosen, notes) -> 
         "training seasons.",
         "",
         _table(market, shown),
-        "",
-        "## Performance target (not like for like)",
-        "",
-        "The performance label is built from each version's own ability percentile, so "
-        "each row below predicts a different target.",
-        "",
-        _table(performance, shown),
         "",
         f"## Look ahead check: test seasons {LATE_TEST} on",
         "",

@@ -449,7 +449,7 @@ def test_present_only_profile_columns_never_reach_a_model(column):
     with pytest.raises(pandera.errors.SchemaErrors, match="no_present_only_columns"):
         validate(PLAYER_SEASON_FEATURES, leaked)
     assert column in NOT_FEATURES
-    assert column not in feature_columns(leaked, TARGETS["growth_24m"])
+    assert column not in feature_columns(leaked, TARGETS["fair_value"])
     assert column not in model_columns(leaked)
 
 

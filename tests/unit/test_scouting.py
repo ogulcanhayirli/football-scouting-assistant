@@ -184,6 +184,7 @@ def _target_inputs():
                     "feature_date": pd.Timestamp(f"{season + 1}-06-30"),
                     "regular": True,
                     "minutes": 2000.0,
+                    "age": 22.0,
                     "market_value": float(10_000 - p),  # rank = player id
                 }
             )
@@ -217,22 +218,9 @@ def test_elite_and_step_up_labels():
     assert first.loc[1100, "step_up"] == 1  # #1100 to #151 or so
     assert np.isnan(first.loc[50, "elite"])  # already in the top 100
     assert out.loc[out["season"] == 2019, "elite"].isna().all()  # window not over
-
-
-def test_performance_needs_a_rise_that_holds():
-    features, vals = _target_inputs()
-    ids = features["source_player_id"]
-    season = features["season"]
-    pct = pd.Series(50.0, index=features.index)
-    # Player 1 rises and stays; player 2 has one good season; player 3 is good already.
-    pct[(ids == 1) & (season > 2018)] = 85.0
-    pct[(ids == 2) & (season == 2019)] = 95.0
-    pct[ids == 3] = 90.0
-    out = targets(features, pd.DataFrame({"ability_pct": pct}), vals, pd.Timestamp("2021-06-30"))
-    first = out[out["season"] == 2018].set_index("source_player_id")
-    assert first.loc[1, "performance"] == 1
-    assert first.loc[2, "performance"] == 0
-    assert first.loc[3, "performance"] == 0
+    older = targets(features.assign(age=24.0), extra, vals, data_end=pd.Timestamp("2021-06-30"))
+    assert older["elite"].notna().any()  # the model learns from every candidate
+    assert older["fall_back"].isna().all()  # but the pool is 23 and under
 
 
 def test_trait_table_compares_with_peers_of_the_same_age():
@@ -385,7 +373,7 @@ def test_riser_beats_the_best_of_two_seasons_and_holds():
     seasons = range(2016, 2022)
     rows = [
         {"source_player_id": p, "season": s, "minutes_share": 0.4 if p == 5 else 0.8}
-        for p in range(1, 6)
+        for p in range(1, 7)
         for s in seasons
     ]
     features = pd.DataFrame(rows)
@@ -395,6 +383,7 @@ def test_riser_beats_the_best_of_two_seasons_and_holds():
         3: [50, 40, 45, 70, 50, 50],  # 2018: one good season, gone the next
         4: [50, 40, 45, 70, np.nan, 90],  # 2018: no score in 2020 breaks the rise
         5: [50, 40, 45, 70, 72, 72],  # under half of team minutes
+        6: [50, 20, 25, 50, 55, 55],  # 2018: rises 25 points, but ends below the 70th
     }
     scores = pd.Series(
         [
@@ -410,5 +399,6 @@ def test_riser_beats_the_best_of_two_seasons_and_holds():
     assert at.loc[(2, 2018), "riser"] == 0
     assert at.loc[(3, 2018), "riser"] == 0
     assert at.loc[(4, 2018), "riser"] == 0
+    assert at.loc[(6, 2018), "riser"] == 0
     assert np.isnan(at.loc[(5, 2018), "riser"])  # outside the pool
     assert np.isnan(at.loc[(1, 2020), "riser"])  # 2022 not played yet

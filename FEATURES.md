@@ -222,15 +222,23 @@ Missing for players the API lists no transfers for at all.
 | `value_now` | value at the feature date: the **fair value** target |
 | `value_24m`, `value_36m` | latest value on or before 24 or 36 months later, at most a year old |
 | `value_24m_date`, `value_36m_date` | the date of that value (audit: always after the feature date) |
-| `log_growth_24m`, `log_growth_36m` | log of later value divided by `value_now`: the **growth** targets |
+| `log_growth_24m`, `log_growth_36m` | log of later value divided by `value_now`; the growth model that used them is retired, the bargains backtest still reads `log_growth_24m` (did the value rise?) |
 
 A horizon that lies past the snapshot's last valuation (2026-06-12, read
 from the snapshot by `TransfermarktValuationProvider.data_end`) is
 missing, so the newest seasons have no growth labels.
 
 **For the fair value model, leave out every `market_value*` and
-`value_change_1y` column**: `market_value` is the target itself. The growth
-model may use them all.
+`value_change_1y` column**: `market_value` is the target itself. Models of a
+later outcome (big move, elite, step up) may use them all.
+
+## User facing tables (decision 5)
+
+`scout lists` writes `candidates` and `bargains` to `data/processed/lists/`
+(Parquet and CSV) with `dictionary.csv`, which explains every column in one
+sentence; the same dictionary closes `reports/candidates.md`, and its text
+lives in `DICTIONARY` in `src/scout/lists.py`. They are model outputs, never
+model inputs.
 
 ## Player profile table (display only)
 

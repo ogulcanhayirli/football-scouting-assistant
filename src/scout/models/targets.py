@@ -1,13 +1,13 @@
-"""Modelling datasets: one per target, built from the feature and label tables.
+"""Modelling datasets, built from the feature and label tables.
 
-Targets are on a log scale, so errors are relative: an error of 0.1 means
-about 10%, whether the player is worth 1m or 100m.
-
-* ``fair_value``: log of the market value at the feature date. Every
+* ``fair_value``: log of the market value at the feature date, so errors are
+  relative (0.1 is about 10%, for a 1m and a 100m player alike). Every
   ``market_value*`` column is left out of its features, because
   ``market_value`` is the target itself.
-* ``growth_24m`` and ``growth_36m``: log of the value 24 or 36 months later
-  divided by the value now. The current value is a legitimate input here.
+
+The value growth targets (24 and 36 months) were retired on 19 October 2026
+(decision 5): they barely beat their age and position baseline (MODELS.md).
+The growth labels stay in the label table for the bargains backtest.
 
 Only regular players (450 minutes or more) are modelled: below that a season
 says little about a player, and those are not the players a scout ranks.
@@ -73,11 +73,7 @@ class Target:
     uses_value_features: bool
 
 
-TARGETS = {
-    "fair_value": Target("fair_value", "value_now", 0, None, False),
-    "growth_24m": Target("growth_24m", "log_growth_24m", 2, "value_24m_date", True),
-    "growth_36m": Target("growth_36m", "log_growth_36m", 3, "value_36m_date", True),
-}
+TARGETS = {"fair_value": Target("fair_value", "value_now", 0, None, False)}
 
 
 def feature_columns(features: pd.DataFrame, target: Target) -> list[str]:

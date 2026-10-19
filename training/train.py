@@ -1,6 +1,6 @@
 """SageMaker training entry point: one expanding window backtest of LightGBM.
 
-SageMaker runs ``python train.py --target growth_24m --learning_rate 0.05 ...``
+SageMaker runs ``python train.py --target fair_value --learning_rate 0.05 ...``
 with the feature tables mounted under ``SM_CHANNEL_FEATURES``. The script
 runs the same backtest as ``scout backtest`` (same folds, gap, purge and leak
 check) with the given settings and prints its metrics as
@@ -40,7 +40,7 @@ TUNED = {
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--target", choices=list(TARGETS), default="growth_24m")
+    parser.add_argument("--target", choices=list(TARGETS), default="fair_value")
     parser.add_argument(
         "--objective", choices=["regression", "regression_l1", "huber"], default="regression"
     )

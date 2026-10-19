@@ -234,10 +234,10 @@ def cmd_scouting(settings: Settings, args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_bargains(settings: Settings, args: argparse.Namespace) -> int:
-    from scout.bargains import run_bargains
+def cmd_lists(settings: Settings, args: argparse.Namespace) -> int:
+    from scout.lists import run_lists
 
-    print(run_bargains(settings))
+    print(run_lists(settings))
     return 0
 
 
@@ -257,9 +257,8 @@ def cmd_ability(settings: Settings, args: argparse.Namespace) -> int:
 
 def cmd_backtest(settings: Settings, args: argparse.Namespace) -> int:
     from scout.models.run import run_all
-    from scout.models.targets import TARGETS
 
-    names = list(TARGETS) if args.target == "all" else [args.target]
+    names = [args.target]
     tuned = None
     if args.tuning_job:
         import os
@@ -441,10 +440,8 @@ def main(argv: list[str] | None = None) -> int:
     fs_pit.add_argument("--as-of", required=True, help="Date, for example 2023-01-01")
     fs.set_defaults(func=cmd_featurestore)
 
-    bt = sub.add_parser("backtest", help="Expanding window backtest of the models")
-    bt.add_argument(
-        "--target", choices=["all", "fair_value", "growth_24m", "growth_36m"], default="all"
-    )
+    bt = sub.add_parser("backtest", help="Expanding window backtest of the fair value model")
+    bt.add_argument("--target", choices=["fair_value"], default="fair_value")
     bt.add_argument("--tuning-job", help="Also run the best settings of this tuning job")
     bt.set_defaults(func=cmd_backtest)
 
@@ -453,9 +450,7 @@ def main(argv: list[str] | None = None) -> int:
         ("tune", "Automatic model tuning: many training jobs, scored on the backtest"),
     ):
         p = sub.add_parser(command, help=help_text)
-        p.add_argument(
-            "--target", choices=["fair_value", "growth_24m", "growth_36m"], default="growth_24m"
-        )
+        p.add_argument("--target", choices=["fair_value"], default="fair_value")
         p.add_argument("--dry-run", action="store_true", help="Print the request, start nothing")
         if command == "tune":
             p.add_argument("--max-jobs", type=int, default=20)
@@ -463,13 +458,13 @@ def main(argv: list[str] | None = None) -> int:
         p.set_defaults(func=cmd_train)
 
     moves = sub.add_parser(
-        "moves", help="Big move model: backtest, report and shortlist (reports/moves.md)"
+        "moves", help="Big move model: backtest, current scores, report (reports/moves.md)"
     )
     moves.set_defaults(func=cmd_moves)
 
     scouting = sub.add_parser(
         "scouting",
-        help="League strength, ability, targets, traits, shortlists (reports/scouting.md)",
+        help="League strength, ability, elite, step up and riser models (reports/scouting.md)",
     )
     scouting.add_argument(
         "--strength",
@@ -481,11 +476,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     scouting.set_defaults(func=cmd_scouting)
 
-    bargains = sub.add_parser(
-        "bargains",
-        help="Bargains lists (prime, experienced) and their backtest (reports/bargains.md)",
+    lists = sub.add_parser(
+        "lists",
+        help="The candidates and bargains tables, their dictionary and reports/candidates.md; "
+        "run after backtest, moves and scouting",
     )
-    bargains.set_defaults(func=cmd_bargains)
+    lists.set_defaults(func=cmd_lists)
 
     elo = sub.add_parser(
         "elo",
