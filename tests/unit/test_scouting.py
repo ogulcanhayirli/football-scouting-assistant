@@ -16,6 +16,7 @@ from scout.scouting import (
     league_strength,
     prior_minutes,
     rank_rate,
+    riser_target,
     targets,
     team_shares,
     trait_table,
@@ -378,3 +379,36 @@ def test_fall_back_label_reads_the_rank_at_the_end_of_the_window():
     assert first.loc[400, "fall_back"] == 0
     assert np.isnan(first.loc[50, "fall_back"])  # not a candidate
     assert out.loc[out["season"] == 2019, "fall_back"].isna().all()  # window not over
+
+
+def test_riser_beats_the_best_of_two_seasons_and_holds():
+    seasons = range(2016, 2022)
+    rows = [
+        {"source_player_id": p, "season": s, "minutes_share": 0.4 if p == 5 else 0.8}
+        for p in range(1, 6)
+        for s in seasons
+    ]
+    features = pd.DataFrame(rows)
+    one = {
+        1: [50, 40, 45, 70, 72, 72],  # 2018: best of 40 and 45 is 45; 70 and 72 hold
+        2: [50, 80, 45, 70, 72, 72],  # 2018: best of the last two is 80, no rise
+        3: [50, 40, 45, 70, 50, 50],  # 2018: one good season, gone the next
+        4: [50, 40, 45, 70, np.nan, 90],  # 2018: no score in 2020 breaks the rise
+        5: [50, 40, 45, 70, 72, 72],  # under half of team minutes
+    }
+    scores = pd.Series(
+        [
+            one[p][s - 2016]
+            for p, s in zip(features["source_player_id"], features["season"], strict=True)
+        ]
+    )
+    out = riser_target(features, scores, features["minutes_share"])
+    at = out.assign(pid=features["source_player_id"], season=features["season"])
+    at = at.set_index(["pid", "season"])
+    assert at.loc[(1, 2018), "riser"] == 1
+    assert at.loc[(1, 2018), "riser_base"] == 45
+    assert at.loc[(2, 2018), "riser"] == 0
+    assert at.loc[(3, 2018), "riser"] == 0
+    assert at.loc[(4, 2018), "riser"] == 0
+    assert np.isnan(at.loc[(5, 2018), "riser"])  # outside the pool
+    assert np.isnan(at.loc[(1, 2020), "riser"])  # 2022 not played yet

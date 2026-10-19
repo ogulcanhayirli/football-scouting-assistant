@@ -73,6 +73,7 @@ ELITE_REACH = 1000  # elite candidates start here; further away it is too rare t
 FALL_BACK_FACTOR = 2.0  # an elite candidate whose value rank is twice as bad at the end
 PERF_RISE = 20.0  # the next two seasons average this many percentiles above now
 PERF_LEVEL = 70.0  # and both are at least this good: a rise that holds, not one lucky season
+RISER_MIN_SHARE = 0.5  # decision 3: risers play at least half of team minutes now
 SHRINK_MINUTES = 900  # an ability score from 900 minutes is half data, half position average
 MIN_MOVES = 50  # league strength from fewer moves is pulled towards the prior
 LABEL_TOLERANCE = pd.Timedelta(days=31)  # a value from 12 June 2026 stands for 30 June 2026
@@ -640,6 +641,12 @@ def targets(
     complete = out["season"].astype(int) + HORIZON_SEASONS <= int(features["season"].max())
     out["performance"] = rose.astype(float).where(now.notna() & seen & complete)
     out["ability_pct"] = now
+    if "ability_pct_1s" in extra:
+        share = features.get("minutes_share", pd.Series(np.nan, index=features.index))
+        rise = riser_target(features, extra["ability_pct_1s"], share)
+        out["riser_base"], out["riser"] = rise["riser_base"], rise["riser"]
+    else:
+        out["riser_base"] = out["riser"] = np.nan
     return out
 
 
@@ -667,9 +674,44 @@ def season_scores(
     return out, seen
 
 
+def riser_target(
+    features: pd.DataFrame, one_season: pd.Series, minutes_share: pd.Series
+) -> pd.DataFrame:
+    """Decision 3, on the one season ability score (version 2 not pooled):
+    a riser's next season beats the best of his current and previous one
+    season scores by ``PERF_RISE`` percentiles, and the season after stays
+    at that level. Only players with at least half of team minutes in the
+    current season. Returns ``riser_base`` (the best of the two seasons,
+    known at the feature date) and ``riser``."""
+    scores, seen = season_scores(features, one_season, [-1, 0, 1, 2])
+    base = scores[[-1, 0]].max(axis=1).where(scores[0].notna())
+    later = scores[[1, 2]].fillna(0.0)  # a season not rated as a regular breaks the rise
+    rose = later.min(axis=1) >= base + PERF_RISE
+    complete = features["season"].astype(int) + HORIZON_SEASONS <= int(features["season"].max())
+    floor = minutes_share.astype(float) >= RISER_MIN_SHARE
+    known = base.notna() & seen & complete & floor
+    return pd.DataFrame(
+        {"riser_base": base, "riser": rose.astype(float).where(known)}, index=features.index
+    )
+
+
 # Models and backtest
 
 TARGET_NAMES = ["elite", "step_up", "performance"]
+# Decision 3's riser replaces the performance list; ``performance`` stays in
+# the backtest as the old definition. Version 2 only.
+SCOUTING_TARGETS = [*TARGET_NAMES, "riser"]
+# Known at the feature date but given to the riser model only, so the other
+# targets keep their columns.
+RISER_COLUMNS = ["ability_pct_1s", "riser_base"]
+LABEL_COLUMNS = [
+    "value_rank",
+    "best_rank_2y",
+    "label_date",
+    "fall_back",
+    "riser_base",
+    *SCOUTING_TARGETS,
+]
 
 
 def classifier(rounds: int = 400):
@@ -689,8 +731,9 @@ def classifier(rounds: int = 400):
 
 
 def model_columns(data: pd.DataFrame) -> list[str]:
-    skip = NOT_FEATURES | set(KEYS) | {"y", "label_date", "best_rank_2y", *TARGET_NAMES, "regular"}
-    skip |= {"fall_back"}
+    skip = NOT_FEATURES | set(KEYS) | {"y", "label_date", "best_rank_2y", *SCOUTING_TARGETS}
+    skip |= {"regular"}
+    skip |= {"fall_back", *RISER_COLUMNS}
     skip |= {c for c in data.columns if c.startswith("pct_")}
     return [c for c in data.columns if c not in skip and data[c].dtype != object]
 
@@ -841,12 +884,15 @@ def build(
         features, strength_source, elo_tables, step_up, pool=pool
     )
     extra = pd.concat([scores, team_shares(features)], axis=1)
+    if strength_source == "v2":  # the riser is defined on one season scores
+        one, *_ = ability_scores(features, "v2", elo_tables, step_up, pool=False)
+        extra["ability_pct_1s"] = one["ability_pct"]
     data = pd.concat([features, extra], axis=1)
     pct = league_percentiles(data, TRAIT_STATS).add_prefix("pct_")
     data = pd.concat([data, pct], axis=1)
     labels = targets(features, extra, valuations, data_end)
     data = data.merge(
-        labels[[*KEYS, "value_rank", "best_rank_2y", "label_date", "fall_back", *TARGET_NAMES]],
+        labels[[*KEYS, *LABEL_COLUMNS]],
         on=KEYS,
     )
     data["group"] = position_group(data)
@@ -897,9 +943,12 @@ def run_scouting(settings, strength_source: str = DEFAULT_STRENGTH) -> Path:
 
     results, scored = {}, {}
     models = {"baseline": rank_rate, "lightgbm": classifier()}
-    for target in TARGET_NAMES:
+    for target in SCOUTING_TARGETS:
+        if not data[target].notna().any():
+            continue  # the riser needs version 2
         rows = target_rows(data, target)
-        predictions = backtest(rows, columns, models)
+        use = columns + RISER_COLUMNS if target == "riser" else columns
+        predictions = backtest(rows, use, models)
         results[target] = evaluate(predictions)
         results[f"{target} (baseline)"] = evaluate(predictions, score="score_baseline")
         scored[target] = predictions
@@ -907,7 +956,7 @@ def run_scouting(settings, strength_source: str = DEFAULT_STRENGTH) -> Path:
         newest = data[
             (data["season"] == data["season"].max()) & data["regular"].astype(bool)
         ].copy()
-        data.loc[newest.index, f"score_{target}"] = classifier()(rows, newest, columns)
+        data.loc[newest.index, f"score_{target}"] = classifier()(rows, newest, use)
 
     data = data.merge(
         features[KEYS].assign(fall_back_3y=fall_back_after(features, valuations, data_end, 3)),
@@ -927,7 +976,9 @@ def run_scouting(settings, strength_source: str = DEFAULT_STRENGTH) -> Path:
         "value_rank",
         "adj_rating",
         "ability_pct",
-        *TARGET_NAMES,
+        "ability_pct_1s",
+        "riser_base",
+        *SCOUTING_TARGETS,
         "fall_back",
         *profiled.columns,
     ]
@@ -983,19 +1034,22 @@ def _lists(data: pd.DataFrame, size: int = 25) -> dict[str, pd.DataFrame]:
     step = newest[newest["value_rank"] > STEP_UP_RANK].sort_values("score_step_up", ascending=False)
     bargains = newest[(newest["ability_pct"] >= 85) & (newest["value_rank"] > 1000)]
     bargains = bargains.sort_values(["ability_pct", "value_rank"], ascending=[False, False])
-    rising = newest.sort_values("score_performance", ascending=False)
+    risers = newest[newest["minutes_share"] >= RISER_MIN_SHARE] if "score_riser" in newest else None
     rounding = {
         "age": 1,
         "ability_pct": 0,
         "score_elite": 3,
         "score_step_up": 3,
         "score_performance": 3,
+        "score_riser": 3,
+        "ability_pct_1s": 0,
+        "riser_base": 0,
     }
 
     def fmt(frame: pd.DataFrame, extra: list[str]) -> pd.DataFrame:
         return frame[show + extra].head(size).round(rounding)
 
-    return {
+    lists = {
         "Investment: likely to enter the top 100 (now #101 to #1,000)": fmt(
             elite, ["score_elite", "score_step_up"]
         ),
@@ -1005,10 +1059,38 @@ def _lists(data: pd.DataFrame, size: int = 25) -> dict[str, pd.DataFrame]:
         "Bargains: ability in the top 15% of the position, value outside the top 1,000": fmt(
             bargains, ["score_performance"]
         ),
-        "Performance risers: likely to climb 20+ ability percentiles": fmt(
-            rising, ["score_performance"]
-        ),
     }
+    if risers is not None:
+        title = (
+            "Performance risers: next season 20+ percentiles above the best of the last two, "
+            "and holding (decision 3)"
+        )
+        risers = risers.sort_values("score_riser", ascending=False)
+        lists[title] = fmt(risers, ["ability_pct_1s", "riser_base", "score_riser"])
+    return lists
+
+
+def season_precision(predictions: pd.DataFrame, k: int = 50) -> pd.DataFrame:
+    """Per test season: players, base rate, top ``k`` precision of the model
+    and of the baseline."""
+    rows = {}
+    for season, g in predictions.groupby("season"):
+        rows[season] = {
+            "players": len(g),
+            "base_rate": g["y"].mean(),
+            f"top{k}": precision_at(g["y"], g["score"], k),
+            f"top{k}_baseline": precision_at(g["y"], g["score_baseline"], k),
+        }
+    out = pd.DataFrame(rows).T
+    out.loc["mean"] = out.mean()
+    out.loc["mean", "players"] = out["players"].iloc[:-1].sum()
+    return out
+
+
+def riser_comparison(old: pd.DataFrame, new: pd.DataFrame) -> pd.DataFrame:
+    both = pd.concat({"old": season_precision(old), "new": season_precision(new)}, axis=1).round(3)
+    both.index = both.index.astype(str)
+    return both
 
 
 TEAM_NOTES = {
@@ -1071,7 +1153,20 @@ def write_report(
         pd.DataFrame(results).T.round(3).to_markdown(),
         "",
     ]
-    for target in TARGET_NAMES:
+    if "riser" in scored:
+        parts += [
+            "## Performance risers: old and new definition (decision 3)",
+            "",
+            "Old: both next two seasons at the 70th percentile of the two season score",
+            "and their average 20 above now (all regular players). New: on the one",
+            "season score, the next season 20 above the best of this and last season",
+            "and the season after still there, for players with half of team minutes.",
+            "Top 50 precision of each season's list against the season's base rate.",
+            "",
+            riser_comparison(scored["performance"], scored["riser"]).to_markdown(),
+            "",
+        ]
+    for target in [t for t in SCOUTING_TARGETS if t in scored]:
         name = target.replace("_", " ")
         parts += [
             f"## Traits: {name}",
