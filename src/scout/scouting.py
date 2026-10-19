@@ -4,18 +4,29 @@ score, three career targets, the traits behind them, and four shortlists.
 Decisions, each argued in SCOUTING.md:
 
 * **League strength** comes from players who changed leagues: the change in
-  their match rating when they move, with the change in team strength and
-  age held fixed, measured against the Premier League. Leagues with few
-  moves are pulled towards the average of the smaller leagues. This is the
-  default (``strength="transfer"``). The alternative (``strength="elo"``)
+  their score when they move, with the change in team strength and age held
+  fixed, measured against the Premier League. Leagues with few moves are
+  pulled towards the average of the smaller leagues. ``strength="elo"``
   takes league and team strength from our own team Elo (``scout.elo``): the
   league's mean club rating that season against the Premier League's, and
-  the club's rating against its league's; the same player pairs turn both
-  into rating units. It stays behind the flag until the comparison in
-  ``reports/elo.md`` decides.
-* **Ability score:** the match rating with league strength and team strength
-  taken out, shrunk towards the position average for players with few
-  minutes, as a percentile within the position group and season.
+  the club's rating against its league's (``reports/elo.md``).
+  ``strength="transfer_elo"`` keeps the transfer based league effect and
+  takes the team term from the Elo tables.
+* **Ability score, version 1** (``strength="transfer"``): the match rating
+  with the league effect and team goal difference taken out, shrunk towards
+  the position average for players with few minutes, as a percentile within
+  the position group and season.
+* **Ability score, version 2** (``strength="v2"``, the default since 19
+  October 2026, decision 8): the match rating is replaced by a per 90
+  composite for each position group. Its measures and weights are the per
+  90 stats on which players who made the step up stood above same age peers
+  (the trait comparison), each standardised within position group and
+  season. League term from transfers and team term from Elo, both refitted
+  in composite units; then the last two seasons pooled by minutes and
+  shrunk towards the position mean by empirical Bayes, with the prior
+  strength fitted from the data. It is more stable from season to season
+  and predicts elite and step up at least as well (``scout ability``,
+  ``reports/ability.md``, MODELS.md).
 * **Targets,** each within 2 seasons:
   ``elite``: enters the 100 most valuable players, from #101 to #1,000 now;
   ``step_up``: value rank at least 3 times better, ending in the top 500;
@@ -41,7 +52,7 @@ import pandas as pd
 
 from scout.features.build import value_asof
 from scout.fsutil import atomic_write_text
-from scout.models.backtest import expanding_folds, fold_season
+from scout.models.backtest import check_no_leak, expanding_folds, fold_season
 from scout.models.estimators import DEFAULT_PARAMS
 from scout.models.moves import auc, average_precision, precision_at
 from scout.models.targets import CATEGORICAL, NOT_FEATURES
@@ -107,6 +118,17 @@ TRAIT_STATS = [
     "intl_minutes_12m",
     "adj_rating",
 ]
+
+# Version 2 candidates: the per 90 and rate measures among the traits. Pass
+# accuracy is left out: the API has it only from 2020.
+COMPOSITE_CANDIDATES = [
+    s for s in TRAIT_STATS if s.endswith("_per90") or s in ("duel_win_rate", "dribble_success_rate")
+]
+COMPOSITE_MIN_GAP = 5.0  # percentile points above same age peers to enter the composite
+SHRINK_FIT_MINUTES = 270  # rows used to fit the prior strength: three full matches or more
+MIN_PRIOR_ROWS = 100
+STRENGTH_SOURCES = ["transfer", "elo", "transfer_elo", "v2"]
+DEFAULT_STRENGTH = "v2"  # decision 8: more stable, elite and step up AUC as good (MODELS.md)
 
 
 # League strength and ability
@@ -280,6 +302,192 @@ def ability_from(features: pd.DataFrame, effect: pd.Series, team: pd.Series) -> 
     return out
 
 
+def ability_transfer_elo(features: pd.DataFrame, terms: pd.DataFrame) -> tuple:
+    """Transfer based league effect, Elo team term, both fitted together on
+    the rating. Returns (scores, strength, team_coef)."""
+    strength, team_coef = league_strength(
+        pd.concat([features.drop(columns=terms.columns, errors="ignore"), terms], axis=1),
+        team_column="elo_team",
+    )
+    effect = features["league_key"].map(strength.set_index("league_key")["effect"]).astype(float)
+    return ability_from(features, effect, team_coef * terms["elo_team"]), strength, team_coef
+
+
+# Ability version 2: per 90 composite
+
+
+def composite_inputs(features: pd.DataFrame) -> pd.DataFrame:
+    """The candidate measures on match tier rows. The API leaves a count
+    empty rather than writing 0 (39% of regulars have no goals entry), so a
+    missing per 90 count reads as 0 where the league season records that
+    count for anyone; a league season without it stays missing."""
+    match = (features["tier"] == "match") & (features["minutes"].astype(float).fillna(0) > 0)
+    out = features[COMPOSITE_CANDIDATES].astype(float).where(match)
+    keys = [features["league_key"], features["season"]]
+    for stat in COMPOSITE_CANDIDATES:
+        if not stat.endswith("_per90"):
+            continue  # a rate without attempts is unknown, not 0
+        recorded = out[stat].notna().groupby(keys).transform("any")
+        out.loc[match & recorded & out[stat].isna(), stat] = 0.0
+    return out
+
+
+def composite_weights(
+    features: pd.DataFrame, inputs: pd.DataFrame, step_up: pd.Series
+) -> pd.DataFrame:
+    """Per position group, the measures on which players who made the step up
+    stood at least ``COMPOSITE_MIN_GAP`` percentiles above same age peers
+    (``trait_table`` on league percentiles), weighted by that gap."""
+    frame = pd.concat(
+        [features[["league_key", "season", "sub_position", "regular"]], inputs], axis=1
+    )
+    data = league_percentiles(frame, COMPOSITE_CANDIDATES).add_prefix("pct_")
+    data["group"] = position_group(features)
+    data["age_band"] = pd.cut(features["age"], AGE_BANDS, right=False, labels=AGE_LABELS)
+    data["step_up"] = step_up.where(features["tier"] == "match")  # rows with the measures
+    table = trait_table(data, "step_up", top=len(COMPOSITE_CANDIDATES), with_rating=False)
+    if table.empty:
+        raise ValueError("too few step ups to choose the version 2 measures")
+    table = table[table["gap"] >= COMPOSITE_MIN_GAP].copy()
+    table["weight"] = table["gap"] / table.groupby("position")["gap"].transform("sum")
+    return table.reset_index(drop=True)
+
+
+def composite(features: pd.DataFrame, inputs: pd.DataFrame, weights: pd.DataFrame) -> pd.Series:
+    """Weighted mean of the measures, each standardised within position group
+    and season against that season's regulars. Needs at least half of the
+    group's weight present."""
+    group = position_group(features)
+    season = features["season"].astype(int)
+    regular = features["regular"].astype(bool) & group.notna()
+    total = pd.Series(0.0, index=features.index)
+    weight = pd.Series(0.0, index=features.index)
+    for stat in weights["measure"].unique():
+        values = inputs[stat]
+        ref = values[regular].groupby([group[regular], season[regular]]).agg(["mean", "std"])
+        at = ref.reindex(pd.MultiIndex.from_arrays([group, season]))
+        z = (values - at["mean"].to_numpy()) / at["std"].replace(0, np.nan).to_numpy()
+        w = group.map(weights[weights["measure"] == stat].set_index("position")["weight"])
+        w = w.fillna(0.0).where(z.notna(), 0.0)
+        total += (w * z.fillna(0)).astype(float)
+        weight += w.astype(float)
+    return (total / weight).where(weight >= 0.5)
+
+
+def prior_minutes(score: pd.Series, minutes: pd.Series, keys: list[pd.Series]) -> float:
+    """Empirical Bayes prior strength, in minutes: a season's score scatters
+    around the position mean with variance tau^2 + sigma^2 / minutes (true
+    spread plus sampling noise). Least squares of the squared deviation on
+    1 / minutes gives both; ``sigma^2 / tau^2`` is the number of minutes at
+    which a score is half data, half position mean."""
+    use = score.notna() & (minutes >= SHRINK_FIT_MINUTES)
+    dev2 = (score - score[use].groupby([k[use] for k in keys]).transform("mean")) ** 2
+    x = np.column_stack([np.ones(int(use.sum())), 1.0 / minutes[use].to_numpy()])
+    (tau2, sigma2), *_ = np.linalg.lstsq(x, dev2[use].to_numpy(), rcond=None)
+    if tau2 <= 0:
+        raise ValueError("no true spread left after the sampling noise; cannot shrink")
+    return float(max(sigma2, 0.0) / tau2)
+
+
+def two_seasons(features: pd.DataFrame, score: pd.Series) -> tuple[pd.Series, pd.Series]:
+    """Each row's score pooled with the player's previous season (all his
+    league rows that season), weighted by minutes; returns (score, minutes).
+    The previous season ended before this row's feature date."""
+    minutes = features["minutes"].astype(float).fillna(0)
+    has = score.notna() & (minutes > 0)
+    frame = pd.DataFrame(
+        {
+            "pid": features["source_player_id"].astype(int),
+            "season": features["season"].astype(int),
+            "m": minutes.where(has, 0.0),
+            "sm": (score * minutes).where(has, 0.0),
+        }
+    )
+    prev = frame.groupby(["pid", "season"])[["m", "sm"]].sum()
+    prev.index = prev.index.set_levels(prev.index.levels[1] + 1, level=1)
+    at = prev.reindex(pd.MultiIndex.from_frame(frame[["pid", "season"]])).fillna(0.0)
+    m_prev, sm_prev = at["m"].to_numpy(), at["sm"].to_numpy()
+    total = frame["m"] + m_prev
+    pooled = (frame["sm"] + sm_prev) / total.where(total > 0)
+    return pooled.where(has), total.where(has)
+
+
+def ability_v2(
+    features: pd.DataFrame,
+    terms: pd.DataFrame,
+    weights: pd.DataFrame,
+    pool: bool = True,
+) -> tuple[pd.DataFrame, pd.DataFrame, float, dict]:
+    """Version 2: the per 90 composite, less the transfer league effect and
+    the Elo team term (both refitted in composite units on the same player
+    pairs as the rating version), pooled over two seasons by minutes, shrunk
+    towards the position mean with the fitted prior strength, as a
+    percentile within position group and season. Returns (scores, league
+    strength, team coefficient, prior minutes per position group)."""
+    inputs = composite_inputs(features)
+    base = composite(features, inputs, weights)
+    on_base = features.drop(columns=terms.columns, errors="ignore").assign(rating=base)
+    strength, team_coef = league_strength(
+        pd.concat([on_base, terms], axis=1), team_column="elo_team"
+    )
+    effect = features["league_key"].map(strength.set_index("league_key")["effect"]).astype(float)
+    adjusted = base - effect - team_coef * terms["elo_team"]
+    group = position_group(features)
+    season = features["season"].astype(int)
+    minutes = features["minutes"].astype(float).fillna(0)
+    prior = {}
+    for g in sorted(group.dropna().unique()):
+        rows = (group == g) & adjusted.notna()
+        if rows.sum() >= MIN_PRIOR_ROWS:  # a group without measures has no score
+            prior[g] = prior_minutes(adjusted[rows], minutes[rows], [season[rows]])
+    score, used = two_seasons(features, adjusted) if pool else (adjusted, minutes)
+    usable = score.notna() & group.notna() & (used > 0)
+    mean = adjusted[usable].groupby([group[usable], season[usable]]).transform("mean")
+    k = group[usable].map(prior)
+    shrunk = mean + used[usable] / (used[usable] + k) * (score[usable] - mean)
+    out = pd.DataFrame(index=features.index)
+    out["adj_rating"] = shrunk.reindex(features.index)  # the adjusted base, here the composite
+    regular = features["regular"].astype(bool) & usable
+    out["ability_pct"] = (
+        out.loc[regular, "adj_rating"]
+        .groupby([group[regular], season[regular]])
+        .rank(pct=True)
+        .mul(100)
+        .reindex(features.index)
+    )
+    out["league_effect"] = effect
+    return out, strength, team_coef, prior
+
+
+def ability_scores(
+    features: pd.DataFrame,
+    source: str,
+    elo_tables: tuple[pd.DataFrame, pd.DataFrame] | None = None,
+    step_up: pd.Series | None = None,
+    pool: bool = True,
+) -> tuple[pd.DataFrame, pd.DataFrame, float, dict]:
+    """The ability score of one version: (scores, league strength, team
+    coefficient, details). ``v2`` needs the step up labels for its weights."""
+    if source == "transfer":
+        strength, team_effect = league_strength(features)
+        return ability(features, strength, team_effect), strength, team_effect, {}
+    if elo_tables is None:
+        raise ValueError(f"strength {source!r} needs the Elo tables (run `scout elo` first)")
+    terms = elo_terms(features, *elo_tables)
+    if source == "elo":
+        strength, league_coef, team_coef = elo_league_strength(features, terms)
+        return ability_elo(features, terms, league_coef, team_coef), strength, team_coef, {}
+    if source == "transfer_elo":
+        return (*ability_transfer_elo(features, terms), {})
+    if source == "v2":
+        if step_up is None:
+            raise ValueError("ability v2 needs the step up labels to choose its measures")
+        weights = composite_weights(features, composite_inputs(features), step_up)
+        scores, strength, team_coef, prior = ability_v2(features, terms, weights, pool=pool)
+        return scores, strength, team_coef, {"weights": weights, "prior_minutes": prior}
+    raise ValueError(f"unknown strength source {source!r}; one of {STRENGTH_SOURCES}")
+
+
 def team_shares(features: pd.DataFrame) -> pd.DataFrame:
     """A player's share of his team's goals, assists, shots, key passes and
     successful dribbles in the league season: carrying a weak team shows here
@@ -448,34 +656,72 @@ def model_columns(data: pd.DataFrame) -> list[str]:
     return [c for c in data.columns if c not in skip and data[c].dtype != object]
 
 
-def backtest(data: pd.DataFrame, columns: list[str]) -> pd.DataFrame:
+RANK_BANDS = [0, 150, 200, 300, 500, 750, 1000, 1500, 2000, 3000, 5000, np.inf]
+MIN_GROUP = 30
+
+
+def rank_rate(train: pd.DataFrame, test: pd.DataFrame, columns: list[str]) -> np.ndarray:
+    """Baseline: the success rate in the training seasons of players with a
+    similar value rank and age, falling back to the value rank alone and then
+    to the overall rate. It knows what the market knows and nothing else."""
+
+    def bands(frame: pd.DataFrame) -> pd.DataFrame:
+        return pd.DataFrame(
+            {
+                "rank_band": pd.cut(frame["value_rank"], RANK_BANDS, labels=False).fillna(-1),
+                "age_band": pd.cut(frame["age"], AGE_BANDS, right=False, labels=False).fillna(-1),
+                "y": frame.get("y", np.nan),
+            },
+            index=frame.index,
+        )
+
+    tr, te = bands(train), bands(test)
+    pred = pd.Series(np.nan, index=test.index)
+    for keys in (["rank_band", "age_band"], ["rank_band"]):
+        stats = tr.groupby(keys)["y"].agg(["mean", "size"])
+        stats = stats[stats["size"] >= MIN_GROUP]["mean"]
+        found = stats.reindex(pd.MultiIndex.from_frame(te[keys]) if len(keys) > 1 else te[keys[0]])
+        pred = pred.fillna(pd.Series(found.to_numpy(), index=test.index))
+    return pred.fillna(train["y"].mean()).to_numpy()
+
+
+def backtest(data: pd.DataFrame, columns: list[str], models: dict | None = None) -> pd.DataFrame:
+    """Season by season: each test season scored by models trained on seasons
+    at least two earlier, purged of labels observed after the test date.
+    One ``score_<model>`` column per model; ``score`` is the LightGBM one."""
+    models = models or {"lightgbm": classifier()}
     folds = fold_season(data["feature_date"])
-    model = classifier()
     out = []
     for fold in expanding_folds(folds.tolist(), _Horizon()):
         train = data[folds.isin(fold.train_seasons)]
         test = data[folds == fold.test_season]
         train = train[train["label_date"] <= test["feature_date"].min()]
-        frame = test[[*KEYS, "player_name", "age", "y"]].copy()
-        frame["score"] = model(train, test, columns)
+        check_no_leak(train, test, _Horizon())
+        frame = test[[*KEYS, "player_name", "age", "feature_date", "y"]].copy()
+        for name, model in models.items():
+            frame[f"score_{name}"] = model(train, test, columns)
         out.append(frame)
-    return pd.concat(out, ignore_index=True)
+    out = pd.concat(out, ignore_index=True)
+    if "score_lightgbm" in out:
+        out["score"] = out["score_lightgbm"]
+    return out
 
 
 class _Horizon:
     horizon_years = HORIZON_SEASONS
+    label_date = "label_date"
 
 
-def evaluate(predictions: pd.DataFrame, k: int = 50) -> dict:
+def evaluate(predictions: pd.DataFrame, k: int = 50, score: str = "score") -> dict:
     per_season = predictions.groupby("season").apply(
-        lambda g: precision_at(g["y"], g["score"], k), include_groups=False
+        lambda g: precision_at(g["y"], g[score], k), include_groups=False
     )
     return {
         "rows": len(predictions),
         "successes": int(predictions["y"].sum()),
         "base_rate": float(predictions["y"].mean()),
-        "auc": auc(predictions["y"], predictions["score"]),
-        "average_precision": average_precision(predictions["y"], predictions["score"]),
+        "auc": auc(predictions["y"], predictions[score]),
+        "average_precision": average_precision(predictions["y"], predictions[score]),
         f"precision_top{k}": float(per_season.mean()),
     }
 
@@ -537,16 +783,24 @@ def build(
     features: pd.DataFrame,
     valuations: pd.DataFrame,
     data_end: pd.Timestamp,
-    strength_source: str = "transfer",
+    strength_source: str = DEFAULT_STRENGTH,
     elo_tables: tuple[pd.DataFrame, pd.DataFrame] | None = None,
+    pool: bool = True,
+    weights_until: int | None = None,
 ):
-    if strength_source == "elo":
-        terms = elo_terms(features, *elo_tables)
-        strength, league_coef, team_effect = elo_league_strength(features, terms)
-        scores = ability_elo(features, terms, league_coef, team_effect)
-    else:
-        strength, team_effect = league_strength(features)
-        scores = ability(features, strength, team_effect)
+    """Ability score of the chosen version, targets, traits. Returns (data,
+    league strength, team coefficient, details of the version).
+    ``weights_until`` chooses the version 2 measures from the step up labels
+    of seasons up to that one only (the look ahead check)."""
+    step_up = None
+    if strength_source == "v2":
+        blank = pd.DataFrame({"ability_pct": np.nan}, index=features.index)
+        step_up = targets(features, blank, valuations, data_end)["step_up"]
+        if weights_until is not None:
+            step_up = step_up.where(features["season"].astype(int) <= weights_until)
+    scores, strength, team_effect, details = ability_scores(
+        features, strength_source, elo_tables, step_up, pool=pool
+    )
     extra = pd.concat([scores, team_shares(features)], axis=1)
     data = pd.concat([features, extra], axis=1)
     pct = league_percentiles(data, TRAIT_STATS).add_prefix("pct_")
@@ -557,10 +811,12 @@ def build(
     )
     data["group"] = position_group(data)
     data["age_band"] = pd.cut(data["age"], AGE_BANDS, right=False, labels=AGE_LABELS)
-    return data, strength, team_effect
+    return data, strength, team_effect, details
 
 
-def run_scouting(settings, strength_source: str = "transfer") -> Path:
+def load_inputs(settings, strength_source: str = DEFAULT_STRENGTH):
+    """Features, linked valuations, the valuation data end and, unless the
+    version is transfer only, the Elo tables. Reads local files only."""
     from scout.providers.transfermarkt import TransfermarktValuationProvider
     from scout.tables import read_feature_table
 
@@ -570,28 +826,42 @@ def run_scouting(settings, strength_source: str = "transfer") -> Path:
     tm = TransfermarktValuationProvider(settings.paths.raw_dir / "transfermarkt")
     valuations = tm.valuations(None)
     valuations = valuations[valuations["source_player_id"].isin(linked)]
-    data_end = tm.data_end()
     elo_tables = None
-    if strength_source == "elo":
+    if strength_source != "transfer":
         from scout.elo import read_tables
 
         elo_tables = read_tables(settings.paths.processed_dir)
-    data, strength, team_effect = build(features, valuations, data_end, strength_source, elo_tables)
+    return features, valuations, tm.data_end(), elo_tables
+
+
+def prepare_models(data: pd.DataFrame) -> list[str]:
     for column in CATEGORICAL:
         if column in data:
             data[column] = data[column].astype("category")
     data["group"] = data["group"].astype("category")
-    columns = model_columns(data)
+    return model_columns(data)
+
+
+def target_rows(data: pd.DataFrame, target: str) -> pd.DataFrame:
+    rows = data[data[target].notna() & data["regular"].astype(bool)]
+    return rows.assign(y=rows[target]).reset_index(drop=True)
+
+
+def run_scouting(settings, strength_source: str = DEFAULT_STRENGTH) -> Path:
+    features, valuations, data_end, elo_tables = load_inputs(settings, strength_source)
+    data, strength, team_effect, details = build(
+        features, valuations, data_end, strength_source, elo_tables
+    )
+    columns = prepare_models(data)
     log.info("scouting: %d rows, %d model columns", len(data), len(columns))
 
     results, scored = {}, {}
+    models = {"baseline": rank_rate, "lightgbm": classifier()}
     for target in TARGET_NAMES:
-        rows = data[data[target].notna() & data["regular"].astype(bool)].assign(
-            y=lambda d, t=target: d[t]
-        )
-        rows = rows.reset_index(drop=True)
-        predictions = backtest(rows, columns)
+        rows = target_rows(data, target)
+        predictions = backtest(rows, columns, models)
         results[target] = evaluate(predictions)
+        results[f"{target} (baseline)"] = evaluate(predictions, score="score_baseline")
         scored[target] = predictions
         log.info("%s: %s", target, {k: round(v, 3) for k, v in results[target].items()})
         newest = data[
@@ -616,7 +886,14 @@ def run_scouting(settings, strength_source: str = "transfer") -> Path:
         out_dir / "scouting.parquet", index=False
     )
     path = write_report(
-        data, strength, team_effect, results, scored, settings.paths.reports_dir, strength_source
+        data,
+        strength,
+        team_effect,
+        results,
+        scored,
+        settings.paths.reports_dir,
+        strength_source,
+        details,
     )
     log.info("Scouting report: %s", path)
     return path
@@ -668,30 +945,61 @@ def _lists(data: pd.DataFrame, size: int = 25) -> dict[str, pd.DataFrame]:
     }
 
 
+TEAM_NOTES = {
+    "transfer": "{:+.3f} rating per goal of goal difference per match",
+    "elo": "{:+.3f} rating per 100 Elo above the league average",
+    "transfer_elo": "{:+.3f} rating per 100 Elo above the league average",
+    "v2": "{:+.3f} composite units per 100 Elo above the league average",
+}
+VERSION_NOTES = {
+    "transfer": "version 1: match rating, transfer league effect, team goal difference",
+    "elo": "match rating, Elo league and Elo team terms",
+    "transfer_elo": "match rating, transfer league effect, Elo team term",
+    "v2": "version 2: per 90 composite, transfer league effect, Elo team term, two seasons",
+}
+
+
 def write_report(
-    data, strength, team_effect, results, scored, reports: Path, strength_source="transfer"
+    data,
+    strength,
+    team_effect,
+    results,
+    scored,
+    reports: Path,
+    strength_source=DEFAULT_STRENGTH,
+    details=None,
 ) -> Path:
     if strength_source == "elo":
-        team_note = (
-            f"Team strength: {team_effect:+.3f} rating per 100 Elo above the league average."
-        )
         strength = strength[strength["season"] == strength["season"].max()]
-    else:
-        team_note = (
-            f"Team strength: {team_effect:+.3f} rating per goal of goal difference per match."
-        )
+    team_note = "Team strength: " + TEAM_NOTES[strength_source].format(team_effect) + "."
     parts = [
         "# Scouting report",
         "",
-        "See SCOUTING.md for every decision behind these tables.",
-        f"League and team strength: {strength_source} based.",
+        "Decisions are in the module docstring of `src/scout/scouting.py` and in MODELS.md.",
+        f"Ability score: {VERSION_NOTES[strength_source]} (`--strength {strength_source}`).",
         "",
-        "## League strength (rating effect against the Premier League)",
+        "## League strength (effect against the Premier League)",
         "",
-        f"A positive effect means a player of the same level rates higher there. {team_note}",
+        f"A positive effect means a player of the same level scores higher there. {team_note}",
         "",
         strength.round(3).to_markdown(index=False),
         "",
+    ]
+    if details and "weights" in details:
+        prior = pd.Series(details["prior_minutes"], name="prior_minutes").round(0)
+        parts += [
+            "## Version 2 composite: measures and weights per position group",
+            "",
+            "From the step up trait comparison (percentiles above same age peers).",
+            "",
+            details["weights"].round(3).to_markdown(index=False),
+            "",
+            "Prior strength (minutes at which a score is half data, half position mean):",
+            "",
+            prior.to_frame().to_markdown(),
+            "",
+        ]
+    parts += [
         "## Backtest of the three targets (2 seasons ahead)",
         "",
         pd.DataFrame(results).T.round(3).to_markdown(),

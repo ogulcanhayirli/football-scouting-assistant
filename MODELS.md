@@ -202,6 +202,86 @@ will join a top club? Details and the shortlist are in `reports/moves.md`.
   move and the question is harder, and highest in the seller leagues (0.91
   to 0.97).
 
+## Ability score version 2 (decision 8, `scout ability`)
+
+The ability score feeds the scouting models (as columns) and the bargain and
+performance lists. Version 1 is the API match rating with the league effect
+(from players who changed leagues) and team goal difference taken out.
+Version 2, built on 19 October 2026 on all 37 leagues:
+
+* **Base:** a per 90 composite per position group instead of the match
+  rating. Its measures and weights come from the step up trait comparison:
+  the per 90 stats on which players who made the step up stood at least 5
+  percentiles above same age peers of their position, weighted by that gap
+  (centre backs: goals, passes, shots, duels won; wingers: dribbles,
+  assists, key passes, goals, shots; full table in `reports/ability.md`).
+  Each stat is standardised within position group and season. The API
+  leaves a zero count empty, so a missing count reads as 0 where the league
+  season records it.
+* **League term:** transfer based, refitted on the composite. **Team term:**
+  the club's Elo (mean pre match rating over its league matches, against
+  its league's average), refitted on the same player pairs.
+* **Two seasons:** this season and the previous one pooled by minutes, then
+  shrunk towards the position mean by empirical Bayes. The prior strength
+  is fitted per position group from how much a season's score scatters at
+  different minutes: 130 minutes for attacking midfielders up to 600 for
+  centre backs and 2,100 for goalkeepers (a goalkeeper's per 90 numbers say
+  little about him).
+
+**Stability** (season to season Pearson of the ability percentile, same
+players, regular in both seasons). The 17 league rows are the pairs of
+`reports/elo.md` and reproduce its numbers:
+
+| Version | 17 leagues (32,932 pairs) | 37 leagues (59,667) | 37 leagues, two seasons apart (45,975) |
+|---|---|---|---|
+| version 1 (rating, transfer league, goal difference) | 0.489 | 0.503 | 0.431 |
+| rating, transfer league, Elo team | 0.537 | 0.537 | 0.464 |
+| **version 2** | **0.859** | **0.858** | **0.656** |
+| version 2 from one season only (check) | 0.596 | 0.595 | 0.544 |
+
+Version 2 pools two seasons, so a score and the next season's share one
+season, which raises the year to year number by itself. The two checks
+without that overlap still put version 2 well ahead: one season only 0.595
+against 0.503, and two seasons apart (no shared season) 0.656 against
+0.431. All gaps have 95% bootstrap intervals well clear of zero.
+
+**Backtest** (all 37 leagues, 2 seasons ahead, each version's ability
+columns in the same LightGBM model). Baseline: the success rate of training
+season players with a similar value rank and age.
+
+| Target | Model | AUC | Average precision | Top 50 precision |
+|---|---|---|---|---|
+| elite (9,579 rows, 606 hits) | baseline | 0.874 | 0.295 | 0.367 |
+| | version 1 | 0.880 | 0.324 | 0.395 |
+| | rating, Elo team | 0.879 | 0.324 | 0.393 |
+| | **version 2** | **0.881** | **0.334** | **0.404** |
+| step up (82,029 rows, 1,490 hits) | baseline | 0.912 | 0.156 | 0.231 |
+| | version 1 | 0.925 | 0.182 | 0.289 |
+| | rating, Elo team | 0.925 | 0.181 | 0.284 |
+| | **version 2** | **0.927** | **0.186** | **0.295** |
+
+The ability score adds little to these models on top of the value, age and
+per 90 columns they already have: the baseline alone gets most of the AUC.
+
+**Performance target, not like for like.** Its label is built from each
+version's own ability percentile, so each version predicts a different
+target: version 1 AUC 0.803 (2,323 risers), Elo team mix 0.809 (2,284),
+version 2 0.809 (1,383). A steadier score has fewer 20 point rises, so
+version 2's target is rarer and its average precision lower (0.105 against
+0.172).
+
+**Look ahead check.** Version 2 picks its measures from step up outcomes of
+all seasons. Repeated with measures from seasons up to 2017 only (labels
+known before the 2020 test season), test seasons 2020 on: elite AUC 0.880
+and step up 0.941, against 0.879 and 0.942 with all seasons and 0.880 and
+0.939 for version 1. The choice of measures does not leak.
+
+**Decision (owner's rule):** version 2 replaces version 1 if it is more
+stable and its elite and step up AUC are within 0.005 of version 1 or
+better. It is (0.858 against 0.503; AUC +0.001 and +0.002), so
+`scout scouting` now uses `--strength v2` by default; `transfer` (version
+1), `elo` and `transfer_elo` stay selectable.
+
 ## Next
 
 1. The clean check above: tune on earlier seasons, score on later ones.

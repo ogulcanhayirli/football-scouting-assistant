@@ -103,13 +103,16 @@ def _per_player_season(features: pd.DataFrame, scores: dict[str, pd.DataFrame]) 
     return frame.sort_values("minutes").drop_duplicates(["source_player_id", "season"], keep="last")
 
 
-def stability(features: pd.DataFrame, scores: dict[str, pd.DataFrame]) -> tuple[pd.DataFrame, dict]:
+def stability(
+    features: pd.DataFrame, scores: dict[str, pd.DataFrame], lag: int = 1
+) -> tuple[pd.DataFrame, dict]:
     """Season to season correlation of the ability percentile per version, on
     the same pairs: one row per player and season (the league with most
-    minutes), regular in both seasons, scored by every version."""
+    minutes), regular in both seasons, scored by every version. ``lag`` 2
+    pairs a season with the one after next."""
     a = _per_player_season(features, scores)
     pairs = a.merge(
-        a.assign(season=a["season"] - 1),
+        a.assign(season=a["season"] - lag),
         on=["source_player_id", "season"],
         suffixes=("_now", "_next"),
     )

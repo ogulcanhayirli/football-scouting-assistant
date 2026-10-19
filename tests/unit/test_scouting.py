@@ -3,15 +3,23 @@ import pandas as pd
 import pytest
 
 from scout.scouting import (
+    COMPOSITE_CANDIDATES,
+    DEFAULT_STRENGTH,
+    STRENGTH_SOURCES,
     _rank_of,
     ability,
     ability_elo,
+    ability_v2,
+    composite_inputs,
     elo_league_strength,
     elo_terms,
     league_strength,
+    prior_minutes,
+    rank_rate,
     targets,
     team_shares,
     trait_table,
+    two_seasons,
 )
 
 
@@ -243,3 +251,112 @@ def test_trait_table_compares_with_peers_of_the_same_age():
     assert with_rating.iloc[0]["measure"] == "rating"
     assert without.iloc[0]["measure"] == "share_dribbles"
     assert without.iloc[0]["gap"] == 30
+
+
+def test_composite_inputs_read_a_missing_count_as_zero_only_where_recorded():
+    features = pd.DataFrame(
+        {
+            "league_key": ["epl", "epl", "mls", "epl"],
+            "season": [2020, 2020, 2020, 2020],
+            "tier": ["match", "match", "match", "season"],
+            "minutes": [900.0, 900.0, 900.0, 900.0],
+            **{c: np.nan for c in COMPOSITE_CANDIDATES},
+        }
+    )
+    features.loc[0, "goals_per90"] = 0.5
+    features.loc[0, "duel_win_rate"] = 0.6
+    out = composite_inputs(features)
+    assert out.loc[1, "goals_per90"] == 0  # the API leaves zero goals empty
+    assert np.isnan(out.loc[1, "duel_win_rate"])  # a rate without attempts is unknown
+    assert np.isnan(out.loc[2, "goals_per90"])  # not recorded in that league season
+    assert out.loc[3].isna().all()  # season totals tier has no per 90 measures
+
+
+def test_prior_minutes_recovers_noise_over_true_spread():
+    rng = np.random.default_rng(3)
+    n = 20_000
+    minutes = pd.Series(rng.uniform(270, 3000, n))
+    tau, sigma2 = 1.0, 600.0  # true spread 1, noise variance 600 / minutes
+    score = pd.Series(rng.normal(0, tau, n) + rng.normal(0, np.sqrt(sigma2 / minutes)))
+    k = prior_minutes(score, minutes, [pd.Series(2020, index=score.index)])
+    assert k == pytest.approx(sigma2 / tau**2, rel=0.15)
+
+
+def test_two_seasons_pools_the_previous_season_by_minutes():
+    features = pd.DataFrame(
+        {
+            "source_player_id": [1, 1, 1, 2],
+            "season": [2019, 2020, 2020, 2020],
+            "minutes": [1000.0, 500.0, 500.0, 900.0],
+        }
+    )
+    score = pd.Series([1.0, 4.0, 2.0, 3.0])
+    pooled, used = two_seasons(features, score)
+    assert pooled.tolist() == [1.0, 2.0, pytest.approx(4 / 3), 3.0]
+    assert used.tolist() == [1000.0, 1500.0, 1500.0, 900.0]
+
+
+def test_ability_v2_removes_the_league_effect_from_the_composite():
+    """Per 90 numbers look better in weaker leagues; movers are spread over
+    the leagues each season (in lockstep, standardising each season would
+    absorb part of the league effect)."""
+    rng = np.random.default_rng(4)
+    shift = {"epl": 0.0, "super_lig": 0.3, "eredivisie": 0.5}
+    leagues = list(shift)
+    level = rng.normal(0, 1, 2000)
+    rows = []
+    for season in range(2015, 2021):
+        for p in range(2000):
+            league = leagues[(p // 3 + (season if p % 3 == 0 else 0)) % 3]
+            minutes = rng.uniform(500, 3000)
+            rows.append(
+                {
+                    "league_key": league,
+                    "season": season,
+                    "source_player_id": p + 1,
+                    "tier": "match",
+                    "minutes": minutes,
+                    "age": 25.0,
+                    "regular": True,
+                    "sub_position": "Centre-Back",
+                    # sampling noise falls with minutes, so the prior is positive
+                    "goals_per90": level[p] + shift[league] + rng.normal(0, np.sqrt(600 / minutes)),
+                }
+            )
+    features = pd.DataFrame(rows)
+    for c in COMPOSITE_CANDIDATES:
+        if c != "goals_per90":
+            features[c] = np.nan
+    terms = pd.DataFrame({"elo_league": 0.0, "elo_team": 0.0}, index=features.index)
+    weights = pd.DataFrame(
+        {"position": ["centre_back"], "measure": ["goals_per90"], "weight": [1.0]}
+    )
+    out, strength, _, prior = ability_v2(features, terms, weights)
+    by = strength.set_index("league_key")["raw_effect"]
+    sd = features.groupby("season")["goals_per90"].std().mean()
+    assert by["eredivisie"] == pytest.approx(0.5 / sd, abs=0.05)  # in standardised units
+    assert by["super_lig"] == pytest.approx(0.3 / sd, abs=0.05)
+    assert out["ability_pct"].between(0, 100).all()
+    assert prior["centre_back"] > 0
+    movers = features["source_player_id"] % 3 == 1
+    spread = out[movers].groupby(features["source_player_id"])["ability_pct"].std()
+    assert spread.median() < 10  # a mover ranks alike wherever he plays
+
+
+def test_rank_rate_baseline_uses_value_rank_and_age():
+    train = pd.DataFrame(
+        {
+            "value_rank": [120.0] * 40 + [900.0] * 40,
+            "age": [22.0] * 80,
+            "y": [1.0] * 20 + [0.0] * 20 + [0.0] * 40,
+        }
+    )
+    test = pd.DataFrame({"value_rank": [130.0, 950.0], "age": [22.0, 22.0], "y": [0.0, 0.0]})
+    assert rank_rate(train, test, []).tolist() == [0.5, 0.0]
+
+
+def test_cli_strength_choices_match_the_module():
+    from scout.cli import SCOUTING_STRENGTHS
+
+    assert SCOUTING_STRENGTHS == STRENGTH_SOURCES
+    assert DEFAULT_STRENGTH in STRENGTH_SOURCES

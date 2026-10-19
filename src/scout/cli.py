@@ -13,6 +13,10 @@ from scout.ratelimit import QuotaGuard
 from scout.secrets import api_football_key
 from scout.storage import LocalRawStore
 
+# scout.scouting.STRENGTH_SOURCES, listed here so the parser does not import
+# LightGBM; a test keeps the two equal.
+SCOUTING_STRENGTHS = ["transfer", "elo", "transfer_elo", "v2"]
+
 
 def _setup_logging(settings: Settings) -> None:
     settings.paths.state_dir.mkdir(parents=True, exist_ok=True)
@@ -224,9 +228,9 @@ def cmd_moves(settings: Settings, args: argparse.Namespace) -> int:
 
 
 def cmd_scouting(settings: Settings, args: argparse.Namespace) -> int:
-    from scout.scouting import run_scouting
+    from scout.scouting import DEFAULT_STRENGTH, run_scouting
 
-    run_scouting(settings, args.strength)
+    run_scouting(settings, args.strength or DEFAULT_STRENGTH)
     return 0
 
 
@@ -234,6 +238,13 @@ def cmd_elo(settings: Settings, args: argparse.Namespace) -> int:
     from scout.elo_compare import run_elo_comparison
 
     print(run_elo_comparison(settings))
+    return 0
+
+
+def cmd_ability(settings: Settings, args: argparse.Namespace) -> int:
+    from scout.ability_compare import run_ability_comparison
+
+    print(run_ability_comparison(settings))
     return 0
 
 
@@ -455,9 +466,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     scouting.add_argument(
         "--strength",
-        choices=["transfer", "elo"],
-        default="transfer",
-        help="League and team strength: transfer based (default) or team Elo (run `elo` first)",
+        choices=SCOUTING_STRENGTHS,
+        default=None,
+        help="Ability score version: transfer (version 1), elo, transfer_elo, or v2 (per 90 "
+        "composite); the default is in scout.scouting.DEFAULT_STRENGTH. All but transfer "
+        "need the Elo tables (run `elo` first)",
     )
     scouting.set_defaults(func=cmd_scouting)
 
@@ -466,6 +479,12 @@ def main(argv: list[str] | None = None) -> int:
         help="Team Elo from the cached fixtures, league strength, comparison (reports/elo.md)",
     )
     elo.set_defaults(func=cmd_elo)
+
+    ability = sub.add_parser(
+        "ability",
+        help="Ability score versions: stability and scouting backtest (reports/ability.md)",
+    )
+    ability.set_defaults(func=cmd_ability)
 
     sync = sub.add_parser("sync", help="Copy data/raw, data/processed and reports to or from S3")
     sync.add_argument("direction", choices=["up", "down"])
