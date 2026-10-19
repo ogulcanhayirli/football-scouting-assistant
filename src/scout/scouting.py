@@ -34,6 +34,10 @@ Decisions, each argued in SCOUTING.md:
   percentile or better, and their average 20 points above now.
   The first two are the market's view (resale); the third is the football
   (Bardakcı at 29: Champions League and Euro 2024, value rank still #1,137).
+  ``fall_back`` (decision 1): an elite candidate (#101 to #1,000) whose
+  value rank at the end of the 2 seasons is at least twice as bad as now
+  (#300 to #600 or worse), the mirror of the step up; risk tables and
+  warning flags in ``scout.candidates``.
 * **Traits** compare the players who reached a target with players of the
   same position group and age band who did not, on percentiles within their
   own league and season, so league strength and age are not the finding.
@@ -50,6 +54,7 @@ import lightgbm as lgb
 import numpy as np
 import pandas as pd
 
+from scout import candidates
 from scout.features.build import value_asof
 from scout.fsutil import atomic_write_text
 from scout.models.backtest import check_no_leak, expanding_folds, fold_season
@@ -65,6 +70,7 @@ ELITE_RANK = 100
 STEP_UP_RANK = 500
 STEP_UP_FACTOR = 3.0
 ELITE_REACH = 1000  # elite candidates start here; further away it is too rare to learn
+FALL_BACK_FACTOR = 2.0  # an elite candidate whose value rank is twice as bad at the end
 PERF_RISE = 20.0  # the next two seasons average this many percentiles above now
 PERF_LEVEL = 70.0  # and both are at least this good: a rise that holds, not one lucky season
 SHRINK_MINUTES = 900  # an ability score from 900 minutes is half data, half position average
@@ -550,33 +556,66 @@ def _rank_of(values: pd.Series, seasons: pd.Series, table: dict[int, np.ndarray]
     return out
 
 
+def value_table(features: pd.DataFrame) -> dict[int, np.ndarray]:
+    """Each season's market values, one per player, highest first."""
+    per_season = features.sort_values("minutes").drop_duplicates(
+        ["season", "source_player_id"], keep="last"
+    )
+    return {
+        int(s): np.sort(g["market_value"].dropna().to_numpy())[::-1]
+        for s, g in per_season.groupby("season")
+    }
+
+
+def rank_after(
+    rows: pd.DataFrame, valuations: pd.DataFrame, table: dict, years: int
+) -> tuple[pd.Series, pd.Series]:
+    """Where each row's value ``years`` after its feature date ranks in that
+    season's value list; returns (rank, the date looked at)."""
+    when = rows.assign(_t=rows["feature_date"] + pd.DateOffset(years=years))
+    found = value_asof(when, valuations, "_t")["market_value_eur"]
+    return _rank_of(found, rows["season"].astype(int) + years, table), when["_t"]
+
+
+def fall_back_label(value_rank: pd.Series, end_rank: pd.Series, reachable: pd.Series) -> pd.Series:
+    """1 when an elite candidate's value rank at the end of the window is at
+    least ``FALL_BACK_FACTOR`` times worse; missing outside the candidates or
+    when the end lies past the data."""
+    within_reach = value_rank.between(ELITE_RANK + 1, ELITE_REACH)
+    known = reachable & end_rank.notna() & value_rank.notna()
+    fell = end_rank >= FALL_BACK_FACTOR * value_rank
+    return fell.astype(float).where(known & within_reach)
+
+
+def fall_back_after(
+    features: pd.DataFrame, valuations: pd.DataFrame, data_end: pd.Timestamp, years: int
+) -> pd.Series:
+    """The fall back label over another window (the three year check)."""
+    rows = features[["season", "feature_date", "tm_player_id"]].copy()
+    value_rank = value_ranks(features)
+    end_rank, when = rank_after(rows, valuations, value_table(features), years)
+    return fall_back_label(value_rank, end_rank, when <= data_end + LABEL_TOLERANCE)
+
+
 def targets(
     features: pd.DataFrame,
     extra: pd.DataFrame,
     valuations: pd.DataFrame,
     data_end: pd.Timestamp,
 ) -> pd.DataFrame:
-    """elite, step_up and performance labels per row, with the date each is
-    known (``label_date``: two seasons after the feature date)."""
+    """elite, step_up, fall_back and performance labels per row, with the
+    date each is known (``label_date``: two seasons after the feature date)."""
     out = features[[*KEYS, "feature_date", "tm_player_id", "regular"]].copy()
     out["value_rank"] = value_ranks(features)
     out["label_date"] = out["feature_date"] + pd.DateOffset(years=HORIZON_SEASONS)
 
-    per_season = features.sort_values("minutes").drop_duplicates(
-        ["season", "source_player_id"], keep="last"
-    )
-    table = {
-        int(s): np.sort(g["market_value"].dropna().to_numpy())[::-1]
-        for s, g in per_season.groupby("season")
-    }
+    table = value_table(features)
     best = pd.Series(np.inf, index=out.index)
     reachable = pd.Series(True, index=out.index)
     for k in range(1, HORIZON_SEASONS + 1):
-        when = out.assign(_t=out["feature_date"] + pd.DateOffset(years=k))
-        found = value_asof(when, valuations, "_t")["market_value_eur"]
-        rank = _rank_of(found, out["season"].astype(int) + k, table)
+        rank, when = rank_after(out, valuations, table, k)
         best = best.where(~(rank < best), rank)
-        reachable &= when["_t"] <= data_end + LABEL_TOLERANCE
+        reachable &= when <= data_end + LABEL_TOLERANCE
     best = best.replace(np.inf, np.nan)
     out["best_rank_2y"] = best
     known = reachable & out["value_rank"].notna() & best.notna()
@@ -586,39 +625,14 @@ def targets(
     out["elite"] = (best <= ELITE_RANK).astype(float).where(known & within_reach)
     step = (best <= STEP_UP_RANK) & (out["value_rank"] / best >= STEP_UP_FACTOR)
     out["step_up"] = step.astype(float).where(known & (out["value_rank"] > ELITE_RANK))
+    out["fall_back"] = fall_back_label(out["value_rank"], rank, reachable)
 
     # Performance: a rise that holds. Half of all one season rises were gone a
     # season later (the score's season to season correlation is 0.53), so both
     # of the next two seasons must be good and their average well above now.
-    pct = (
-        pd.DataFrame(
-            {
-                "pid": features["source_player_id"].astype(int),
-                "season": features["season"].astype(int),
-                "pct": extra["ability_pct"],
-            }
-        )
-        .groupby(["pid", "season"])["pct"]
-        .max()
-    )
-    present = set(pct.index)
-    pct = pct.dropna().to_dict()
-    pid = out["source_player_id"].astype(int).tolist()
-    season = out["season"].astype(int).tolist()
-    later = []
-    seen = pd.Series(False, index=out.index)
-    for k in range(1, HORIZON_SEASONS + 1):
-        # A season not rated as a regular counts as 0: it breaks the rise.
-        later.append(
-            pd.Series(
-                [pct.get((p, s + k), 0.0) for p, s in zip(pid, season, strict=True)],
-                index=out.index,
-            )
-        )
-        seen |= pd.Series(
-            [(p, s + k) in present for p, s in zip(pid, season, strict=True)], index=out.index
-        )
-    later = pd.concat(later, axis=1)
+    # A season not rated as a regular counts as 0: it breaks the rise.
+    later, seen = season_scores(features, extra["ability_pct"], range(1, HORIZON_SEASONS + 1))
+    later = later.fillna(0.0)
     now = extra["ability_pct"]
     rose = (later.min(axis=1) >= PERF_LEVEL) & (later.mean(axis=1) - now >= PERF_RISE)
     # Never seen again (left our leagues) and seasons too new to have two
@@ -627,6 +641,30 @@ def targets(
     out["performance"] = rose.astype(float).where(now.notna() & seen & complete)
     out["ability_pct"] = now
     return out
+
+
+def season_scores(
+    features: pd.DataFrame, values: pd.Series, offsets
+) -> tuple[pd.DataFrame, pd.Series]:
+    """Each row's player score ``k`` seasons away for every ``k`` in
+    ``offsets`` (his best league row that season; missing when he has no
+    score then), and whether he has any row in a later season."""
+    pid = features["source_player_id"].astype(int)
+    season = features["season"].astype(int)
+    best = pd.DataFrame({"pid": pid, "season": season, "v": values}).groupby(["pid", "season"])
+    best = best["v"].max()
+    present = set(best.index)
+    found = best.dropna().to_dict()
+    pairs = list(zip(pid.tolist(), season.tolist(), strict=True))
+    out = pd.DataFrame(
+        {k: [found.get((p, s + k), np.nan) for p, s in pairs] for k in offsets},
+        index=features.index,
+    )
+    seen = pd.Series(
+        [any((p, s + k) in present for k in offsets if k > 0) for p, s in pairs],
+        index=features.index,
+    )
+    return out, seen
 
 
 # Models and backtest
@@ -652,6 +690,7 @@ def classifier(rounds: int = 400):
 
 def model_columns(data: pd.DataFrame) -> list[str]:
     skip = NOT_FEATURES | set(KEYS) | {"y", "label_date", "best_rank_2y", *TARGET_NAMES, "regular"}
+    skip |= {"fall_back"}
     skip |= {c for c in data.columns if c.startswith("pct_")}
     return [c for c in data.columns if c not in skip and data[c].dtype != object]
 
@@ -807,7 +846,8 @@ def build(
     data = pd.concat([data, pct], axis=1)
     labels = targets(features, extra, valuations, data_end)
     data = data.merge(
-        labels[[*KEYS, "value_rank", "best_rank_2y", "label_date", *TARGET_NAMES]], on=KEYS
+        labels[[*KEYS, "value_rank", "best_rank_2y", "label_date", "fall_back", *TARGET_NAMES]],
+        on=KEYS,
     )
     data["group"] = position_group(data)
     data["age_band"] = pd.cut(data["age"], AGE_BANDS, right=False, labels=AGE_LABELS)
@@ -869,6 +909,13 @@ def run_scouting(settings, strength_source: str = DEFAULT_STRENGTH) -> Path:
         ].copy()
         data.loc[newest.index, f"score_{target}"] = classifier()(rows, newest, columns)
 
+    data = data.merge(
+        features[KEYS].assign(fall_back_3y=fall_back_after(features, valuations, data_end, 3)),
+        on=KEYS,
+        how="left",
+    )
+    profiled = candidate_profiles(data, scored["elite"])
+    data = data.join(profiled)
     out_dir = settings.paths.processed_dir / "models"
     out_dir.mkdir(parents=True, exist_ok=True)
     keep = [
@@ -881,6 +928,8 @@ def run_scouting(settings, strength_source: str = DEFAULT_STRENGTH) -> Path:
         "adj_rating",
         "ability_pct",
         *TARGET_NAMES,
+        "fall_back",
+        *profiled.columns,
     ]
     data[keep + [c for c in data.columns if c.startswith("score_")]].to_parquet(
         out_dir / "scouting.parquet", index=False
@@ -896,7 +945,24 @@ def run_scouting(settings, strength_source: str = DEFAULT_STRENGTH) -> Path:
         details,
     )
     log.info("Scouting report: %s", path)
+    path = candidates.write_report(
+        data, scored["elite"], data.loc[profiled.index], settings.paths.reports_dir
+    )
+    log.info("Candidates report: %s", path)
     return path
+
+
+def candidate_profiles(data: pd.DataFrame, elite_predictions: pd.DataFrame) -> pd.DataFrame:
+    """Elite chance, fall back risk and flags for the newest season's elite
+    candidates (decision 2)."""
+    tables = candidates.risk_tables(elite_predictions, candidates.fall_back_rows(data))
+    current = data[
+        (data["season"] == data["season"].max())
+        & data["regular"].astype(bool)
+        & data["value_rank"].between(ELITE_RANK + 1, ELITE_REACH)
+        & data["score_elite"].notna()
+    ]
+    return candidates.profiles(current, "score_elite", tables)
 
 
 def _lists(data: pd.DataFrame, size: int = 25) -> dict[str, pd.DataFrame]:

@@ -360,3 +360,21 @@ def test_cli_strength_choices_match_the_module():
 
     assert SCOUTING_STRENGTHS == STRENGTH_SOURCES
     assert DEFAULT_STRENGTH in STRENGTH_SOURCES
+
+
+def test_fall_back_label_reads_the_rank_at_the_end_of_the_window():
+    features, vals = _target_inputs()
+    # Player 300 is worth #700 two seasons on, player 400 only #500.
+    for pid, value in ((300, 10_000 - 700.5), (400, 10_000 - 500.5)):
+        vals.loc[
+            (vals["source_player_id"] == pid)
+            & (vals["valuation_date"] == pd.Timestamp("2021-06-30")),
+            "market_value_eur",
+        ] = value
+    extra = pd.DataFrame({"ability_pct": np.nan}, index=features.index)
+    out = targets(features, extra, vals, data_end=pd.Timestamp("2021-06-30"))
+    first = out[out["season"] == 2018].set_index("source_player_id")
+    assert first.loc[300, "fall_back"] == 1
+    assert first.loc[400, "fall_back"] == 0
+    assert np.isnan(first.loc[50, "fall_back"])  # not a candidate
+    assert out.loc[out["season"] == 2019, "fall_back"].isna().all()  # window not over

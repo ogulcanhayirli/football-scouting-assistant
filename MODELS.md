@@ -282,6 +282,64 @@ better. It is (0.858 against 0.503; AUC +0.001 and +0.002), so
 `scout scouting` now uses `--strength v2` by default; `transfer` (version
 1), `elo` and `transfer_elo` stay selectable.
 
+## Fall back risk and the candidate tables (decisions 1, 2)
+
+Built on 19 October 2026 on all 37 leagues with ability score version 2
+(`src/scout/candidates.py`, `reports/candidates.md`, written by
+`scout scouting`). No earlier code defined a fall back, so this is the
+definition: an elite candidate (regular, value rank #101 to #1,000) whose
+value rank at the end of the 2 seasons is **at least twice as bad** as now
+(#300 becomes #600 or worse), the mirror of the step up (3 times better).
+Same pool and label windows as the elite target. The flags need per match
+data, so the tables start in 2015: 7,842 candidates in 2015 to 2023, of
+whom 37.7% fell back. A missing raw number raises no flag (injury history
+is known for 68% of them).
+
+| Flag | Raised for | Fall back with | without | Ratio |
+|---|---|---|---|---|
+| under 47% of team minutes | 30.5% | 42.2% | 35.7% | 1.18 |
+| ability below the 55th percentile | 17.0% | 37.5% | 37.7% | 1.00 |
+| 5 or more matches missed injured | 21.9% | 48.3% | 34.7% | 1.39 |
+| value lower than a year before | 32.4% | 53.6% | 30.0% | 1.79 |
+
+With a base rate near 38% no flag can double the risk the way the earlier
+17 league notes said (a doubling would need about 33% without and 65%
+with). **The ability flag under version 2 carries no signal at any
+percentile:** ratios 1.16 below the 20th (2% of players), 1.06 below the
+40th, 1.00 below the 55th, 0.98 below the 70th. So there is no percentile
+to recalibrate to; the threshold stays at 55 for the owner to decide, and
+the report also shows the count table without it. Two reasons: the market
+already prices ability into the rank (a #300 player with a low score is
+valued for something else, often age), and version 2 is the steadier
+score, so a low one is less often a passing dip. With the looser
+definition "out of the top 1,000 two seasons later" the ability flag does
+raise the risk (x1.3 at every threshold from the 20th to the 70th), but
+that definition punishes a #950 for a small slide.
+
+Fall back rate by flag count, pooled (per season in the report; every
+season shows the same order):
+
+| Flags | 0 | 1 | 2 | 3 or more |
+|---|---|---|---|---|
+| four flags | 25% (2,909) | 40% (2,659) | 50% (1,566) | 55% (708) |
+| without ability | 30% (3,522) | 40% (2,481) | 50% (1,353) | 55% (486) |
+
+Elite rate by quintile of the elite model's out of sample score (within
+each season, test seasons 2013 to 2023): quintile 1 0%, 2 and 3 under 5%,
+4 5%, 5 25% (about 1,900 candidates each). Per season the top quintile
+ranges from 20% to 30%.
+
+**Check only, 3 years (not shipped):** 6,919 candidates, 53.2% fall back.
+Ratios: minutes 1.07, ability 1.01, injury 1.24, value falling 1.51. No
+flag doubles the risk; each one is weaker than at 2 years. Flag counts 0,
+1, 2, 3 or more: 45%, 55%, 65%, 70%.
+
+`candidate_profile` returns, for one candidate, the elite chance (quintile,
+rounded rate, players behind it), the fall back risk (flag count, rounded
+rate, players) and each flag with its raw number; buckets under 30 players
+return no rate. `scouting.parquet` carries the flattened profile for the
+newest season's candidates.
+
 ## Next
 
 1. The clean check above: tune on earlier seasons, score on later ones.

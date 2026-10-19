@@ -164,6 +164,7 @@ through the native API, and model only regular players (450+ minutes).
 | Big move | `moves` | joins a top 20 club by squad value within 24 months; returns to a former club excluded | `group_rate` | AUC, average precision, share of movers in each season's top 50 |
 | Elite | `scouting` | enters the 100 most valuable players within 2 seasons, from #101 to #1,000 now | `rank_rate` (value rank band, age band) | AUC, average precision, top 50 precision |
 | Step up | `scouting` | value rank at least 3 times better, ending in the top 500, within 2 seasons | `rank_rate` | as above |
+| Fall back | `scouting` | elite candidate whose value rank is at least twice as bad after 2 seasons | flag count rates | rate with and without each flag (`reports/candidates.md`) |
 | Performance | `scouting` | both next two seasons at the 70th ability percentile or better, average 20 above now | `rank_rate` | as above |
 
 `scouting` also estimates league strength from players who changed leagues
@@ -185,6 +186,9 @@ October 2026, from MODELS.md and `reports/`:
   0.927 (0.912), performance 0.809 (2 seasons ahead). The value rank and age
   baseline carries most of it. The models rank who makes it but do not
   predict collapses.
+* Fall back (decisions 1, 2): 37.7% of elite candidates; value falling
+  raises the risk 1.79 times, injuries 1.39, low minutes 1.18, low ability
+  1.00 (MODELS.md, `reports/candidates.md`).
 * Ability score stability (year to year): version 2 0.858 against 0.503 for
   version 1 and 0.537 for the rating with the Elo team term (37 leagues);
   0.656 against 0.431 two seasons apart, where pooling cannot help.
@@ -199,7 +203,7 @@ October 2026, from MODELS.md and `reports/`:
   term is the most stable (0.537). Details in `reports/elo.md`.
 
 Outputs: `reports/backtest_<target>.md`, `reports/moves.md`,
-`reports/scouting.md`, predictions under `data/processed/models/`.
+`reports/scouting.md`, `reports/candidates.md`, predictions under `data/processed/models/`.
 
 ## AWS
 
@@ -221,6 +225,7 @@ src/scout/  config, secrets, ratelimit, storage, sync, athena, featurestore,
   contracts/                pandera schemas for every table
   backfill/                 season, match, injury and transfer runners
   elo.py, elo_compare.py    team Elo from cached fixtures; comparison report
+  candidates.py             fall back flags, elite chance and risk tables, candidate_profile
   features/                 build.py (core), context.py (cups, team, injuries, transfers), pipeline.py
   models/                   targets, backtest, estimators, moves, run
 training/   SageMaker entry point and requirements
@@ -233,8 +238,8 @@ infra/      CDK app and its tests
 
 Owner decisions of 2026-10-16. Each one line; details in the code and docs once built.
 
-1. Fall back risk horizon: two years, the same pool and seasons as the elite target; three years is run once as a check only and not shipped.
-2. List format: each candidate shows elite chance from the model score quintile and fall back risk from the flag count, with the flags and their raw numbers; no bucket with fewer than 30 players, rounded to the nearest 5%, count shown.
+1. Fall back risk horizon: two years, the same pool and seasons as the elite target; three years is run once as a check only and not shipped. **Built 19 October:** fall back = value rank at the end of the 2 seasons at least twice as bad (no earlier definition existed); 37.7% of 7,842 candidates (2015 to 2023). At 3 years (check) 53.2%, every flag weaker.
+2. List format: each candidate shows elite chance from the model score quintile and fall back risk from the flag count, with the flags and their raw numbers; no bucket with fewer than 30 players, rounded to the nearest 5%, count shown. **Built 19 October** (`src/scout/candidates.py`, `candidate_profile`, `reports/candidates.md`): flag counts 0 to 3+ give 25%, 40%, 50%, 55%; elite quintiles 0%, <5%, <5%, 5%, 25%. No flag doubles the risk; the ability flag (55th percentile) has no effect under version 2 at any threshold, so it is unchanged and awaits the owner (MODELS.md).
 3. Performance risers: baseline is the best of the player's last two seasons, with a floor of half of team minutes in the current season; the list is kept only if the fixed version beats the base rate in the backtest.
 4. Bargains: score is actual value divided by the current value model's prediction, ranked within position; ability at or above the 70th percentile within position and at least half of team minutes; split into prime (29 and under) and experienced (30 and over); contract expiry shown.
 5. Simplify: two user facing tables, candidates and bargains; keep the value model, big move, elite and step up; retire the growth model; performance risers only if decision 3 passes.
