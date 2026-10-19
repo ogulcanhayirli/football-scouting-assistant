@@ -83,7 +83,8 @@ $C features                                  # feature and label tables
 $C backtest                                  # value models, all targets
 $C moves                                     # big move model
 $C elo                                       # team Elo from cached fixtures, reports/elo.md
-$C scouting [--strength transfer|elo]        # league strength, ability, 3 targets
+$C scouting [--strength v2|transfer|elo|transfer_elo]  # league strength, ability, 3 targets
+$C ability                                  # ability versions: stability, backtest (reports/ability.md)
 $C sync up | down [--dry-run] [--only raw|processed|reports]
 uv run python scripts/run_extras.py          # sidelined, coaches, events (done 17 October)
 uv run python scripts/rebuild_match_seasons.py --from-s3 serie_b:2016  # re-parse partitions offline after an adapter repair
@@ -161,13 +162,17 @@ through the native API, and model only regular players (450+ minutes).
 | Fair value | `backtest` | log market value at the feature date; value columns excluded | `group_median` (league, position, age band) | MAE and RMSE in log units, median percentage error, Spearman |
 | Growth 24m, 36m | `backtest` | log of value 24 or 36 months later over value now | `no_change`, `group_median` | as above |
 | Big move | `moves` | joins a top 20 club by squad value within 24 months; returns to a former club excluded | `group_rate` | AUC, average precision, share of movers in each season's top 50 |
-| Elite | `scouting` | enters the 100 most valuable players within 2 seasons, from #101 to #1,000 now | none yet | AUC, average precision, top 50 precision |
-| Step up | `scouting` | value rank at least 3 times better, ending in the top 500, within 2 seasons | none yet | as above |
-| Performance | `scouting` | both next two seasons at the 70th ability percentile or better, average 20 above now | none yet | as above |
+| Elite | `scouting` | enters the 100 most valuable players within 2 seasons, from #101 to #1,000 now | `rank_rate` (value rank band, age band) | AUC, average precision, top 50 precision |
+| Step up | `scouting` | value rank at least 3 times better, ending in the top 500, within 2 seasons | `rank_rate` | as above |
+| Performance | `scouting` | both next two seasons at the 70th ability percentile or better, average 20 above now | `rank_rate` | as above |
 
 `scouting` also estimates league strength from players who changed leagues
-and builds the ability score (rating adjusted for league and team strength,
-shrunk by minutes, percentile within the position group). Results as of
+and builds the ability score. Since 19 October the default is version 2
+(`--strength v2`, decision 8): a per 90 composite per position group (stats
+and weights from the step up traits), less the transfer league effect and
+the Elo team term, last two seasons pooled by minutes, shrunk by empirical
+Bayes, percentile within position group and season. Version 1 (match rating,
+`--strength transfer`), `elo` and `transfer_elo` stay selectable. Results as of
 October 2026, from MODELS.md and `reports/`:
 
 * Fair value is good: MAE 0.395 over all 37 leagues against 0.780 for the
@@ -176,8 +181,14 @@ October 2026, from MODELS.md and `reports/`:
   age carries most of it.
 * Big move: AUC 0.928 against 0.803 over 37 leagues (0.907 against 0.780 on
   the original 17, 0.905 before); 38.5% of each season's top 50 moved.
-* Elite AUC 0.88, step up 0.91, performance 0.81 (backtest, 2 seasons ahead).
-  The models rank who makes it but do not predict collapses.
+* Scouting, 37 leagues, version 2: elite AUC 0.881 (baseline 0.874), step up
+  0.927 (0.912), performance 0.809 (2 seasons ahead). The value rank and age
+  baseline carries most of it. The models rank who makes it but do not
+  predict collapses.
+* Ability score stability (year to year): version 2 0.858 against 0.503 for
+  version 1 and 0.537 for the rating with the Elo team term (37 leagues);
+  0.656 against 0.431 two seasons apart, where pooling cannot help.
+  `reports/ability.md` and MODELS.md.
 * Automatic model tuning in SageMaker was run once, for growth 24m only.
 * Team Elo (`src/scout/elo.py`): 163,835 club matches from 2010, home advantage
   70, K 12, league link 1.0, fitted on matches before July 2015 only; Brier
@@ -229,7 +240,7 @@ Owner decisions of 2026-10-16. Each one line; details in the code and docs once 
 5. Simplify: two user facing tables, candidates and bargains; keep the value model, big move, elite and step up; retire the growth model; performance risers only if decision 3 passes.
 6. Data before 7 November: yes; feeder leagues first (Austria, Switzerland, Croatia, Serbia, Czech Republic, Norway, Sweden, Poland, Mexico, MLS, Colombia, Uruguay, Japan, South Korea, Saudi Arabia, then the second tiers of the big five), then the sidelined endpoint per player, match events, youth competitions, coaches, and a final pull of the current season on 6 November.
 7. New free sources: FBref advanced stats for the big five and the European cups from 2017/18; Elo computed from our own fixtures; ClubElo not used because its API went offline in September 2026. API Football stays for breadth.
-8. Ability score version 2 is built from per 90 stats with minutes shrinkage, without the match rating, and replaces version 1 only if it is more stable year to year and predicts the targets at least as well.
+8. Ability score version 2 is built from per 90 stats with minutes shrinkage, without the match rating, and replaces version 1 only if it is more stable year to year and predicts the targets at least as well. Rule set on 19 October: more stable, and elite and step up AUC within 0.005 of version 1 or better; else the most stable version that passes. **Outcome (19 October): adopted.** Stability 0.858 against 0.503, elite AUC 0.881 against 0.880, step up 0.927 against 0.925; `--strength v2` is the default (MODELS.md, `reports/ability.md`).
 9. Serving stack: no Lambda, API Gateway, DynamoDB or Bedrock agent; a weekly GitHub Actions run publishes Parquet, CSV and one static HTML page to S3 static hosting.
 
 ## Open questions
@@ -237,11 +248,10 @@ Owner decisions of 2026-10-16. Each one line; details in the code and docs once 
 These are unresolved or inconsistent in the repository as of 2026-10-16.
 Settle them with the owner rather than guessing.
 
-* `src/scout/scouting.py` says its decisions are argued in `SCOUTING.md`,
-  which does not exist. MODELS.md does not cover the scouting targets yet, and
-  the README status table does not list them.
-* The three scouting targets have no baseline next to the model, against
-  rule 3.
+* `SCOUTING.md` does not exist; the scouting decisions are in the docstring of
+  `src/scout/scouting.py`, and MODELS.md covers only the ability score
+  comparison, not the targets themselves. The README status table does not
+  list the scouting targets.
 * `processed/` and `reports/` in S3 were synced up on 2026-10-19 (the 37
   league build: features, labels, model outputs, 23 repaired
   `player_match_stats` partitions, `reports/injury_sources.md`) and matched
@@ -274,17 +284,17 @@ Settle them with the owner rather than guessing.
   Profesional 2023 has no season totals (the API returns the Copa de la Liga).
 * Market value targets reflect the market's opinion; coach and system effects
   are not predictable from this data.
-* League and team strength for the ability score: `scouting` still defaults
-  to `--strength transfer`. `reports/elo.md` has the comparison; the owner
-  decides between transfer, Elo, and transfer league plus Elo team (the most
-  stable, not built as a flag yet). Decision 8 also asks that a replacement
-  predicts the targets at least as well, which is not yet checked.
+* Ability score version 2 picks its measures from the step up traits, which
+  favour stats a rising player shows (centre backs: goals, passes, shots),
+  not defending as such. The goalkeeper composite is weak (passes, fouls
+  drawn, duels; prior 2,100 minutes): a full goalkeeper season counts about
+  60% against the position mean. A goalkeeper specific base (goals conceded against the
+  team's expected) would need xG, which the API has only from 2023/24.
 * The `pyproject.toml` description still names only the Premier League and the
   Süper Lig.
-* The scouting targets and the ability score were not rerun on the 37 league
-  features; `reports/scouting*.md` still describe the 17 leagues. League
-  strength (transfer based and Elo) needs no code change: both are fitted
-  from the feature rows and the Elo tables, which already hold the
-  expansion leagues.
+* `scouting` was rerun on the 37 league features on 19 October with version 2
+  (`reports/scouting.md`, `data/processed/models/scouting.parquet`);
+  `reports/scouting_elo.md` is still the 17 league Elo run. These and
+  `reports/ability.md` are not synced up to S3 yet.
 * The work branch is `claude/gifted-brown-nwtnj0`; it is not merged into
   `main`, and CI runs on pull requests and pushes to `main`.

@@ -4,30 +4,29 @@ score, three career targets, the traits behind them, and four shortlists.
 Decisions, each argued in SCOUTING.md:
 
 * **League strength** comes from players who changed leagues: the change in
-  their match rating when they move, with the change in team strength and
-  age held fixed, measured against the Premier League. Leagues with few
-  moves are pulled towards the average of the smaller leagues. This is the
-  default (``strength="transfer"``). The alternative (``strength="elo"``)
+  their score when they move, with the change in team strength and age held
+  fixed, measured against the Premier League. Leagues with few moves are
+  pulled towards the average of the smaller leagues. ``strength="elo"``
   takes league and team strength from our own team Elo (``scout.elo``): the
   league's mean club rating that season against the Premier League's, and
-  the club's rating against its league's; the same player pairs turn both
-  into rating units. It stays behind the flag until the comparison in
-  ``reports/elo.md`` decides.
+  the club's rating against its league's (``reports/elo.md``).
   ``strength="transfer_elo"`` keeps the transfer based league effect and
-  takes the team term from the Elo tables (the most stable mix in
-  ``reports/elo.md``).
-* **Ability score:** the match rating with league strength and team strength
-  taken out, shrunk towards the position average for players with few
-  minutes, as a percentile within the position group and season.
-* **Ability score version 2** (``strength="v2"``, decision 8): the match
-  rating is replaced by a per 90 composite for each position group. Its
-  measures and weights are the per 90 stats on which players who made the
-  step up stood above same age peers (the trait comparison), each
-  standardised within position group and season. League term from transfers
-  and team term from Elo, both refitted in composite units; then the last two
-  seasons pooled by minutes and shrunk towards the position mean by
-  empirical Bayes, with the prior strength fitted from the data.
-  The outcome of the comparison is in MODELS.md.
+  takes the team term from the Elo tables.
+* **Ability score, version 1** (``strength="transfer"``): the match rating
+  with the league effect and team goal difference taken out, shrunk towards
+  the position average for players with few minutes, as a percentile within
+  the position group and season.
+* **Ability score, version 2** (``strength="v2"``, the default since 19
+  October 2026, decision 8): the match rating is replaced by a per 90
+  composite for each position group. Its measures and weights are the per
+  90 stats on which players who made the step up stood above same age peers
+  (the trait comparison), each standardised within position group and
+  season. League term from transfers and team term from Elo, both refitted
+  in composite units; then the last two seasons pooled by minutes and
+  shrunk towards the position mean by empirical Bayes, with the prior
+  strength fitted from the data. It is more stable from season to season
+  and predicts elite and step up at least as well (``scout ability``,
+  ``reports/ability.md``, MODELS.md).
 * **Targets,** each within 2 seasons:
   ``elite``: enters the 100 most valuable players, from #101 to #1,000 now;
   ``step_up``: value rank at least 3 times better, ending in the top 500;
@@ -129,7 +128,7 @@ COMPOSITE_MIN_GAP = 5.0  # percentile points above same age peers to enter the c
 SHRINK_FIT_MINUTES = 270  # rows used to fit the prior strength: three full matches or more
 MIN_PRIOR_ROWS = 100
 STRENGTH_SOURCES = ["transfer", "elo", "transfer_elo", "v2"]
-DEFAULT_STRENGTH = "transfer"
+DEFAULT_STRENGTH = "v2"  # decision 8: more stable, elite and step up AUC as good (MODELS.md)
 
 
 # League strength and ability
