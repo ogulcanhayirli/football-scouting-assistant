@@ -242,12 +242,13 @@ Settle them with the owner rather than guessing.
   the README status table does not list them.
 * The three scouting targets have no baseline next to the model, against
   rule 3.
-* `processed/` and `reports/` in S3 were synced on 2026-10-18. The build of
-  18 October (37 leagues) rewrote the features, labels, model outputs,
-  `reports/backtest_fair_value.md`, `reports/moves.md`,
-  `reports/features_report.md`, the new `reports/injury_sources.md`, and 23
-  `player_match_stats` partitions repaired by the adapter; none of that is
-  in S3 until the owner runs `sync up`.
+* `processed/` and `reports/` in S3 were synced up on 2026-10-19 (the 37
+  league build: features, labels, model outputs, 23 repaired
+  `player_match_stats` partitions, `reports/injury_sources.md`) and matched
+  the local files then; any rebuild since needs another `sync up`.
+  `scout backtest --target X` rewrites `reports/backtest_summary.json` with
+  that target alone; the growth entries were merged back by hand and still
+  describe the 17 league run, like `reports/backtest_growth_*.md`.
 * The Transfermarkt dataset (dcaribou) has been paused since its 5 September
   2026 release, with valuations ending 12 June 2026. Live lists would freeze
   at June 2026 values, so a replacement value source is needed before the
