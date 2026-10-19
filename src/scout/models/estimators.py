@@ -1,8 +1,6 @@
 """The models the backtest compares. Each takes training rows, test rows and
 the feature columns, and returns predictions for the test rows.
 
-* ``no_change`` (growth only): the value stays where it is. The bar any growth
-  model has to clear first.
 * ``group_median``: the median target of similar players in the training
   seasons: same league, position and age band, falling back to coarser groups
   when a group is too small. The simple baseline the README promises.
@@ -30,10 +28,6 @@ DEFAULT_PARAMS = {
     "lambda_l2": 1.0,
 }
 NUM_BOOST_ROUND = 600
-
-
-def no_change(train: pd.DataFrame, test: pd.DataFrame, columns: list[str]) -> np.ndarray:
-    return np.zeros(len(test))
 
 
 def _age_band(age: pd.Series) -> pd.Series:
@@ -82,8 +76,6 @@ def models_for(target_name: str, tuned: dict | None = None) -> dict:
     """The models to compare. ``tuned`` holds settings found by automatic model
     tuning (LightGBM parameters plus ``num_boost_round``), added as ``lightgbm_tuned``."""
     models = {"group_median": group_median, "lightgbm": make_lightgbm()}
-    if target_name.startswith("growth"):
-        models = {"no_change": no_change, **models}
     if tuned:
         params = dict(tuned)
         rounds = int(params.pop("num_boost_round", NUM_BOOST_ROUND))

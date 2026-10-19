@@ -223,22 +223,6 @@ def test_elite_and_step_up_labels():
     assert older["fall_back"].isna().all()  # but the pool is 23 and under
 
 
-def test_performance_needs_a_rise_that_holds():
-    features, vals = _target_inputs()
-    ids = features["source_player_id"]
-    season = features["season"]
-    pct = pd.Series(50.0, index=features.index)
-    # Player 1 rises and stays; player 2 has one good season; player 3 is good already.
-    pct[(ids == 1) & (season > 2018)] = 85.0
-    pct[(ids == 2) & (season == 2019)] = 95.0
-    pct[ids == 3] = 90.0
-    out = targets(features, pd.DataFrame({"ability_pct": pct}), vals, pd.Timestamp("2021-06-30"))
-    first = out[out["season"] == 2018].set_index("source_player_id")
-    assert first.loc[1, "performance"] == 1
-    assert first.loc[2, "performance"] == 0
-    assert first.loc[3, "performance"] == 0
-
-
 def test_trait_table_compares_with_peers_of_the_same_age():
     rng = np.random.default_rng(2)
     n = 400

@@ -1,7 +1,7 @@
 [project]
 name = "scout"
 version = "0.1.0"
-description = "Football scouting assistant: fair value, value growth and similarity search for the Premier League and the Süper Lig"
+description = "Football scouting assistant: elite candidates and bargains across 37 leagues"
 readme = "README.md"
 authors = [{ name = "Ogulcan Hayirli" }]
 requires-python = ">=3.12,<3.13"

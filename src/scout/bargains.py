@@ -1,6 +1,6 @@
 """Bargains (decision 4): players already good whose market value sits well
 below what the fair value model expects, and a backtest of whether such
-lists paid off.
+lists paid off. The table and its report are written by ``scout.lists``.
 
 * **Score** is the actual market value divided by the fair value model's
   prediction (``ratio``; 0.5 means half of what the model expects). The
@@ -32,13 +32,11 @@ lists paid off.
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
 from scout import flags
-from scout.fsutil import atomic_write_text
 from scout.scouting import AGE_BANDS, AGE_LABELS, KEYS
 
 log = logging.getLogger(__name__)
@@ -200,46 +198,6 @@ def current_lists(
     return out
 
 
-SHOW = [
-    "list_rank",
-    "player_name",
-    "league_key",
-    "team_name",
-    "group",
-    "age",
-    "ability_pct",
-    "value_m",
-    "predicted_m",
-    "ratio",
-    "ratio_pct",
-    "minutes_share",
-    "contract_expiry",
-    "flag_count",
-    "flags",
-    "on_loan",
-    "stale_value",
-]
-
-
-def readable(frame: pd.DataFrame) -> pd.DataFrame:
-    out = frame.assign(
-        value_m=frame["value"] / 1e6,
-        predicted_m=frame["predicted"] / 1e6,
-        contract_expiry=frame["contract_expiry"].dt.strftime("%Y-%m-%d").fillna(""),
-    )[SHOW]
-    return out.round(
-        {
-            "age": 1,
-            "ability_pct": 0,
-            "value_m": 2,
-            "predicted_m": 2,
-            "ratio": 2,
-            "ratio_pct": 1,
-            "minutes_share": 2,
-        }
-    )
-
-
 # Running it
 
 
@@ -277,127 +235,3 @@ def load(settings) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.Timesta
     data = data.merge(scouting[[*KEYS, "group", "ability_pct"]], on=KEYS, how="left")
     data = data.merge(outcomes(features, labels, teams), on=KEYS, how="left")
     return data, profiles, teams, snapshot
-
-
-def run_bargains(settings) -> Path:
-    data, profiles, _, snapshot = load(settings)
-    rows = eligible(data)
-    log.info("bargains: %d eligible rows in %d seasons", len(rows), rows["season"].nunique())
-    lists = current_lists(rows, profiles, snapshot)
-    results = backtest(rows)
-
-    out_dir = settings.paths.processed_dir / "models"
-    out_dir.mkdir(parents=True, exist_ok=True)
-    keep = [
-        *KEYS,
-        "list_rank",
-        "player_name",
-        "team_id",
-        "team_name",
-        "group",
-        "age",
-        "ability_pct",
-        "value",
-        "predicted",
-        "ratio",
-        "ratio_pct",
-        "minutes_share",
-        "contract_expiry",
-        "flag_count",
-        "flags",
-        "on_loan",
-        "stale_value",
-        "stale_days",
-        *[c for c in rows.columns if c.startswith("flag_") and c != "flag_count"],
-    ]
-    for name, frame in lists.items():
-        frame[keep].to_parquet(out_dir / f"bargains_{name}.parquet", index=False)
-    results.to_parquet(out_dir / "bargains_backtest.parquet", index=False)
-    path = write_report(rows, lists, results, snapshot, settings.paths.reports_dir)
-    log.info("Bargains report: %s", path)
-    return path
-
-
-def write_report(
-    rows: pd.DataFrame,
-    lists: dict[str, pd.DataFrame],
-    results: pd.DataFrame,
-    snapshot: pd.Timestamp | None,
-    reports: Path,
-    size: int = 50,
-) -> Path:
-    season = int(rows["season"].max())
-    snap = snapshot.date().isoformat() if snapshot is not None else "unknown"
-    parts = [
-        "# Bargains",
-        "",
-        "Decisions are in the module docstring of `src/scout/bargains.py` (decision 4).",
-        "",
-        "**How to read it.** `ratio` is the market value divided by what the fair value "
-        "model expects for this player (0.40: the market asks 40% of the model's price). "
-        "`ratio_pct` ranks that ratio among eligible players of the same position group "
-        "(1 is the cheapest), and the lists are sorted by it. Only players at the 70th "
-        f"ability percentile of their position or better, with at least {MIN_MINUTES_SHARE:.0%} "
-        "of their team's minutes, are eligible. The prediction for each season comes from "
-        "a model trained only on earlier seasons. Contract expiry is the Transfermarkt "
-        f"snapshot of {snap}, shown only when it ends after that date. Warning flags are "
-        "reasons the market may be right; a cheap player with several deserves a closer look "
-        "before anything else.",
-        "",
-    ]
-    for name, title in LISTS.items():
-        frame = lists[name]
-        parts += [
-            f"## {title}, season {season}: {len(frame)} eligible, top {min(size, len(frame))}",
-            "",
-            readable(frame.head(size)).to_markdown(index=False),
-            "",
-        ]
-    parts += backtest_section(results)
-    path = reports / "bargains.md"
-    reports.mkdir(parents=True, exist_ok=True)
-    atomic_write_text(path, "\n".join(parts))
-    return path
-
-
-def backtest_section(results: pd.DataFrame) -> list[str]:
-    parts = [
-        "## Backtest: did past bargains pay off?",
-        "",
-        f"Each season's top {TOP_K} of each list against the matched baseline: players of the "
-        "same season, ability band (70 to 79, 80 to 89, 90 to 100) and age band who passed "
-        "the same filters but were not in the top 50. `rate` is the share of the top 50 "
-        "with the outcome, `matched_rate` what players like them achieved, `z` the "
-        "difference in standard errors (above 2 is unlikely to be luck). Value up: the "
-        "market value 24 months later is higher (known for seasons up to 2022 and the "
-        "2023 calendar year leagues). Club with higher Elo: within two seasons he plays "
-        "league minutes for another club whose season Elo is above his club's now (known "
-        "up to season 2023; a move to a league outside the data counts as no).",
-        "",
-        "Part of the value rise is the market correcting a price that was low against the "
-        "model, which is the point of a bargain list; but a value that was low by chance "
-        "(a late update) rises the same way, so the rise overstates what a buyer would "
-        "have earned. The move to a stronger club is the cleaner test of whether the "
-        "football was underrated.",
-        "",
-    ]
-    if results.empty:
-        return [*parts, "No season could be evaluated.", ""]
-    pooled = results[results["season"] == "pooled"].drop(columns="season")
-    parts += [
-        "### Pooled over all seasons",
-        "",
-        pooled.assign(outcome=pooled["outcome"].map(OUTCOMES)).round(3).to_markdown(index=False),
-        "",
-    ]
-    seasons = results[results["season"] != "pooled"]
-    for name, title in LISTS.items():
-        for outcome, label in OUTCOMES.items():
-            table = seasons[(seasons["list"] == name) & (seasons["outcome"] == outcome)]
-            parts += [
-                f"### {title}: {label}, per season",
-                "",
-                table.drop(columns=["list", "outcome"]).round(3).to_markdown(index=False),
-                "",
-            ]
-    return parts

@@ -4,16 +4,12 @@ import pytest
 
 from scout.candidates import (
     MIN_BUCKET,
-    RiskTables,
     ability_decision,
-    candidate_profile,
     chance_table,
     count_bucket,
     flag_effects,
     merge_low,
-    profiles,
     rate_table,
-    risk_tables,
     rounded,
     score_deciles,
     show_rate,
@@ -128,72 +124,3 @@ def test_chance_table_merges_small_deciles_and_looks_up_rates():
     found = chance.lookup(pd.Series([1, 10]))
     assert found["players"].tolist() == [40, 40]
     assert found["pct"].tolist() == [0, 50]
-
-
-def _history(n=600, seed=3):
-    rng = np.random.default_rng(seed)
-    season = np.repeat([2018, 2019], n // 2)
-    score = rng.random(n)
-    top = score_deciles(pd.Series(score), pd.Series(season)) == 10
-    elite = pd.DataFrame({"season": season, "score": score, "y": top.astype(float)})
-    rows = pd.DataFrame(
-        {
-            "season": season,
-            "minutes_share": rng.uniform(0.2, 1.0, n),
-            "ability_pct": rng.uniform(0, 100, n),
-            "injury_matches_missed_12m": rng.integers(0, 10, n).astype(float),
-            "value_change_1y": rng.uniform(0.5, 1.5, n),
-        }
-    )
-    count = warning_flags(rows).sum(axis=1)
-    rows["fall_back"] = (count >= 2).astype(float)
-    return elite, rows
-
-
-def test_candidate_profile_gives_chance_risk_and_raw_flags():
-    elite, rows = _history()
-    tables = risk_tables(elite, rows)
-    candidate = {
-        "minutes_share": 0.40,
-        "ability_pct": 80.0,
-        "injury_matches_missed_12m": np.nan,
-        "value_change_1y": 0.8,
-    }
-    p = candidate_profile(candidate, 10, tables)
-    assert p["elite_chance"]["decile"] == 10
-    assert p["elite_chance"]["pct"] == 100  # the label is the top decile
-    assert p["elite_chance"]["players"] == 60
-    assert p["fall_back_risk"]["flags"] == 2
-    assert p["fall_back_risk"]["pct"] == 100
-    assert p["elite_chance"]["players"] >= MIN_BUCKET
-    by_name = {f["flag"]: f for f in p["flags"]}
-    assert set(by_name) == set(FLAGS)
-    assert by_name["low_minutes"]["raised"]
-    assert by_name["low_minutes"]["text"] == "40% of team minutes"
-    assert by_name["injured"]["value"] is None
-    assert by_name["injured"]["text"] == "unknown"
-    assert by_name["value_falling"]["text"] == "value -20% on a year before"
-    low = candidate_profile({**candidate, "value_change_1y": 1.2, "minutes_share": 0.9}, 1, tables)
-    assert low["elite_chance"]["pct"] == 0
-    assert low["fall_back_risk"]["flags"] == 0
-    assert low["fall_back_risk"]["pct"] == 0
-
-
-def test_candidate_profile_hides_a_small_bucket():
-    elite, rows = _history()
-    tables = risk_tables(elite, rows)
-    small = RiskTables(tables.elite, tables.fall_back.assign(players=10, rate=np.nan, pct=np.nan))
-    p = candidate_profile({"minutes_share": 0.9}, 3, small)
-    assert p["fall_back_risk"]["pct"] is None
-    assert p["fall_back_risk"]["text"].startswith("fewer than")
-
-
-def test_profiles_flatten_every_candidate():
-    elite, rows = _history()
-    tables = risk_tables(elite, rows)
-    current = rows.head(20).assign(season=2025, score_elite=np.linspace(0, 1, 20))
-    out = profiles(current, "score_elite", tables)
-    assert out.index.equals(current.index)
-    assert out["elite_decile"].tolist() == [d for d in range(1, 11) for _ in range(2)]
-    assert out["elite_chance_pct"].iloc[-1] == 100
-    assert (out["fall_back_n"] >= MIN_BUCKET).all()

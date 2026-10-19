@@ -1,0 +1,150 @@
+import numpy as np
+import pandas as pd
+
+from scout.lists import (
+    DICTIONARY,
+    bargains_table,
+    candidates_table,
+    chance_tables,
+    dictionary,
+    rising_ids,
+)
+
+KEYS = ["league_key", "season", "source_player_id"]
+
+
+def _scouting(rng, seasons=range(2015, 2026), n=2400):
+    """n players per season, value rank = player id, ages 18 to 33."""
+    rows = []
+    for season in seasons:
+        ids = np.arange(1, n + 1)
+        rows.append(
+            pd.DataFrame(
+                {
+                    "league_key": "epl",
+                    "season": season,
+                    "source_player_id": ids,
+                    "player_name": [f"p{i}" for i in ids],
+                    "team_name": "club",
+                    "sub_position": "Centre-Forward",
+                    "position": "Attack",
+                    "regular": True,
+                    "minutes": 2000.0,
+                    "age": 18.0 + ids % 16,
+                    "value_rank": ids.astype(float),
+                    "market_value": 1e8 / ids,
+                    "minutes_share": rng.uniform(0.2, 1.0, n),
+                    "injury_matches_missed_12m": rng.integers(0, 10, n).astype(float),
+                    "value_change_1y": rng.uniform(0.5, 1.5, n),
+                    "ability_pct": rng.uniform(0, 100, n),
+                    "ability_pct_1s": rng.uniform(0, 100, n),
+                    "fall_back": rng.integers(0, 2, n).astype(float),
+                    "score_elite": rng.random(n),
+                    "score_step_up": rng.random(n),
+                    "score_riser": rng.random(n),
+                }
+            )
+        )
+    out = pd.concat(rows, ignore_index=True)
+    pool = out["value_rank"].between(101, 1000) & (out["age"] < 24)
+    out["fall_back"] = out["fall_back"].where(pool & (out["season"] < 2024))
+    return out
+
+
+def _backtest(scouting, score="score"):
+    past = scouting[scouting["season"] < 2024]
+    return pd.DataFrame(
+        {
+            **{k: past[k] for k in KEYS},
+            "age": past["age"],
+            "value_rank": past["value_rank"],
+            "y": (past["score_elite"] > 0.8).astype(float),
+            score: past["score_elite"],
+            "score_baseline": past["score_step_up"],
+        }
+    )
+
+
+def _inputs(seed=5):
+    rng = np.random.default_rng(seed)
+    s = _scouting(rng)
+    newest = s[s["season"] == 2025]
+    return {
+        "scouting": s,
+        "elite": _backtest(s),
+        "step_up": _backtest(s),
+        "riser": _backtest(s),
+        "big_move": _backtest(s, "score_lightgbm"),
+        "big_move_now": newest[KEYS].assign(score=rng.random(len(newest))),
+        "fair_value": newest[KEYS].assign(pred_lightgbm=np.log(2e6)),
+    }
+
+
+def test_candidates_cover_ranks_101_to_2000_with_chances_only_where_measured():
+    inputs = _inputs()
+    out = candidates_table(inputs, chance_tables(inputs), {"epl": "Premier League"})
+    assert list(out.columns) == list(DICTIONARY["candidates"])
+    assert out["player_id"].is_unique
+    assert out["value_rank"].between(101, 2000).all()
+    assert len(out) == 1900
+    pool = (out["value_rank"] <= 1000) & (out["age"] < 24)
+    assert out.loc[pool, "elite_chance_pct"].notna().all()
+    assert out.loc[~pool, "elite_chance_pct"].isna().all()  # blank outside the elite pool
+    assert out.loc[~pool, "fall_back_risk_pct"].isna().all()
+    assert out.loc[pool, "fall_back_risk_players"].ge(30).all()
+    assert out["step_up_chance_pct"].notna().all()
+    assert out["big_move_chance_pct"].notna().all()
+    assert (out["league"] == "Premier League").all()
+    assert (out["fair_value_eur"] == 2e6).all()
+    # sorted by elite chance, the pool first
+    assert out["elite_chance_pct"].iloc[: int(pool.sum())].notna().all()
+    shown = out["elite_chance_pct"].dropna()
+    assert shown.is_monotonic_decreasing
+    assert out["rising"].sum() <= 50
+
+
+def test_rising_is_the_riser_models_top_50_among_half_of_team_minutes():
+    s = _inputs()["scouting"]
+    ids = rising_ids(s)
+    newest = s[s["season"] == 2025].set_index("source_player_id")
+    assert len(ids) == 50
+    assert (newest.loc[list(ids), "minutes_share"] >= 0.5).all()
+    cut = newest.loc[list(ids), "score_riser"].min()
+    pool = newest[newest["minutes_share"] >= 0.5]
+    assert (pool["score_riser"] > cut).sum() == 49
+
+
+def test_bargains_table_and_dictionary_agree():
+    frame = pd.DataFrame(
+        {
+            "league_key": "epl",
+            "season": 2025,
+            "source_player_id": [1, 2],
+            "list_rank": [1, 2],
+            "player_name": ["a", "b"],
+            "age": [25.0, 31.0],
+            "sub_position": [None, "Left-Back"],
+            "position": ["Defender", "Defender"],
+            "team_name": "club",
+            "ability_pct": [80.0, 90.0],
+            "minutes_share": [0.6, 0.7],
+            "value": [1e6, 2e6],
+            "predicted": [2e6, 3e6],
+            "ratio": [0.5, 0.67],
+            "ratio_pct": [1.0, 2.0],
+            "contract_expiry": pd.to_datetime(["2028-06-30", None]),
+            "flag_count": [0, 1],
+            "flags": ["none", "value lower than a year before (value -20% on a year before)"],
+            "on_loan": [False, True],
+            "stale_value": [False, False],
+            "value_date": pd.to_datetime(["2026-06-01", "2026-06-01"]),
+        }
+    )
+    out = bargains_table({"prime": frame.iloc[[0]], "experienced": frame.iloc[[1]]}, {})
+    assert list(out.columns) == list(DICTIONARY["bargains"])
+    assert out["list"].tolist() == ["prime", "experienced"]
+    assert out["position"].tolist() == ["Defender", "Left-Back"]
+    words = dictionary()
+    assert set(words["table"]) == {"candidates", "bargains"}
+    assert words["meaning"].str.len().gt(20).all()  # one plain sentence each
+    assert not words["meaning"].str.contains("\n").any()

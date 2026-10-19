@@ -1,20 +1,28 @@
 # Models and backtest
 
-`uv run scout backtest` runs everything below in under a minute, locally,
-with no AWS calls. Results: `reports/backtest_<target>.md` (overall, by
-league, by tier, by season) and `reports/backtest_summary.json`; every out of
-time prediction goes to `data/processed/models/backtest_<target>.parquet`.
+The models in use since 19 October 2026 (decision 5, last section): fair value
+(`scout backtest`), big move (`scout moves`), elite, step up and riser
+(`scout scouting`). Their outputs feed the two user facing tables built by
+`scout lists`. **The value growth model is retired**: the growth sections
+below are kept as the record of why (it barely beat its age and position
+baseline), but the code, its commands and its tests are gone.
+
+`uv run scout backtest` runs the fair value backtest locally, with no AWS
+calls. Results: `reports/backtest_fair_value.md` (overall, by league, by
+tier, by season) and `reports/backtest_summary.json`; every out of time
+prediction goes to `data/processed/models/backtest_fair_value.parquet`.
 
 ## Targets
 
 All on a log scale, so an error of 0.10 means about 10%, for a 1m player and a
-100m player alike. Only regular players (450+ minutes) are modelled.
+100m player alike. Only regular players (450+ minutes) are modelled. Row
+counts are from the first two league build.
 
 | Target | Label | Rows | May use current value? |
 |---|---|---|---|
 | `fair_value` | log of the market value at the feature date | 11,360 | no: it is the target |
-| `growth_24m` | log of value 24 months later divided by value now | 8,414 | yes |
-| `growth_36m` | the same, 36 months later | 7,233 | yes |
+| `growth_24m` (retired) | log of value 24 months later divided by value now | 8,414 | yes |
+| `growth_36m` (retired) | the same, 36 months later | 7,233 | yes |
 
 ## Expanding window backtest
 
@@ -38,7 +46,7 @@ seasons (and from later price levels) while predicting his earlier ones.
 
 | Model | What it is |
 |---|---|
-| `no_change` | growth only: the value stays where it is |
+| `no_change` | growth only (retired with it): the value stays where it is |
 | `group_median` | the baseline: median target of players with the same league, position and age band in the training seasons, falling back to coarser groups below 15 players |
 | `lightgbm` | gradient boosted trees on all feature columns, **untuned** defaults (`scout.models.estimators.DEFAULT_PARAMS`) |
 
@@ -71,7 +79,9 @@ What they say:
 * Errors are lower for EPL than for the Süper Lig, in line with the noisier
   Süper Lig values found in FEASIBILITY.md.
 
-## Automatic model tuning (growth 24m)
+## Automatic model tuning (growth 24m, retired)
+
+`scout train` and `scout tune` now take `--target fair_value` only.
 
 `scout tune --target growth_24m` ran SageMaker automatic model tuning:
 Bayesian search, 20 training jobs, 2 at a time, on `ml.m5.large`. Each job ran
@@ -337,13 +347,13 @@ Ratios: minutes 1.07, ability 1.01, injury 1.24, value falling 1.51. No
 flag doubles the risk; each one is weaker than at 2 years. Flag counts 0,
 1, 2, 3 or more: 45%, 55%, 65%, 70%.
 
-`candidate_profile` returns, for one candidate, the elite chance (quintile,
+(`candidate_profile`, removed in the simplification, returned) for one candidate, the elite chance (quintile,
 rounded rate, players behind it), the fall back risk (flag count, rounded
 rate, players) and each flag with its raw number; buckets under 30 players
 return no rate. `scouting.parquet` carries the flattened profile for the
 newest season's candidates.
 
-## Bargains (decision 4, `scout bargains`)
+## Bargains (decision 4)
 
 Score: market value divided by the fair value model's out of time
 prediction, ranked as a percentile within position group and season among
@@ -367,7 +377,7 @@ the other eligible players of the same season, ability band and age band.
 The market does catch up on the cheap players (part of that is a low price
 correcting itself, so it overstates a buyer's gain), but clubs did not sign
 them up a level more often than their peers. Per season tables in
-`reports/bargains.md`.
+`reports/candidates.md` (until 19 October `reports/bargains.md`).
 
 ## Performance risers (decision 3)
 
@@ -503,6 +513,62 @@ listed or used as matched peers. Pooled backtest, 2015 to 2023:
 | prime | club with higher Elo | 0.398 / 0.415 | 0.398 / 0.418 |
 | experienced | value up after 24 months | 0.119 / 0.044 | 0.110 / 0.045 |
 | experienced | club with higher Elo | 0.182 / 0.175 | 0.187 / 0.191 |
+
+## Simplification (decision 5, 19 October 2026)
+
+**Two user facing tables**, built by `scout lists` (`src/scout/lists.py`)
+after `backtest`, `moves` and `scouting`, written to `data/processed/lists/`
+as Parquet and CSV with `dictionary.csv` (one plain sentence per column):
+
+* `candidates`: one row per regular player ranked #101 to #2,000 by value in
+  the newest season (1,792 rows, 25 columns): elite chance (elite pool only),
+  step up chance, fall back risk (elite pool only), flags with raw numbers,
+  rising tag, big move chance, current and fair value, ability percentile;
+  sorted by elite chance, then step up chance.
+* `bargains`: the prime (1,249) and experienced (353) lists, 21 columns, with
+  the shared flags and the on loan and stale value tags.
+
+Every chance is a decile rate from the out of sample backtest scores, as for
+the elite chance: step up and big move deciles are taken among past players
+ranked #101 to #2,000 (the players the table shows), so a #1,500 is compared
+with players like him. Pooled rates, deciles 1 to 10: step up under 5% (four
+deciles), 5% (three), 10%, 15%, 20% (base rate 5.9%, 19,765 players); big move
+under 5% (three), 5% (four), 10%, 15%, 25% (base rate 7.1%, 16,647 players,
+blank for players already at a top 20 club). Fall back risk is blank outside
+the elite pool, where it was never measured; the flags are shown for everyone.
+Rising: the riser model's top 50 of the season (11 of them are in the table's
+rank range).
+
+**One readable report**, `reports/candidates.md`: both tables' top 50 and
+every backtest number next to its baseline. `reports/scouting.md` keeps the
+model detail (league strength, composite weights, traits) without lists;
+`reports/moves.md` keeps the big move detail; `reports/bargains.md` is no
+longer written.
+
+| Model | Measure | Model | Baseline | Base rate |
+|---|---|---|---|---|
+| fair value (111,348 rows) | error, log units | 0.395 | 0.780 | |
+| | rank correlation | 0.908 | 0.641 | |
+| big move (112,531) | AUC | 0.928 | 0.803 | 0.014 |
+| | top 50 precision | 0.385 | 0.133 | |
+| elite, all candidates (9,579) | AUC | 0.881 | 0.874 | 0.063 |
+| elite, elite pool (2,925) | AUC | 0.774 | 0.771 | 0.135 |
+| | top 50 precision | 0.342 | 0.349 | |
+| step up (82,029) | AUC | 0.927 | 0.912 | 0.018 |
+| | top 50 precision | 0.295 | 0.231 | |
+| riser (25,332) | AUC | 0.799 | 0.610 | 0.017 |
+| | top 50 precision | 0.093 | 0.027 | |
+
+**Retired:** the value growth model (`growth_24m`, `growth_36m`, the
+`no_change` model, their commands and tests); nothing used its predictions,
+so no replacement was needed, and the growth labels stay for the bargains
+backtest. The old performance target and its comparison with the riser; the
+old bargains (ability top 15%, value outside the top 1,000) and the investment
+lists in `reports/scouting.md`; the bargains' own flags; `scout bargains`
+(now part of `scout lists`); `candidate_profile`, the quintile tables, the
+ability scan and the three year fall back check, whose numbers are recorded
+above. The strength variants (`transfer`, `elo`, `transfer_elo`) stay
+selectable; `v2` is the one default path.
 
 ## Next
 

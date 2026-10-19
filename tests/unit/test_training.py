@@ -5,6 +5,7 @@ import tarfile
 from datetime import UTC, datetime
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 from test_models import _dataset
 
@@ -39,25 +40,25 @@ def test_package_is_deterministic_and_holds_only_the_lean_modules():
 
 
 def test_job_names_fit_the_tuning_limit():
-    name = job_name("tune", "growth_24m", datetime(2026, 10, 8, 17, 3, 0, tzinfo=UTC))
-    assert name == "scout-tune-g24-1008-170300"
+    name = job_name("tune", "fair_value", datetime(2026, 10, 8, 17, 3, 0, tzinfo=UTC))
+    assert name == "scout-tune-fv-1008-170300"
     assert len(name) <= 32
 
 
 def test_training_request_points_at_the_features_and_the_runner_bucket():
-    request = training_job_request("scout-train-x", "growth_24m", "s3://b/code.tar.gz", **CTX)
+    request = training_job_request("scout-train-x", "fair_value", "s3://b/code.tar.gz", **CTX)
     source = request["InputDataConfig"][0]["DataSource"]["S3DataSource"]
     assert source["S3Uri"] == "s3://data-bucket/processed/features/"
     assert request["RoleArn"].endswith(":role/scout-sagemaker-training")
     assert request["OutputDataConfig"]["S3OutputPath"] == "s3://scout-ml-123456789012/output/"
     assert request["HyperParameters"]["sagemaker_program"] == "train.py"
-    assert request["HyperParameters"]["target"] == "growth_24m"
+    assert request["HyperParameters"]["target"] == "fair_value"
     assert "pytorch-training:2.8.0-cpu-py312" in request["AlgorithmSpecification"]["TrainingImage"]
 
 
 def test_tuning_request_minimises_the_backtest_error():
     request = tuning_job_request(
-        "scout-tune-x", "growth_24m", "s3://b/c.tar.gz", max_jobs=20, max_parallel=2, **CTX
+        "scout-tune-x", "fair_value", "s3://b/c.tar.gz", max_jobs=20, max_parallel=2, **CTX
     )
     config = request["HyperParameterTuningJobConfig"]
     assert config["HyperParameterTuningJobObjective"] == {
@@ -119,11 +120,11 @@ def _write(frame: pd.DataFrame, root: Path) -> None:
 
 
 def test_train_py_runs_the_backtest_and_prints_the_metric(tmp_path, capsys):
-    data = _dataset(per_season=60).rename(columns={"y": "log_growth_24m"})
+    data = _dataset(per_season=60)
     data["regular"] = True
-    data["value_24m_date"] = data["feature_date"] + pd.DateOffset(months=23)
-    features = data.drop(columns=["log_growth_24m", "value_24m_date"])
-    labels = data[["league_key", "season", "source_player_id", "log_growth_24m", "value_24m_date"]]
+    data["value_now"] = np.exp(data["y"])
+    features = data.drop(columns=["y", "value_now"])
+    labels = data[["league_key", "season", "source_player_id", "value_now"]]
     _write(features, tmp_path / "in" / "player_season_features")
     _write(labels, tmp_path / "in" / "player_season_labels")
 
@@ -133,7 +134,7 @@ def test_train_py_runs_the_backtest_and_prints_the_metric(tmp_path, capsys):
     summary = train.main(
         [
             "--target",
-            "growth_24m",
+            "fair_value",
             "--num_boost_round",
             "50",
             "--data-dir",
@@ -144,7 +145,7 @@ def test_train_py_runs_the_backtest_and_prints_the_metric(tmp_path, capsys):
     )
     printed = capsys.readouterr().out
     assert f"backtest_mae_log={summary['metrics']['mae_log']:.6f}" in printed
-    assert json.loads((tmp_path / "out" / "summary.json").read_text())["target"] == "growth_24m"
+    assert json.loads((tmp_path / "out" / "summary.json").read_text())["target"] == "fair_value"
     assert (tmp_path / "out" / "predictions.parquet").is_file()
 
 
@@ -176,6 +177,6 @@ def test_best_parameters_are_typed_for_lightgbm():
 def test_tuned_settings_join_the_comparison():
     from scout.models.estimators import models_for
 
-    models = models_for("growth_24m", {"num_leaves": 8, "num_boost_round": 50})
-    assert list(models) == ["no_change", "group_median", "lightgbm", "lightgbm_tuned"]
-    assert "lightgbm_tuned" not in models_for("growth_24m")
+    models = models_for("fair_value", {"num_leaves": 8, "num_boost_round": 50})
+    assert list(models) == ["group_median", "lightgbm", "lightgbm_tuned"]
+    assert "lightgbm_tuned" not in models_for("fair_value")
