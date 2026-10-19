@@ -295,6 +295,7 @@ Settle them with the owner rather than guessing.
 * `scouting` was rerun on the 37 league features on 19 October with version 2
   (`reports/scouting.md`, `data/processed/models/scouting.parquet`);
   `reports/scouting_elo.md` is still the 17 league Elo run. These and
-  `reports/ability.md` are not synced up to S3 yet.
+  `reports/ability.md` were synced up to S3 on 19 October; `processed/` and
+  `reports/` then matched the local files.
 * The work branch is `claude/gifted-brown-nwtnj0`; it is not merged into
   `main`, and CI runs on pull requests and pushes to `main`.
