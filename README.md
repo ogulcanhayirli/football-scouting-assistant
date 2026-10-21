@@ -35,6 +35,8 @@ that is reported even when it wins.
 | Elite, step up and riser models (`scout scouting`) | Done: elite AUC 0.774 against 0.771 on the 23 and under pool; step up 0.927 against 0.912; riser top 50 precision 0.093 against a base rate of 0.017 |
 | Fall back risk and warning flags (`src/scout/flags.py`) | Done: 17.2% of the elite pool fall back; three flags, each raising the risk 1.33 to 1.40 times |
 | The two tables, candidates and bargains (`scout lists`) | Done: Parquet, CSV and a data dictionary in `data/processed/lists/`; one report, `reports/candidates.md` |
+| One line explanations on both tables (`src/scout/explain.py`) | Done: the three stats furthest from position and age peers, from the same table as the flags |
+| Registered forecast (`forecasts/2026-10-21/`, `scout forecast`) | Done: frozen 21 October 2026; scoring tested on the rebuilt 2015 to 2023 forecasts (MODELS.md) |
 | Athena, Feature Store and tuning on the new data | Not yet: Glue schema regenerated, redeploy pending |
 | Similarity search, agent, rest of the AWS stack | Not started |
 
@@ -169,6 +171,23 @@ uv run scout sync up                # or: sync down, --dry-run, --only raw, --wo
 The backfill writes `reports/coverage_report.md` and `.json`, logs to
 `data/state/scout.log`, and stores Parquet under
 `data/processed/player_season_stats/league=<key>/season=<year>.parquet`.
+
+## Limits
+
+* **Among young players the elite model barely beats the market.** On the
+  elite pool (ranked #101 to #1,000 by value, 23 or under) its AUC is 0.774
+  against 0.771 for value rank plus age (prompt 12 run), and its top 50 is
+  slightly worse (0.342 against 0.349). A young player's price already holds
+  most of what the data says about his chance of becoming elite.
+* **So the product's value is not prediction beyond the market.** It is
+  calibrated odds (each chance is the historical rate of past players in the
+  same bucket, with how many there were), risk flags with the player's own
+  numbers, and one consistent treatment of 37 leagues, far more players than
+  anyone can price by hand.
+* **The top elite chance runs high.** Rebuilt forecasts of 2015 to 2023 saw
+  30.5% of the players shown 40% make it (MODELS.md).
+* **Market values freeze at June 2026.** The Transfermarkt snapshot has had
+  no valuations since 12 June 2026 (CLAUDE.md, open questions).
 
 ## Data sources and attribution
 

@@ -39,11 +39,13 @@ MIN_BUCKET = 30
 ROUND_TO = 5
 DECILES = 10
 FLAG_START = 2015  # minutes share and ability come from per match data
-COUNT_BUCKETS = ["0", "1", "2", "3+"]
+# Two or more flags is one bucket (prompt 14): the 3+ bucket held few players
+# and its rate dipped below the bucket of 2.
+COUNT_BUCKETS = ["0", "1", "2 or more"]
 
 
 def count_bucket(count: pd.Series) -> pd.Series:
-    return count.clip(upper=3).astype(int).astype(str).replace("3", "3+")
+    return count.clip(upper=2).astype(int).astype(str).replace("2", "2 or more")
 
 
 def rounded(rate: float) -> int:

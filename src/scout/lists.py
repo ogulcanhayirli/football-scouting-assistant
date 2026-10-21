@@ -2,11 +2,16 @@
 
 * **candidates**: one row per regular player ranked #101 to #2,000 by value
   in the newest season, with his elite chance (elite pool only), step up
-  chance, fall back risk (elite pool only), flags, rising tag, big move
-  chance, current and fair value, and ability percentile. Sorted by elite
-  chance, then step up chance.
+  chance, fall back risk (elite pool only), flags, explanation, rising tag,
+  big move chance, current and fair value, and ability percentile. Sorted by
+  elite chance, then step up chance. The riser model's top 50 are added as
+  rows when they are valued below #2,000 (or have no value), with the
+  chances blank: those were never measured there (prompt 14).
 * **bargains**: the prime and experienced lists of ``scout.bargains`` with
-  the shared flags and the two context tags.
+  the shared flags, the explanation and the two context tags.
+
+Flags and explanation come from one peer table (``scout.explain``), so the
+sentence and the flags of a player always quote the same numbers.
 
 Every chance is a historical rate, not a model probability: the share of
 past players in the same decile of the model's out of sample score (from
@@ -30,14 +35,15 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from scout import bargains, candidates
+from scout import bargains, candidates, explain
 from scout.candidates import ChanceTable, chance_table, score_deciles, show_rate
-from scout.flags import ABILITY, ABILITY_MIN_RATIO, TAGS, describe
+from scout.flags import ABILITY, ABILITY_MIN_RATIO, TAGS
 from scout.fsutil import atomic_write_text
 from scout.models.backtest import summarize
 from scout.models.moves import summarize_moves
 from scout.scouting import (
     ELITE_MAX_AGE,
+    HORIZON_SEASONS,
     KEYS,
     RISER_LEVEL,
     RISER_MIN_SHARE,
@@ -52,6 +58,13 @@ RANKS = (101, 2000)  # the candidates table: value rank #101 to #2,000
 RISING_TOP = 50  # the riser model's top 50 of the season carry the rising tag
 REPORT_SIZE = 50
 
+EXPLANATION = (
+    f"The {explain.SHOWN} stats where he stands furthest from regulars of his position and "
+    "age band this season, each with his number and where it ranks (top means better, "
+    "even for stats where less is better); a neutral sentence when nothing is in the top "
+    f"or bottom {explain.NOTABLE:.0f}%. It reads the same numbers as the flags."
+)
+
 DICTIONARY = {
     "candidates": {
         "season": "The season the row describes (2025 is 2025/26, or the 2025 calendar year).",
@@ -61,7 +74,8 @@ DICTIONARY = {
         "position": "His Transfermarkt position, such as Centre-Forward or Left-Back.",
         "club": "The club he played most league minutes for that season.",
         "league": "The league of that club.",
-        "value_rank": "Where his market value ranks among all players we track (1 is the dearest).",
+        "value_rank": "Where his market value ranks among all players we track (1 is the dearest); "
+        "blank when he has no market value.",
         "elite_decile": "Where the elite model puts him among this season's elite pool, from 1 "
         "(least likely) to 10 (most likely); blank outside the pool.",
         "elite_chance_pct": "Of past players in the same elite decile, the share who became one "
@@ -80,10 +94,12 @@ DICTIONARY = {
         "fall_back_risk_players": "How many past players that fall back risk is based on.",
         "flag_count": "How many warning flags he raises: low minutes, injured, value falling.",
         "flags": "The raised flags, each with his own number, or none.",
+        "explanation": EXPLANATION,
         "rising": f"True when the riser model has him in this season's top {RISING_TOP}: "
         "likely to play clearly better in each of the next two seasons and end at the "
         f"{RISER_LEVEL:.0f}th percentile of his position or better (players with at least "
-        f"{RISER_MIN_SHARE:.0%} of team minutes).",
+        f"{RISER_MIN_SHARE:.0%} of team minutes). Risers valued below #2,000 are added as "
+        "rows of their own, with the chances blank.",
         "big_move_decile": "Where the big move model puts him among this season's candidates, "
         "from 1 to 10; blank when he already plays for a top 20 club.",
         "big_move_chance_pct": "Of past players ranked 101 to 2,000 in the same big move decile, "
@@ -119,6 +135,7 @@ DICTIONARY = {
         "when it ends after the snapshot date.",
         "flag_count": "How many warning flags he raises: low minutes, injured, value falling.",
         "flags": "The raised flags, each with his own number, or none.",
+        "explanation": EXPLANATION,
         "on_loan": "True when he is on loan: " + TAGS["on_loan"].split(": ", 1)[1] + ".",
         "stale_value": "True when his market value is "
         + TAGS["stale_value"].split(": ", 1)[1]
@@ -161,13 +178,21 @@ def in_ranks(value_rank: pd.Series) -> pd.Series:
     return value_rank.between(*RANKS)
 
 
-def chance_tables(inputs: dict) -> dict[str, ChanceTable]:
+def chance_tables(inputs: dict, through: int | None = None) -> dict[str, ChanceTable]:
     """Elite on the elite pool; step up and big move on past players ranked
-    #101 to #2,000."""
+    #101 to #2,000. ``through``: only backtest seasons up to it (a forecast
+    for season S uses S minus 2, the last season whose two year outcome is
+    known by then)."""
+
+    def upto(frame: pd.DataFrame) -> pd.DataFrame:
+        return frame if through is None else frame[frame["season"] <= through]
+
     ranks = inputs["scouting"][[*KEYS, "value_rank"]]
-    elite = inputs["elite"]
-    step = inputs["step_up"]
-    move = inputs["big_move"].drop(columns="value_rank", errors="ignore").merge(ranks, on=KEYS)
+    elite = upto(inputs["elite"])
+    step = upto(inputs["step_up"])
+    move = (
+        upto(inputs["big_move"]).drop(columns="value_rank", errors="ignore").merge(ranks, on=KEYS)
+    )
     return {
         "elite": chance_table(elite[elite_pool(elite["value_rank"], elite["age"])]),
         "step_up": chance_table(step[in_ranks(step["value_rank"])]),
@@ -175,19 +200,19 @@ def chance_tables(inputs: dict) -> dict[str, ChanceTable]:
     }
 
 
-def newest_players(scouting: pd.DataFrame) -> pd.DataFrame:
-    """The newest season's regular players, one row each (the league where he
-    played most minutes)."""
-    newest = scouting[
-        (scouting["season"] == scouting["season"].max()) & scouting["regular"].astype(bool)
-    ]
+def newest_players(scouting: pd.DataFrame, season: int | None = None) -> pd.DataFrame:
+    """The season's regular players (the newest when None), one row each (the
+    league where he played most minutes)."""
+    season = scouting["season"].max() if season is None else season
+    newest = scouting[(scouting["season"] == season) & scouting["regular"].astype(bool)]
     return newest.sort_values("minutes").drop_duplicates("source_player_id", keep="last")
 
 
-def rising_ids(scouting: pd.DataFrame, top: int = RISING_TOP) -> set:
-    """The riser model's top ``top`` of the newest season, among players with
-    a one season score and half of team minutes (the riser pool)."""
-    newest = newest_players(scouting)
+def rising_ids(scouting: pd.DataFrame, top: int = RISING_TOP, season: int | None = None) -> set:
+    """The riser model's top ``top`` of the season (the newest when None),
+    among players with a one season score and half of team minutes (the riser
+    pool)."""
+    newest = newest_players(scouting, season)
     pool = newest[
         (newest["minutes_share"].astype(float) >= RISER_MIN_SHARE)
         & newest["ability_pct_1s"].notna()
@@ -215,37 +240,54 @@ COMPUTED = [
     c
     for c in DICTIONARY["candidates"]
     if c.endswith(("_decile", "_pct", "_players")) and c != "ability_pct"
-] + ["flag_count", "flags", "rising"]
+] + ["flag_count", "flags", "explanation", "rising"]
 
 
-def candidates_table(inputs: dict, tables: dict, leagues: dict[str, str]) -> pd.DataFrame:
+def candidates_table(
+    inputs: dict,
+    tables: dict,
+    leagues: dict[str, str],
+    profile: pd.DataFrame | None = None,
+    season: int | None = None,
+) -> pd.DataFrame:
+    """The candidates of ``season`` (the newest when None). ``profile`` is the
+    season's peer table (``scout.explain.peer_table``); without one it is
+    built from the scouting rows, which carry the flag columns but few stats."""
     s = inputs["scouting"]
-    rows = newest_players(s)
-    rows = rows[in_ranks(rows["value_rank"])].copy()
+    season = int(s["season"].max()) if season is None else season
+    players = newest_players(s, season)
+    if profile is None:
+        profile = explain.peer_table(players)
+    risers = rising_ids(s, season=season)
+    ranked = in_ranks(players["value_rank"])
+    below = players["source_player_id"].isin(risers) & ~(players["value_rank"] <= RANKS[1])
+    rows = players[ranked | below].copy()
     fair = inputs["fair_value"].assign(fair_value_eur=lambda d: np.exp(d["pred_lightgbm"]))
     rows = rows.merge(fair[[*KEYS, "fair_value_eur"]], on=KEYS, how="left")
     move = inputs["big_move_now"][[*KEYS, "score"]].rename(columns={"score": "score_big_move"})
     rows = rows.merge(move, on=KEYS, how="left")
 
     pool = elite_pool(rows["value_rank"], rows["age"])
-    everyone = pd.Series(True, index=rows.index)
+    ranked = in_ranks(rows["value_rank"])  # added risers have no chances
     parts = [
         _chance(rows, rows["score_elite"], tables["elite"], "elite", pool),
-        _chance(rows, rows["score_step_up"], tables["step_up"], "step_up", everyone),
-        _chance(rows, rows["score_big_move"], tables["big_move"], "big_move", everyone),
+        _chance(rows, rows["score_step_up"], tables["step_up"], "step_up", ranked),
+        _chance(rows, rows["score_big_move"], tables["big_move"], "big_move", ranked),
     ]
     rows = pd.concat([rows, *parts], axis=1)
 
-    flags = describe(rows)
-    fall = candidates.pool_summary(s)["count"]
+    flags = explain.flags_and_explanation(explain.for_rows(profile, rows))
+    past = s[s["season"] <= season - HORIZON_SEASONS]
+    fall = candidates.pool_summary(past)["count"]
     fall = fall[fall["season"] == "all"].set_index("bucket")
     bucket = candidates.count_bucket(flags["flag_count"]).where(pool)
     rows["flag_count"] = flags["flag_count"]
     rows["flags"] = flags["flags"]
+    rows["explanation"] = flags["explanation"]
     rows["fall_back_risk_rate"] = bucket.map(fall["rate"])
     rows["fall_back_risk_pct"] = bucket.map(fall["pct"]).astype("Int64")
     rows["fall_back_risk_players"] = bucket.map(fall["players"]).astype("Int64")
-    rows["rising"] = rows["source_player_id"].isin(rising_ids(s))
+    rows["rising"] = rows["source_player_id"].isin(risers)
 
     rows = rows.sort_values(
         ["elite_chance_rate", "step_up_chance_rate", "score_elite", "score_step_up"],
@@ -258,7 +300,9 @@ def candidates_table(inputs: dict, tables: dict, leagues: dict[str, str]) -> pd.
             "player_id": rows["source_player_id"].astype("Int64"),
             "player": rows["player_name"],
             "age": tenths(rows["age"]),
-            "position": rows["sub_position"].fillna(rows["position"]),
+            "position": rows["sub_position"]
+            .astype("string")
+            .fillna(rows["position"].astype("string")),
             "club": rows["team_name"],
             "league": rows["league_key"].map(leagues).fillna(rows["league_key"]),
             "value_rank": rows["value_rank"].astype("Int64"),
@@ -283,7 +327,9 @@ def bargains_table(lists: dict[str, pd.DataFrame], leagues: dict[str, str]) -> p
                     "player_id": frame["source_player_id"].astype("Int64"),
                     "player": frame["player_name"],
                     "age": tenths(frame["age"]),
-                    "position": frame["sub_position"].fillna(frame["position"]),
+                    "position": frame["sub_position"]
+                    .astype("string")
+                    .fillna(frame["position"].astype("string")),
                     "club": frame["team_name"],
                     "league": frame["league_key"].map(leagues).fillna(frame["league_key"]),
                     "ability_pct": frame["ability_pct"].round(0),
@@ -295,6 +341,7 @@ def bargains_table(lists: dict[str, pd.DataFrame], leagues: dict[str, str]) -> p
                     "contract_expiry": frame["contract_expiry"],
                     "flag_count": frame["flag_count"],
                     "flags": frame["flags"],
+                    "explanation": frame["explanation"],
                     "on_loan": frame["on_loan"],
                     "stale_value": frame["stale_value"],
                     "value_date": frame["value_date"],
@@ -423,6 +470,7 @@ CANDIDATE_SHOW = [
     "value_m",
     "fair_value_m",
     "ability_pct",
+    "explanation",
 ]
 BARGAIN_SHOW = [
     "list_rank",
@@ -440,6 +488,7 @@ BARGAIN_SHOW = [
     "flags",
     "on_loan",
     "stale_value",
+    "explanation",
 ]
 
 
@@ -482,6 +531,7 @@ def write_report(
     size: int = REPORT_SIZE,
 ) -> Path:
     season = int(cand["season"].max())
+    added = cand[~in_ranks(cand["value_rank"].astype(float))]
     s = candidates.pool_summary(inputs["scouting"])
     pool_rows, y = s["rows"], s["y"]
     models = model_table(inputs)
@@ -513,11 +563,21 @@ def write_report(
         "5%, with the number of players behind it (n). Elite chance and fall back risk",
         f"are only given inside the elite pool (ranked #101 to #1,000, {ELITE_MAX_AGE} or",
         "under), where they were measured. Flags are reasons for doubt, each with the",
-        "player's own number. Rising: in the riser model's top 50 of the season.",
+        "player's own number. Rising: in the riser model's top 50 of the season. The",
+        "explanation names the three stats where he stands furthest from regulars of his",
+        "position and age band; it reads the same numbers as the flags.",
         "",
         f"## Candidates: top {size} of {len(cand):,} (value rank #101 to #2,000)",
         "",
         readable_candidates(cand.head(size)).to_markdown(index=False),
+        "",
+        f"### Risers valued below #{RANKS[1]:,}: {len(added):,} rows added",
+        "",
+        f"Of the riser model's top {RISING_TOP}, these are valued below #{RANKS[1]:,} or have "
+        "no market value. They are rows of the table with the chances blank (never measured",
+        "there); risers inside the top 100 are not listed.",
+        "",
+        readable_candidates(added).to_markdown(index=False) if len(added) else "None.",
         "",
     ]
     for name, title in bargains.LISTS.items():
@@ -570,7 +630,8 @@ def write_report(
             else "is left out of the count; the ability percentile is a column."
         ),
         "",
-        "Fall back rate by flag count (the risk shown in the table):",
+        "Fall back rate by flag count (the risk shown in the table; two or more flags are",
+        "one bucket since prompt 14, as three or more held few players):",
         "",
         candidates.wide(s["count"], candidates.COUNT_BUCKETS).to_markdown(),
         "",
@@ -617,16 +678,44 @@ def write_tables(tables: dict[str, pd.DataFrame], out_dir: Path) -> list[Path]:
     return written
 
 
+def with_explanation(frame: pd.DataFrame, profile: pd.DataFrame) -> pd.DataFrame:
+    """A bargains list with flags and explanation from the peer table."""
+    found = explain.flags_and_explanation(explain.for_rows(profile, frame))
+    return frame.assign(
+        flag_count=found["flag_count"], flags=found["flags"], explanation=found["explanation"]
+    )
+
+
+def season_tables(
+    inputs: dict,
+    features: pd.DataFrame,
+    bargain_rows: pd.DataFrame,
+    profiles: pd.DataFrame,
+    snapshot: pd.Timestamp | None,
+    leagues: dict[str, str],
+    season: int | None = None,
+) -> tuple[pd.DataFrame, pd.DataFrame, dict]:
+    """(candidates, bargains, chance tables) of one season, the newest when
+    None. Chances come from backtest seasons up to ``season`` minus 2 only,
+    so a past season's tables are what we could have published then."""
+    season = int(inputs["scouting"]["season"].max()) if season is None else season
+    tables = chance_tables(inputs, through=season - HORIZON_SEASONS)
+    profile = explain.peer_table(explain.population(features, season))
+    cand = candidates_table(inputs, tables, leagues, profile, season)
+    lists = bargains.current_lists(bargain_rows, profiles, snapshot, season)
+    lists = {name: with_explanation(frame, profile) for name, frame in lists.items()}
+    return cand, bargains_table(lists, leagues), tables
+
+
 def run_lists(settings) -> Path:
     """``scout lists``: both tables, the dictionary and reports/candidates.md."""
     inputs = load(settings)
-    tables = chance_tables(inputs)
     leagues = league_names(settings)
-    cand = candidates_table(inputs, tables, leagues)
-
-    data, profiles, _, snapshot = bargains.load(settings)
+    data, profiles, _, snapshot, features = bargains.load(settings)
     rows = bargains.eligible(data)
-    barg = bargains_table(bargains.current_lists(rows, profiles, snapshot), leagues)
+    cand, barg, tables = season_tables(inputs, features, rows, profiles, snapshot, leagues)
+    added = int((~in_ranks(cand["value_rank"].astype(float))).sum())
+    log.info("lists: %d risers valued below #%d added to the candidates", added, RANKS[1])
     results = bargains.backtest(rows)
     results.to_parquet(settings.paths.processed_dir / "models" / "bargains_backtest.parquet")
 

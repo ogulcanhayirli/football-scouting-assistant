@@ -1,0 +1,54 @@
+{
+  "kind": "registered",
+  "created": "2026-10-21",
+  "season": 2025,
+  "feature_dates": {
+    "2026-01-01": [
+      "Allsvenskan",
+      "Brasileirão Série A",
+      "Colombian Primera A",
+      "Eliteserien",
+      "J1 League",
+      "K League 1",
+      "Liga Profesional Argentina",
+      "Major League Soccer"
+    ],
+    "2026-06-30": [
+      "2. Bundesliga",
+      "Austrian Bundesliga",
+      "Belgian Pro League",
+      "Bundesliga",
+      "Championship",
+      "Croatian HNL",
+      "Czech First League",
+      "Danish Superliga",
+      "Eerste Divisie",
+      "Ekstraklasa",
+      "Eredivisie",
+      "Greek Super League",
+      "La Liga",
+      "Liga MX",
+      "Ligue 1",
+      "Ligue 2",
+      "Premier League",
+      "Primeira Liga",
+      "Russian Premier League",
+      "Saudi Pro League",
+      "Scottish Premiership",
+      "Segunda División",
+      "Serbian SuperLiga",
+      "Serie A",
+      "Serie B",
+      "Swiss Super League",
+      "Süper Lig",
+      "Ukrainian Premier League"
+    ]
+  },
+  "valuation_end": "2026-06-12",
+  "latest_value_date": "2026-06-11",
+  "horizon_seasons": 2,
+  "rows": {
+    "candidates": 1830,
+    "bargains": 1602
+  }
+}

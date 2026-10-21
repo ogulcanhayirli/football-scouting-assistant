@@ -48,7 +48,10 @@ fix this file.
    gitignored; `.env.example` lists the names only. Never ask the owner to
    paste a key into chat.
 6. **Data never goes to git.** `data/` and `reports/` are gitignored; only the
-   synthetic sample under `tests/fixtures` is committed (D7).
+   synthetic sample under `tests/fixtures` is committed (D7). The one
+   exception is `forecasts/<date>/`: registered forecasts (the two tables as
+   CSV, no raw API data) are committed so their date is on record; the
+   repository is private.
 7. **Source errors are repaired in the adapter, never in the cache** (D8):
    an impossible value becomes missing, is logged, and gets a test. The pandera
    contracts must keep rejecting the unrepaired value.
@@ -86,6 +89,9 @@ $C elo                                       # team Elo from cached fixtures, re
 $C scouting [--strength v2|transfer|elo|transfer_elo]  # league strength, ability, elite, step up, riser
 $C ability                                  # ability versions: stability, backtest (reports/ability.md)
 $C lists                                    # the two tables and reports/candidates.md; run after backtest, moves, scouting
+$C forecast freeze [--date YYYY-MM-DD]       # copy today's lists into forecasts/<date>; never overwrites
+$C forecast score forecasts/2026-10-21 --as-of 2027-06-30  # promised buckets against what happened
+$C forecast history                         # rebuild and score 2015 to 2023 (reports/forecast_history.md)
 $C sync up | down [--dry-run] [--only raw|processed|reports]
 uv run python scripts/run_extras.py          # sidelined, coaches, events (done 17 October)
 uv run python scripts/rebuild_match_seasons.py --from-s3 serie_b:2016  # re-parse partitions offline after an adapter repair
@@ -165,7 +171,7 @@ through the native API, and model only regular players (450+ minutes).
 | Big move | `moves` | joins a top 20 club by squad value within 24 months; returns to a former club excluded | `group_rate` | AUC, average precision, share of movers in each season's top 50 |
 | Elite | `scouting` | enters the 100 most valuable players within 2 seasons, from #101 to #1,000 now; trained on all of them, evaluated and listed on the elite pool (also 23 or under) | `rank_rate` (value rank band, age band) | AUC, average precision, top 50 precision |
 | Step up | `scouting` | value rank at least 3 times better, ending in the top 500, within 2 seasons | `rank_rate` | as above |
-| Fall back | `scouting`, `lists` | elite pool player whose value rank is at least twice as bad after 2 seasons | the pool's base rate | rate with and without each flag, rate by flag count (`reports/candidates.md`) |
+| Fall back | `scouting`, `lists` | elite pool player whose value rank is at least twice as bad after 2 seasons | the pool's base rate | rate with and without each flag, rate by flag count 0, 1, 2 or more (`reports/candidates.md`) |
 | Bargains | `lists` | ratio of value to the fair value prediction, ranked within position group; top 50 per season | other eligible players of the same season, ability band and age band | share whose value rose in 24 months, share who joined a club with higher Elo within 2 seasons |
 | Riser (decision 3) | `scouting` | one season ability: both next seasons 20 above the best of this and last season and at the 70th percentile or better; half of team minutes now | `rank_rate` | as above, plus top 50 precision per season against the base rate |
 
@@ -194,7 +200,13 @@ October 2026, from MODELS.md and `reports/`:
   precision 0.093 against a base rate of 0.017 (baseline 0.027).
 * Fall back (decisions 1, 2): 17.2% of the elite pool; low minutes raises
   the risk 1.40 times, value falling 1.35, injuries 1.33; ability 1.26, not
-  counted (MODELS.md, `reports/candidates.md`).
+  counted (MODELS.md, `reports/candidates.md`). By flag count (prompt 14,
+  2 or more merged): 15% (0 flags), 20% (1), 25% (2 or more).
+* Forecast history (prompt 14, `scout forecast history`, 2015 to 2023
+  rebuilt and scored two seasons on): step up, big move and fall back
+  chances are calibrated within a few points; the elite chance runs high at
+  the top (shown 40%, happened 30.5%). Bargains: prime top 50 value rose
+  67.0% against 47.6% for the whole list, experienced 14.4% against 7.1%.
 * Ability score stability (year to year): version 2 0.858 against 0.503 for
   version 1 and 0.537 for the rating with the Elo team term (37 leagues);
   0.656 against 0.431 two seasons apart, where pooling cannot help.
@@ -220,16 +232,24 @@ Decision 5: two user facing tables, written by `scout lists`
 (`src/scout/lists.py`) to `data/processed/lists/` as Parquet and CSV:
 
 * `candidates`: one row per regular player ranked #101 to #2,000 by value,
-  newest season (1,792 rows on 19 October). Player, age, position, club,
-  league, value rank; elite chance (decile rate and players, blank outside
-  the elite pool); step up chance; fall back risk (flag count rate and
-  players, blank outside the elite pool); flag count and flags with raw
-  numbers; rising (the riser model's top 50); big move chance (blank at a
-  top 20 club); value, fair value, ability percentile. Sorted by elite
-  chance, then step up chance.
+  newest season, plus the riser model's top 50 valued below #2,000 or
+  without a value (prompt 14: 38 rows added, 1,830 in all on 21 October).
+  Player, age, position, club, league, value rank; elite chance (decile rate
+  and players, blank outside the elite pool); step up chance; fall back risk
+  (flag count 0, 1 or 2 or more, rate and players, blank outside the elite
+  pool); flag count and flags with raw numbers; explanation; rising (the
+  riser model's top 50); big move chance (blank at a top 20 club); value,
+  fair value, ability percentile. Sorted by elite chance, then step up
+  chance; the added risers come last with every chance blank.
 * `bargains`: the prime (1,249) and experienced (353) lists, ranked by value
-  against fair value, with the shared flags and the on loan and stale value
-  tags.
+  against fair value, with the shared flags, the explanation and the on
+  loan and stale value tags.
+* `explanation` (both tables, `src/scout/explain.py`): the three stats where
+  the player is furthest from the regulars of his position group and age
+  band that season, as sentences with his number and rank ("Takes 13% of
+  his team's shots, top 1% of wingers aged under 21."); a neutral sentence
+  when nothing is in the top or bottom 10%. Flags and explanation read one
+  peer table, and a flag column is only told on the side its flag says.
 * `dictionary.csv`: one plain sentence per column of both tables (`DICTIONARY`
   in `src/scout/lists.py`; a test checks every column has one).
 
@@ -237,6 +257,29 @@ The one readable report is `reports/candidates.md`: both tables' top 50 and
 every backtest number next to its baseline, then the dictionary. Model
 detail stays in `reports/scouting.md`, `reports/moves.md`,
 `reports/backtest_fair_value.md`, `reports/ability.md` and `reports/elo.md`.
+
+## Forecasts
+
+* `forecasts/2026-10-21/` is the first registered forecast: the two tables
+  of 21 October 2026 as CSV with `dictionary.csv`, `forecast.json` (season
+  2025, feature dates 30 June 2026 and 1 January 2026 for the eight calendar
+  year leagues, Transfermarkt valuations ending 12 June 2026, row counts)
+  and a README of what each column promises. Never edit it; a new forecast
+  gets a new dated folder (`scout forecast freeze` refuses to overwrite).
+* `scout forecast score FOLDER --as-of DATE` (`src/scout/forecast.py`)
+  reads a folder and the local tables up to that date and writes
+  `reports/forecast_<folder>_at_<date>.md`: elite chance bucket against the
+  share that entered the top 100, fall back risk against the share that fell
+  back, step up and big move the same way, bargains' top 50 against the
+  whole list for value rose, each with the season's base rate. Outcomes come
+  from later seasons' value ranks (`scouting.parquet`) and the transfers;
+  a player with no later row is unknown, not a miss. Before two seasons have
+  passed the report says it is interim. The 2025 forecast is final at the
+  season 2027 feature dates (1 January and 30 June 2028).
+* `scout forecast history` rebuilds 2015 to 2023 in the same folder format
+  under `data/processed/forecasts/history/` and scores each two seasons on
+  (`reports/forecast_history.md`); the scorer agrees with the stored labels
+  on 96.7% to 99.9% of rows.
 
 ## Version 2 directions
 
@@ -266,11 +309,14 @@ src/scout/  config, secrets, ratelimit, storage, sync, athena, featurestore,
   backfill/                 season, match, injury and transfer runners
   elo.py, elo_compare.py    team Elo from cached fixtures; comparison report
   flags.py                  the one warning flag set (both lists) and the bargains' context tags
+  explain.py                peer table and one line explanations (both lists, same rows as the flags)
+  forecast.py               registered forecasts: freeze, score, history
   candidates.py             decile chance tables, fall back pool and flag count rates
   bargains.py               bargains eligibility, ranking, backtest
   lists.py                  the two user facing tables, their dictionary, reports/candidates.md
   features/                 build.py (core), context.py (cups, team, injuries, transfers), pipeline.py
   models/                   targets, backtest, estimators, moves, run
+forecasts/  registered forecasts, one dated folder each (committed)
 training/   SageMaker entry point and requirements
 scripts/    feasibility.py, export_glue_schema.py
 tests/      unit, contracts, fixtures (synthetic)
@@ -337,20 +383,24 @@ Settle them with the owner rather than guessing.
   drawn, duels; prior 2,100 minutes): a full goalkeeper season counts about
   60% against the position mean. A goalkeeper specific base (goals conceded against the
   team's expected) would need xG, which the API has only from 2023/24.
-* The prompt 12 rebuild of 19 October (`backtest`, `moves`, `scouting`,
-  `lists`: `data/processed/models/`, `data/processed/lists/`,
-  `reports/candidates.md`, `reports/scouting.md`, `reports/moves.md`,
-  `reports/backtest_*`) is local only; the owner syncs it up.
+* The prompt 12 rebuild was in S3 by 21 October. The prompt 14 rebuild
+  (`data/processed/lists/`, `data/processed/models/bargains_backtest.parquet`,
+  `data/processed/forecasts/history/`, `reports/candidates.md`,
+  `reports/forecast_history.md`) is local only; the owner syncs it up.
   `reports/scouting_elo.md` is still the 17 league Elo run.
 * Elite on the young: among the 23 and under pool the elite model barely
   beats the value rank and age baseline (AUC 0.774 against 0.771) and its
-  top 50 is slightly worse (0.342 against 0.349). The elite chance is still
-  honest (a historical rate per decile), but the model adds little there.
+  top 50 is slightly worse (0.342 against 0.349). Recorded as a limit in
+  MODELS.md and README.md (prompt 14): the product's value is calibrated
+  odds, risk flags and coverage of 37 leagues, not prediction beyond the
+  market. The rebuilt forecasts also show the top elite decile running high
+  (shown 40%, happened 30.5%); whether to shrink the shown rate is the
+  owner's call.
 * The ability flag would pass the 1.3 rule below the 50th percentile (x1.33)
   but not at 55 (x1.26); the threshold was not moved after looking.
   Bargains need half of team minutes, so the minutes flag never fires on
   them.
 * The riser list matches its base rate in 2019 (0.02 against 0.019); every
   other test season it beats it at least three times over.
-* The work branch is `claude/prompt-12-fixes-simplification-sww93j`; it is not
-  merged into `main`, and CI runs on pull requests and pushes to `main`.
+* The default branch is `claude/loving-ptolemy-ghpx5n` (prompt 12 merged
+  into it); CI runs on pull requests and pushes to `main`.

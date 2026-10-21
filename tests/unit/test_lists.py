@@ -85,8 +85,10 @@ def test_candidates_cover_ranks_101_to_2000_with_chances_only_where_measured():
     out = candidates_table(inputs, chance_tables(inputs), {"epl": "Premier League"})
     assert list(out.columns) == list(DICTIONARY["candidates"])
     assert out["player_id"].is_unique
-    assert out["value_rank"].between(101, 2000).all()
-    assert len(out) == 1900
+    ranked = out["value_rank"].between(101, 2000)
+    assert ranked.sum() == 1900
+    assert out.loc[~ranked, "rising"].all()  # only risers valued below #2,000 are added
+    out = out[ranked]
     pool = (out["value_rank"] <= 1000) & (out["age"] < 24)
     assert out.loc[pool, "elite_chance_pct"].notna().all()
     assert out.loc[~pool, "elite_chance_pct"].isna().all()  # blank outside the elite pool
@@ -135,6 +137,7 @@ def test_bargains_table_and_dictionary_agree():
             "contract_expiry": pd.to_datetime(["2028-06-30", None]),
             "flag_count": [0, 1],
             "flags": ["none", "value lower than a year before (value -20% on a year before)"],
+            "explanation": ["No stat stands out.", "Plays 70% of team minutes, top 5% of x."],
             "on_loan": [False, True],
             "stale_value": [False, False],
             "value_date": pd.to_datetime(["2026-06-01", "2026-06-01"]),
@@ -148,3 +151,31 @@ def test_bargains_table_and_dictionary_agree():
     assert set(words["table"]) == {"candidates", "bargains"}
     assert words["meaning"].str.len().gt(20).all()  # one plain sentence each
     assert not words["meaning"].str.contains("\n").any()
+
+
+def test_risers_valued_below_2000_are_added_with_the_chances_blank():
+    inputs = _inputs()
+    s = inputs["scouting"]
+    newest = s["season"] == 2025
+    # make the top riser scores belong to players ranked below #2,000
+    low = newest & (s["value_rank"] > 2000) & (s["minutes_share"] >= 0.5)
+    s.loc[low, "score_riser"] = 2.0 + s.loc[low, "score_riser"]
+    out = candidates_table(inputs, chance_tables(inputs), {})
+    added = out[out["value_rank"] > 2000]
+    assert len(added) == min(50, int(low.sum()))
+    assert added["rising"].all()
+    for column in (
+        "elite_chance_pct",
+        "step_up_chance_pct",
+        "big_move_chance_pct",
+        "fall_back_risk_pct",
+        "step_up_decile",
+        "big_move_decile",
+    ):
+        assert added[column].isna().all(), column
+    assert added["flags"].notna().all()
+    assert added["explanation"].str.len().gt(0).all()
+    # the deciles of the ranked rows ignore the added ones
+    ranked = out[out["value_rank"] <= 2000]
+    assert ranked["step_up_decile"].value_counts().min() >= 189
+    assert out.index[out["value_rank"] > 2000].min() > out.index[out["value_rank"] <= 2000].max()

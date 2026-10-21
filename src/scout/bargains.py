@@ -182,14 +182,23 @@ def _record(name: str, outcome: str, season, group: pd.DataFrame, column: str) -
 
 
 def current_lists(
-    rows: pd.DataFrame, profiles: pd.DataFrame, snapshot: pd.Timestamp | None
+    rows: pd.DataFrame,
+    profiles: pd.DataFrame,
+    snapshot: pd.Timestamp | None,
+    season: int | None = None,
 ) -> dict[str, pd.DataFrame]:
-    """The newest season's eligible players of each list, cheapest first,
-    with contract expiry where it ends after the snapshot date."""
-    newest = rows[rows["season"] == rows["season"].max()]
+    """The season's eligible players of each list (the newest when None),
+    cheapest first, with contract expiry where it ends after the snapshot
+    date (never for a past season: the snapshot describes 2026)."""
+    newest_season = rows["season"].max()
+    season = newest_season if season is None else season
+    if season != newest_season:
+        snapshot = None
+    newest = rows[rows["season"] == season]
     contract = profiles.set_index("af_player_id")["contract_expiry"]
     expiry = newest["source_player_id"].map(contract)
-    expiry = expiry.where(expiry > snapshot) if snapshot is not None else expiry.where(False)
+    shown = expiry > snapshot if snapshot is not None else pd.Series(False, index=expiry.index)
+    expiry = expiry.where(shown)
     newest = newest.assign(contract_expiry=expiry)
     out = {}
     for name in LISTS:
@@ -201,9 +210,11 @@ def current_lists(
 # Running it
 
 
-def load(settings) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.Timestamp | None]:
+def load(
+    settings,
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.Timestamp | None, pd.DataFrame]:
     """(rows with value, prediction, ability and outcomes; profiles; team
-    Elo; snapshot date). Local files only: features, labels, the scouting and
+    Elo; snapshot date; the feature table). Local files only: features, labels, the scouting and
     fair value outputs, the Elo tables."""
     from scout.elo import read_tables
     from scout.providers.transfermarkt import TransfermarktValuationProvider
@@ -234,4 +245,4 @@ def load(settings) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.Timesta
     scouting = scouting.assign(season=scouting["season"].astype(int))
     data = data.merge(scouting[[*KEYS, "group", "ability_pct"]], on=KEYS, how="left")
     data = data.merge(outcomes(features, labels, teams), on=KEYS, how="left")
-    return data, profiles, teams, snapshot
+    return data, profiles, teams, snapshot, features

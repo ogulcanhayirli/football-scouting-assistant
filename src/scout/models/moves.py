@@ -91,7 +91,7 @@ def move_labels(
     )
     pairs = pairs[inside]
     is_top = [(s, t) in top_keys for s, t in zip(pairs["season"], pairs["team_in_id"], strict=True)]
-    pairs = pairs[is_top]
+    pairs = pairs[np.array(is_top, dtype=bool)]  # a plain empty list would select columns
     pairs = pairs[~_is_return(pairs, transfers)]
     first = pairs.sort_values("transfer_date").groupby("row").first()
 

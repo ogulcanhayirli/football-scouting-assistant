@@ -1,0 +1,49 @@
+table,column,meaning
+candidates,season,"The season the row describes (2025 is 2025/26, or the 2025 calendar year)."
+candidates,player_id,"The player's API Football id, for joining with other tables."
+candidates,player,The player's name as API Football writes it.
+candidates,age,"His age in years at the feature date, the day the row describes him."
+candidates,position,"His Transfermarkt position, such as Centre-Forward or Left-Back."
+candidates,club,The club he played most league minutes for that season.
+candidates,league,The league of that club.
+candidates,value_rank,Where his market value ranks among all players we track (1 is the dearest); blank when he has no market value.
+candidates,elite_decile,"Where the elite model puts him among this season's elite pool, from 1 (least likely) to 10 (most likely); blank outside the pool."
+candidates,elite_chance_pct,"Of past players in the same elite decile, the share who became one of the 100 most valuable players within two seasons, rounded to 5; blank outside the elite pool (ranked 101 to 1,000 and 23 or under)."
+candidates,elite_chance_players,How many past players that elite chance is based on.
+candidates,step_up_decile,"Where the step up model puts him among this season's candidates, from 1 to 10."
+candidates,step_up_chance_pct,"Of past players ranked 101 to 2,000 in the same step up decile, the share whose value rank became at least three times better, inside the top 500, within two seasons, rounded to 5."
+candidates,step_up_chance_players,How many past players that step up chance is based on.
+candidates,fall_back_risk_pct,"Of past elite pool players with the same number of flags, the share whose value rank was at least twice as bad two seasons later, rounded to 5; blank outside the elite pool, where it was never measured."
+candidates,fall_back_risk_players,How many past players that fall back risk is based on.
+candidates,flag_count,"How many warning flags he raises: low minutes, injured, value falling."
+candidates,flags,"The raised flags, each with his own number, or none."
+candidates,explanation,"The 3 stats where he stands furthest from regulars of his position and age band this season, each with his number and where it ranks (top means better, even for stats where less is better); a neutral sentence when nothing is in the top or bottom 10%. It reads the same numbers as the flags."
+candidates,rising,"True when the riser model has him in this season's top 50: likely to play clearly better in each of the next two seasons and end at the 70th percentile of his position or better (players with at least 50% of team minutes). Risers valued below #2,000 are added as rows of their own, with the chances blank."
+candidates,big_move_decile,"Where the big move model puts him among this season's candidates, from 1 to 10; blank when he already plays for a top 20 club."
+candidates,big_move_chance_pct,"Of past players ranked 101 to 2,000 in the same big move decile, the share who joined a top 20 club (by squad value) within 24 months, rounded to 5."
+candidates,big_move_chance_players,How many past players that big move chance is based on.
+candidates,value_eur,"His Transfermarkt market value at the feature date, in euros."
+candidates,fair_value_eur,"What the fair value model, trained on earlier seasons only, says a player with his record is worth, in euros."
+candidates,ability_pct,"His ability score as a percentile among regulars of his position that season (100 is the best), from per 90 stats of the last two seasons."
+bargains,season,The season the row describes.
+bargains,list,prime (29 and under) or experienced (30 to 33).
+bargains,list_rank,"His place on that list, 1 being the cheapest against the fair value."
+bargains,player_id,The player's API Football id.
+bargains,player,The player's name as API Football writes it.
+bargains,age,His age in years at the feature date.
+bargains,position,His Transfermarkt position.
+bargains,club,The club he played most league minutes for that season.
+bargains,league,The league of that club.
+bargains,ability_pct,His ability percentile within his position (70 or better to be listed).
+bargains,minutes_share,The share of his club's league minutes he played (half or more to be listed).
+bargains,value_eur,"His Transfermarkt market value at the feature date, in euros."
+bargains,fair_value_eur,"What the fair value model, trained on earlier seasons only, says he is worth, in euros."
+bargains,value_to_fair,Market value divided by fair value: 0.40 means the market asks 40% of the model's price.
+bargains,value_to_fair_pct,That ratio as a percentile among listed players of his position group (1 is the cheapest); the lists are sorted by it.
+bargains,contract_expiry,"When his contract ends, from the Transfermarkt snapshot, shown only when it ends after the snapshot date."
+bargains,flag_count,"How many warning flags he raises: low minutes, injured, value falling."
+bargains,flags,"The raised flags, each with his own number, or none."
+bargains,explanation,"The 3 stats where he stands furthest from regulars of his position and age band this season, each with his number and where it ranks (top means better, even for stats where less is better); a neutral sentence when nothing is in the top or bottom 10%. It reads the same numbers as the flags."
+bargains,on_loan,True when he is on loan: the parent club decides the sale and the price.
+bargains,stale_value,"True when his market value is dated more than 180 days before the feature date, so the cheap price may be out of date."
+bargains,value_date,The date of his market value.

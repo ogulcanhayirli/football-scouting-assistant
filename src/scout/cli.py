@@ -241,6 +241,32 @@ def cmd_lists(settings: Settings, args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_forecast(settings: Settings, args: argparse.Namespace) -> int:
+    from scout import forecast
+
+    if args.action == "freeze":
+        import pandas as pd
+
+        from scout.lists import league_names
+
+        date = args.date or pd.Timestamp.now(tz="UTC").strftime("%Y-%m-%d")
+        scouting = pd.read_parquet(settings.paths.processed_dir / "models" / "scouting.parquet")
+        folder = forecast.freeze(
+            settings.paths.processed_dir / "lists",
+            scouting,
+            league_names(settings),
+            Path(args.root) / date,
+        )
+        print(folder)
+    elif args.action == "score":
+        if not args.folder:
+            raise SystemExit("forecast score needs a forecast folder")
+        print(forecast.run_score(settings, Path(args.folder), args.as_of))
+    else:
+        print(forecast.run_history(settings))
+    return 0
+
+
 def cmd_elo(settings: Settings, args: argparse.Namespace) -> int:
     from scout.elo_compare import run_elo_comparison
 
@@ -482,6 +508,18 @@ def main(argv: list[str] | None = None) -> int:
         "run after backtest, moves and scouting",
     )
     lists.set_defaults(func=cmd_lists)
+
+    fc = sub.add_parser(
+        "forecast",
+        help="Registered forecasts: freeze today's lists into forecasts/<date>, score a "
+        "folder at a later feature date, or rebuild and score 2015 to 2023 (history)",
+    )
+    fc.add_argument("action", choices=["freeze", "score", "history"])
+    fc.add_argument("folder", nargs="?", help="score: the forecast folder")
+    fc.add_argument("--as-of", help="score: the later feature date (default: the newest)")
+    fc.add_argument("--date", help="freeze: the folder's date (default: today, UTC)")
+    fc.add_argument("--root", default="forecasts", help="freeze: where the folder goes")
+    fc.set_defaults(func=cmd_forecast)
 
     elo = sub.add_parser(
         "elo",

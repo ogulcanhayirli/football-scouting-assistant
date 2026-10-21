@@ -69,7 +69,13 @@ def test_the_ability_flag_follows_the_owners_rule():
 
 
 def test_buckets_round_to_five_and_hide_small_groups():
-    assert count_bucket(pd.Series([0, 1, 2, 3, 4])).tolist() == ["0", "1", "2", "3+", "3+"]
+    assert count_bucket(pd.Series([0, 1, 2, 3, 4])).tolist() == [
+        "0",
+        "1",
+        "2 or more",
+        "2 or more",
+        "2 or more",
+    ]
     assert rounded(0.374) == 35
     assert rounded(0.376) == 40
     assert rounded(0.02) == 0

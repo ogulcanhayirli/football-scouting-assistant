@@ -570,6 +570,79 @@ ability scan and the three year fall back check, whose numbers are recorded
 above. The strength variants (`transfer`, `elo`, `transfer_elo`) stay
 selectable; `v2` is the one default path.
 
+## Explanations, two fixes and the first registered forecast (prompt 14, 21 October 2026)
+
+**Explanations** (`src/scout/explain.py`). Both tables carry `explanation`:
+the three stats where the player stands furthest from the regulars of his
+position group and age band that season (37 leagues pooled), each as a plain
+sentence with his number and where it ranks, for example "Takes 13% of his
+team's shots, top 1% of wingers aged under 21." Rule based templates for 19
+stats (outfield, goalkeeper only, or all); a stat counts when it is in the
+top or bottom 10%, a band with fewer than 30 peers falls back to the position
+group, and "top 4%" means 4% of peers are at least as good, so a value many
+share (no yellow card) never reads as the top. Flags and explanation read
+one peer table, and a flag column is told only on the side its flag says
+(low minutes only as a weakness when the flag is raised, never as one when
+it is not), so they cannot contradict each other. 8.6% of candidates get the
+neutral sentence ("No stat stands out against other centre backs aged 24 to
+26 this season (15 compared)"); none is empty.
+
+**Fall back by flag count: 2 or more is one bucket.** The 3+ bucket was
+small and dipped below 2 (20% against 25%). Now 0, 1, 2 or more: 15%
+(1,318 players), 20% (788), 25% (405) over 2015 to 2023.
+
+**Rising rows.** The riser model's current top 50 are rows of the candidates
+table even when valued below #2,000: **38 rows added** (36 ranked below
+#2,000, 2 without a market value), 1,830 rows in all. 11 risers were already
+in the table and 1 is in the top 100, which the table does not list. The
+added rows have every chance blank (never measured there), the rising tag
+set, and flags and explanation like any other row.
+
+**The young pool (limit).** Among players 23 and under, the elite model
+barely beats value rank plus age: AUC 0.774 against 0.771 for the
+`rank_rate` baseline in the prompt 12 run, and its top 50 is slightly worse
+(0.342 against 0.349). The market's own price already holds most of what the
+model knows about a young player's chance of becoming elite. The product's
+value is therefore not prediction beyond the market but calibrated odds (a
+historical rate per bucket, with its count), risk flags with their raw
+numbers, and the same treatment across 37 leagues, where nobody prices every
+player by hand.
+
+**Registered forecast and its scoring** (`src/scout/forecast.py`,
+`scout forecast`). `forecasts/2026-10-21/` holds the two tables of 21
+October 2026 (season 2025, feature dates 30 June 2026, 1 January 2026 for
+the eight calendar year leagues; Transfermarkt valuations end 12 June 2026)
+with the dictionary, `forecast.json` and a README of what each column
+promises. `scout forecast score FOLDER --as-of DATE` scores a folder from
+later seasons' value ranks and the transfers, using nothing dated after
+`--as-of`. `scout forecast history` rebuilt the tables of every season 2015
+to 2023 in the same format (backtest scores, chance tables only from seasons
+whose two year outcome was known by then) and scored each two seasons on.
+Pooled:
+
+| promise | bucket shown | players | happened |
+|---|---|---:|---:|
+| elite chance | under 5% / 5% / 10% / 15% | 322 / 803 / 249 / 378 | 3.7% / 3.5% / 7.6% / 13.0% |
+| | 20% / 25% / 30% / 40% | 167 / 246 / 76 / 141 | 15.0% / 23.6% / 23.7% / 30.5% |
+| | base rate | 2,440 | 11.3% |
+| fall back risk | 15% / 20% / 25% / 30% | 854 / 747 / 260 / 64 known | 13.8% / 19.8% / 22.7% / 23.4% |
+| | base rate | 1,925 known | 17.7% |
+| step up chance | under 5% / 5% / 10% / 15% / 20% | 6,575 / 4,378 / 2,799 / 1,057 / 878 known | 0.3% / 3.5% / 11.2% / 14.8% / 22.9% |
+| | base rate | 15,687 known | 5.4% |
+| big move chance | under 5% / 5% / 10% / 15% / 25% / 30% | 4,861 / 4,126 / 1,774 / 1,177 / 1,181 / 150 | 1.4% / 4.9% / 9.5% / 15.0% / 26.6% / 24.0% |
+| | base rate | 13,269 | 7.3% |
+| bargains, value rose | prime top 50 against the list | 394 / 7,947 known | 67.0% / 47.6% |
+| | experienced top 50 against the list | 355 / 1,941 known | 14.4% / 7.1% |
+
+Step up, big move and fall back are calibrated within a few points. The
+elite chance is about right up to 25% but **too high at the top**: the 40%
+bucket made it 30.5% of the time (the 35% and 45% buckets, 28 and 30
+players, 42.9% and 36.7%). The current table's top decile also says 40%, so
+read it as about 30%. The scorer's outcomes (later seasons' feature rows)
+agree with the stored model labels (the valuation two years on) on 98.4%
+(elite), 98.9% (step up), 98.2% (fall back), 99.9% (big move) and 96.7%
+(value rose) of rows. Details per season in `reports/forecast_history.md`.
+
 ## Next
 
 1. The clean check above: tune on earlier seasons, score on later ones.
