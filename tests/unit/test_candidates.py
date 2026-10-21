@@ -9,7 +9,9 @@ from scout.candidates import (
     count_bucket,
     flag_effects,
     merge_low,
+    not_monotonic,
     rate_table,
+    realized_tables,
     rounded,
     score_deciles,
     show_rate,
@@ -130,3 +132,61 @@ def test_chance_table_merges_small_deciles_and_looks_up_rates():
     found = chance.lookup(pd.Series([1, 10]))
     assert found["players"].tolist() == [40, 40]
     assert found["pct"].tolist() == [0, 50]
+
+
+def _outcomes():
+    """Two forecast seasons; in 2020 decile 10 made it 60% of the time, in
+    2021 20%. Deciles 1 to 9 hold 20 known players a season, decile 10
+    holds 50 (one unknown outcome each season)."""
+    rows = []
+    for season, top in ((2020, 0.6), (2021, 0.2)):
+        for decile in range(1, 11):
+            n = 50 if decile == 10 else 20
+            made = round(n * (top if decile == 10 else 0.05 * (decile > 5)))
+            for i in range(n):
+                rows.append(
+                    {
+                        "season": season,
+                        "elite_decile": decile,
+                        "elite": float(i < made),
+                        "step_up_decile": decile,
+                        "step_up": 0.0,
+                        "big_move_decile": decile,
+                        "big_move": 0.0,
+                        "fall_back_bucket": ["0", "1", "2 or more"][i % 3] if decile > 8 else None,
+                        "fall_back": float(i % 3 == 2),
+                    }
+                )
+        rows.append({"season": season, "elite_decile": 10, "elite": np.nan})
+    return pd.DataFrame(rows)
+
+
+def test_realized_tables_use_known_outcomes_of_past_forecasts_only():
+    out = _outcomes()
+    early = realized_tables(out, through=2020)["elite"]  # only 2020
+    assert early.mapping[1] == early.mapping[2] == "1 to 2"  # 20 known players a decile
+    assert early.mapping[9] == early.mapping[10] == "9 to 10"
+    # one of decile 9's 20 and 30 of decile 10's 50; the unknown outcome is not counted
+    assert early.pooled.loc["9 to 10", "players"] == 70
+    assert early.pooled.loc["9 to 10", "rate"] == pytest.approx(31 / 70)
+    both = realized_tables(out)["elite"]
+    assert both.pooled.loc["10", "rate"] == pytest.approx(0.4)
+    assert both.mapping[1] == "1"  # 40 known players over two seasons
+    found = both.lookup(pd.Series([10]))
+    assert found["pct"].tolist() == [40]
+    assert found["players"].tolist() == [100]
+    fall = realized_tables(out)["fall_back"]
+    assert fall.pooled.loc["2 or more", "rate"] == 1.0
+    assert fall.pooled.loc["0", "players"] == 2 * (7 + 17)  # deciles 9 and 10, both seasons
+    empty = realized_tables(out, through=2019)["elite"]
+    assert empty.lookup(pd.Series([10]))["pct"].isna().all()
+
+
+def test_not_monotonic_names_a_bucket_below_the_one_before():
+    out = _outcomes()
+    table = realized_tables(out)["elite"]
+    assert not_monotonic(table) == []
+    flipped = out.assign(elite=np.where(out["elite_decile"] == 1, 1.0, out["elite"]))
+    found = not_monotonic(realized_tables(flipped)["elite"])
+    assert len(found) == 1
+    assert found[0].startswith("2 (0.0%, n=40) is below 1 (100.0%, n=40)")

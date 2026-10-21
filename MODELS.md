@@ -643,6 +643,85 @@ agree with the stored model labels (the valuation two years on) on 98.4%
 (elite), 98.9% (step up), 98.2% (fall back), 99.9% (big move) and 96.7%
 (value rose) of rows. Details per season in `reports/forecast_history.md`.
 
+## Shown chances are realized rates of past forecasts (prompt 14b, 21 October 2026)
+
+The prompt 14 scoring showed the elite chance too optimistic at the top
+(shown 40%, happened 30.5%). Every shown chance was an in sample rate: the
+backtest rows of every test season pooled per bucket. Since prompt 14b each
+chance (elite by decile, step up and big move by decile, fall back by flag
+count) is the **realized rate of the rebuilt past forecasts**: of the players
+that `scout forecast history` put in the bucket, with the models and buckets
+of their season, the share whose outcome came true two seasons on
+(`realized_tables` in `src/scout/candidates.py`). The 30 player floor now
+counts players with a known outcome; rounding to 5% stays; the count shown is
+that number. A forecast for season S uses forecast seasons up to S minus 2
+only, so the 2025 table uses 2015 to 2023 (all scored by the 30 June 2026
+feature date). `scout forecast history` runs twice: the first pass (in sample
+rates, `history/in_sample/`) fixes each row's bucket and outcome in
+`history/outcomes.parquet`, which the buckets do not depend on; the second
+shows the realized rates. `scout lists` now runs after `forecast history`.
+
+Old against new, every bucket of the current table (n: players behind the
+rate; old counts backtest rows, new counts forecast players with a known
+outcome):
+
+| promise | bucket | old | new | new, unrounded |
+|---|---|---|---|---:|
+| elite | decile 1 / 2 | under 5% (287 / 294) | under 5% (240 / 244) | 1.7% / 2.5% |
+| | decile 3 / 4 / 5 | 5% (292 / 293 / 295) | 5% (243 / 246 / 244) | 3.3% / 4.5% / 5.3% |
+| | decile 6 | 10% (290) | 10% (242) | 9.5% |
+| | decile 7 | 15% (292) | 15% (245) | 13.9% |
+| | decile 8 | 20% (293) | **15%** (244) | 15.6% |
+| | decile 9 | 25% (293) | **20%** (243) | 21.4% |
+| | decile 10 | 40% (296) | **35%** (249) | 34.5% |
+| step up | deciles 1 to 4 | under 5% (about 1,975 each) | under 5% (1,543 to 1,570) | 0.0% to 0.6% |
+| | decile 5 | 5% (1,977) | **under 5%** (1,573) | 1.7% |
+| | decile 6 / 7 | 5% (1,976 / 1,975) | 5% (1,573 / 1,575) | 3.1% / 5.7% |
+| | decile 8 | 10% (1,977) | 10% (1,576) | 8.6% |
+| | decile 9 | 15% (1,975) | **10%** (1,575) | 12.4% |
+| | decile 10 | 20% (1,983) | 20% (1,583) | 21.4% |
+| big move | deciles 1 to 3 | under 5% (about 1,665 each) | under 5% (about 1,325 each) | 0.5% / 1.1% / 1.3% |
+| | deciles 4 to 7 | 5% (about 1,665 each) | 5% (about 1,327 each) | 2.8% / 3.8% / 4.6% / 7.4% |
+| | decile 8 / 9 / 10 | 10% / 15% / 25% (1,665 / 1,665 / 1,670) | 10% / 15% / 25% (1,328 / 1,327 / 1,331) | 10.2% / 14.8% / 26.3% |
+| fall back | 0 / 1 / 2 or more flags | 15% / 20% / 25% (1,318 / 788 / 405) | 15% / 20% / 25% (1,298 / 720 / 384) | 15.3% / 20.3% / 24.7% |
+
+Every realized rate rises from bucket to bucket; the report
+(`reports/candidates.md`) checks it and would name any bucket out of order
+rather than smooth it. 99 elite pool players show a lower elite chance, 359
+candidates a lower step up chance; no player changed bucket, order or flags,
+and the bargains table is unchanged.
+
+**Out of sample check** (`reports/forecast_history.md`). The rebuilt
+forecasts of 2017 to 2023 now show realized rates from forecast seasons two
+or more earlier (2015 and 2016 have none before them). Shown against what
+happened, pooled, next to the in sample rate on the same seasons:
+
+| promise | realized rate shown: happened | in sample shown: happened |
+|---|---|---|
+| elite | 15%: 14.3%, 20%: 20.1%, 25%: 33.3% (84), 35%: 29.8% (57), 40%: 32.5% (114) | 15%: 12.1%, 20%: 15.0%, 25%: 22.1%, 40%: 30.5% (141) |
+| fall back | 15%: 13.9%, 20%: 18.1%, 25%: 18.9%, 30%: 24.7%, 35%: 23.4% | 15%: 13.8%, 20%: 19.8%, 25%: 22.7%, 30%: 23.4% |
+| step up | 5%: 5.9%, 10%: 10.1%, 15%: 13.5%, 20%: 22.5% | 5%: 3.5%, 10%: 10.4%, 15%: 14.8%, 20%: 22.9% |
+| big move | 5%: 4.3%, 10%: 9.6%, 15%: 14.1%, 25%: 26.5% | 5%: 4.5%, 10%: 9.0%, 15%: 15.5%, 25%: 26.5% |
+
+The realized rates fix the middle of the elite chance (20% now happens
+20.1%, was 15.0%) and narrow the top gap (40% shown, 32.5% happened, against
+30.5%), but the top still runs high out of sample by about 6 to 8 points.
+Fall back gets worse at the top (35% shown, 23.4% happened): the 30% and
+35% shown buckets come from 2017 to 2019, whose realized tables rested on
+one to three seasons with higher fall back rates. Early tables are thin;
+the current one rests on nine seasons. Its top elite decile (34.5% pooled)
+made it 37.5%, 42.3% and 42.9% in 2015 to 2017 but 27.6% to 32.1% in each
+season 2020 to 2023 (about 28 players a season): the pooled rate leans on
+the early seasons, so the 35% shown is likely still a few points high.
+Treat the top elite chance as a ceiling rather than a midpoint; weighting
+recent seasons would be the owner's call.
+
+The registered forecast `forecasts/2026-10-21/` was revised in place with
+the same date (`scout forecast revise`): `forecast.json` and its README
+record the revision, the reason and every bucket's old and new value; the
+original is commit e012805, and the revised one carries the git tag
+`forecast-2026-10-21`.
+
 ## Next
 
 1. The clean check above: tune on earlier seasons, score on later ones.

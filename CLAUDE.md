@@ -88,10 +88,11 @@ $C moves                                     # big move model, current scores
 $C elo                                       # team Elo from cached fixtures, reports/elo.md
 $C scouting [--strength v2|transfer|elo|transfer_elo]  # league strength, ability, elite, step up, riser
 $C ability                                  # ability versions: stability, backtest (reports/ability.md)
-$C lists                                    # the two tables and reports/candidates.md; run after backtest, moves, scouting
+$C lists                                    # the two tables and reports/candidates.md; run after backtest, moves, scouting, forecast history
 $C forecast freeze [--date YYYY-MM-DD]       # copy today's lists into forecasts/<date>; never overwrites
 $C forecast score forecasts/2026-10-21 --as-of 2027-06-30  # promised buckets against what happened
-$C forecast history                         # rebuild and score 2015 to 2023 (reports/forecast_history.md)
+$C forecast history                         # rebuild and score 2015 to 2023 (reports/forecast_history.md); before lists
+$C forecast revise forecasts/2026-10-21 --reason "..."  # rewrite a registered folder from today's lists, date kept, reason recorded
 $C sync up | down [--dry-run] [--only raw|processed|reports]
 uv run python scripts/run_extras.py          # sidelined, coaches, events (done 17 October)
 uv run python scripts/rebuild_match_seasons.py --from-s3 serie_b:2016  # re-parse partitions offline after an adapter repair
@@ -204,9 +205,11 @@ October 2026, from MODELS.md and `reports/`:
   2 or more merged): 15% (0 flags), 20% (1), 25% (2 or more).
 * Forecast history (prompt 14, `scout forecast history`, 2015 to 2023
   rebuilt and scored two seasons on): step up, big move and fall back
-  chances are calibrated within a few points; the elite chance runs high at
+  chances are calibrated within a few points; the elite chance ran high at
   the top (shown 40%, happened 30.5%). Bargains: prime top 50 value rose
   67.0% against 47.6% for the whole list, experienced 14.4% against 7.1%.
+  Since prompt 14b every shown chance is the realized rate of these
+  forecasts (Forecasts below); the top elite decile now shows 35%.
 * Ability score stability (year to year): version 2 0.858 against 0.503 for
   version 1 and 0.537 for the rating with the Elo team term (37 leagues);
   0.656 against 0.431 two seasons apart, where pooling cannot help.
@@ -264,8 +267,29 @@ detail stays in `reports/scouting.md`, `reports/moves.md`,
   of 21 October 2026 as CSV with `dictionary.csv`, `forecast.json` (season
   2025, feature dates 30 June 2026 and 1 January 2026 for the eight calendar
   year leagues, Transfermarkt valuations ending 12 June 2026, row counts)
-  and a README of what each column promises. Never edit it; a new forecast
-  gets a new dated folder (`scout forecast freeze` refuses to overwrite).
+  and a README of what each column promises. Never edit it by hand; a new
+  forecast gets a new dated folder (`scout forecast freeze` refuses to
+  overwrite). Only an owner decision on what a column promises rewrites it,
+  through `scout forecast revise FOLDER --reason TEXT`: same date and rows,
+  the revision, its reason and every bucket's old and new value in
+  `forecast.json` and the README, the original left in git.
+* **Revision 1 (prompt 14b, 21 October 2026).** The owner's calibration fix:
+  every displayed chance (elite by decile, step up, big move, fall back by
+  flag count) is the realized rate of the rebuilt past forecasts (built with
+  the models and buckets of their season, scored two seasons on), no longer
+  the in sample rate of the pooled backtest rows, which showed 40% at the
+  top of the elite chance while 30.5% happened. 30 player floor on known
+  outcomes, rounding to 5% and the count kept. Changed buckets: elite
+  deciles 8, 9, 10 from 20%, 25%, 40% to 15%, 20%, 35%; step up decile 5
+  from 5% to under 5% and decile 9 from 15% to 10%; big move and fall back
+  unchanged. All realized rates rise with their neighbours. The original is
+  commit e012805; the revised folder is tagged `forecast-2026-10-21`.
+  Out of sample (2017 to 2023) the top elite bucket still ran high (40%
+  shown, 32.5% happened) and fall back's top shown buckets came from thin
+  early tables (35% shown, 23.4% happened). The top elite decile made it
+  27.6% to 32.1% in each season 2020 to 2023 against 34.5% pooled, so 35%
+  is likely still a few points high; weighting recent seasons is the
+  owner's call. MODELS.md.
 * `scout forecast score FOLDER --as-of DATE` (`src/scout/forecast.py`)
   reads a folder and the local tables up to that date and writes
   `reports/forecast_<folder>_at_<date>.md`: elite chance bucket against the
@@ -279,7 +303,11 @@ detail stays in `reports/scouting.md`, `reports/moves.md`,
 * `scout forecast history` rebuilds 2015 to 2023 in the same folder format
   under `data/processed/forecasts/history/` and scores each two seasons on
   (`reports/forecast_history.md`); the scorer agrees with the stored labels
-  on 96.7% to 99.9% of rows.
+  on 96.7% to 99.9% of rows. It runs twice: in sample rates first
+  (`history/in_sample/`), whose scored buckets and outcomes go to
+  `history/outcomes.parquet`; then the realized rates of seasons up to S
+  minus 2 (`history/<season>/`; 2015 and 2016 show none). `scout lists`
+  reads `outcomes.parquet`, so run it after `forecast history`.
 
 ## Version 2 directions
 
@@ -383,19 +411,22 @@ Settle them with the owner rather than guessing.
   drawn, duels; prior 2,100 minutes): a full goalkeeper season counts about
   60% against the position mean. A goalkeeper specific base (goals conceded against the
   team's expected) would need xG, which the API has only from 2023/24.
-* The prompt 12 rebuild was in S3 by 21 October. The prompt 14 rebuild
-  (`data/processed/lists/`, `data/processed/models/bargains_backtest.parquet`,
-  `data/processed/forecasts/history/`, `reports/candidates.md`,
-  `reports/forecast_history.md`) is local only; the owner syncs it up.
+* The prompt 12 rebuild was in S3 by 21 October. The prompt 14 and 14b
+  rebuild (`data/processed/lists/`, `data/processed/models/bargains_backtest.parquet`,
+  `data/processed/forecasts/history/` with `outcomes.parquet`,
+  `reports/candidates.md`, `reports/forecast_history.md`) is local only; the
+  owner syncs it up. A fresh session needs `sync down` plus
+  `raw/transfermarkt/players.csv.gz.meta.json` (the snapshot date for
+  contract expiry) to rebuild the lists byte for byte.
   `reports/scouting_elo.md` is still the 17 league Elo run.
 * Elite on the young: among the 23 and under pool the elite model barely
   beats the value rank and age baseline (AUC 0.774 against 0.771) and its
   top 50 is slightly worse (0.342 against 0.349). Recorded as a limit in
   MODELS.md and README.md (prompt 14): the product's value is calibrated
   odds, risk flags and coverage of 37 leagues, not prediction beyond the
-  market. The rebuilt forecasts also show the top elite decile running high
-  (shown 40%, happened 30.5%); whether to shrink the shown rate is the
-  owner's call.
+  market. The top elite decile ran high (shown 40%, happened 30.5%); the
+  owner settled it in prompt 14b with realized rates (now 35%), but out of
+  sample the top bucket still ran about 7 points high (Forecasts).
 * The ability flag would pass the 1.3 rule below the 50th percentile (x1.33)
   but not at 55 (x1.26); the threshold was not moved after looking.
   Bargains need half of team minutes, so the minutes flag never fires on

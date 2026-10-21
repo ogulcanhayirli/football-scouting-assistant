@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from scout.forecast import freeze, read_folder, score, write_folder
+from scout.forecast import freeze, read_folder, revise, score, shown_buckets, write_folder
 
 KEYS = ["league_key", "season", "source_player_id"]
 
@@ -157,3 +157,70 @@ def test_freeze_copies_the_lists_and_never_overwrites(tmp_path):
     assert "elite_chance_pct" in text
     with pytest.raises(FileExistsError):
         freeze(lists, _scouting(), {}, folder)
+
+
+def _lists(tmp_path, cand, barg):
+    lists = tmp_path / "lists"
+    lists.mkdir(exist_ok=True)
+    cand.to_csv(lists / "candidates.csv", index=False)
+    barg.to_csv(lists / "bargains.csv", index=False)
+    pd.DataFrame({"table": ["candidates"], "column": ["x"], "meaning": ["y"]}).to_csv(
+        lists / "dictionary.csv", index=False
+    )
+    return lists
+
+
+def _shown(cand):
+    return cand.assign(
+        age=[20.0, 21.0, 22.0, 25.0, 19.0],
+        elite_decile=[10, None, 10, 1, None],
+        elite_chance_players=[296, None, 296, 287, None],
+        step_up_decile=[3, 10, 3, 3, 1],
+        step_up_chance_players=1000,
+        big_move_decile=[5, 5, 5, 5, 10],
+        big_move_chance_players=1000,
+        flag_count=[0, 1, 2, 3, 0],
+        fall_back_risk_players=[1318, None, 405, None, None],
+    )
+
+
+def test_shown_buckets_put_fall_back_in_the_elite_pool_only():
+    _, cand, _ = _forecast()
+    b = shown_buckets(_shown(cand))
+    assert b["fall_back"].tolist()[:3] == ["0", "1", "2 or more"]
+    assert pd.isna(b["fall_back"].iloc[3])  # 25 is too old
+    assert pd.isna(b["fall_back"].iloc[4])  # #1,500 is outside the pool
+    assert b["elite"].tolist()[0] == 10
+
+
+def test_revise_keeps_the_date_and_records_every_bucket(tmp_path):
+    _, cand, barg = _forecast()
+    cand = _shown(cand)
+    folder = freeze(
+        _lists(tmp_path, cand, barg), _scouting(), {"epl": "Premier League"}, tmp_path / "f"
+    )
+    new = cand.assign(
+        elite_chance_pct=[35, None, 35, 0, None], elite_chance_players=[249, None, 249, 240, None]
+    )
+    lists = _lists(tmp_path, new, barg)
+    revise(lists, folder, "Shown rates are now realized rates.", "2021-07-02", "abc1234")
+    meta = json.loads((folder / "forecast.json").read_text())
+    assert meta["created"] == "f"  # the folder's name, kept
+    (rev,) = meta["revisions"]
+    assert rev["date"] == "2021-07-02"
+    assert rev["changed"] == ["candidates.csv"]
+    assert rev["replaces_commit"] == "abc1234"
+    top = next(r for r in rev["buckets"] if r["promise"] == "elite" and r["bucket"] == "decile 10")
+    assert top == {
+        "promise": "elite",
+        "bucket": "decile 10",
+        "players now": 2,
+        "old": "40% (n=296)",
+        "new": "35% (n=249)",
+    }
+    assert (folder / "candidates.csv").read_bytes() == (lists / "candidates.csv").read_bytes()
+    text = (folder / "README.md").read_text()
+    assert "## Revisions" in text
+    assert "Shown rates are now realized rates." in text
+    with pytest.raises(ValueError, match="other rows"):
+        revise(_lists(tmp_path, new.iloc[:4], barg), folder, "x", "2021-07-03", "abc")

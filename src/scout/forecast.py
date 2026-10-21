@@ -35,9 +35,26 @@ count stands next to every share.
 
 ``scout forecast history`` rebuilds the forecast of every season 2015 to
 2023 in the same folder format (``data/processed/forecasts/history``), each
-from backtest scores and chance tables of seasons whose outcomes were known
-by then, and scores it two seasons on, so the command is tested on nine
-seasons before the first registered forecast comes due in 2027.
+from the backtest's out of sample scores, and scores it two seasons on, so
+the command is tested on nine seasons before the first registered forecast
+comes due in 2027. It runs twice (prompt 14b):
+
+1. with the in sample chance tables (the backtest rows of seasons up to S
+   minus 2 pooled; ``history/in_sample/<season>``). Its scored rows, the
+   bucket each player was in and what happened, go to
+   ``history/outcomes.parquet``; the buckets do not depend on the rate
+   shown, so this pass fixes them.
+2. with the realized rates of those scored forecasts, again from seasons up
+   to S minus 2 only (``history/<season>``): the rate shown since prompt
+   14b. 2015 and 2016 have no scored forecast before them and show no
+   chance, so the new rates are tested on 2017 to 2023.
+
+``scout lists`` reads ``outcomes.parquet`` for the current table.
+
+``scout forecast revise FOLDER --reason TEXT`` rewrites a registered folder
+from today's lists when the owner changes what a column promises: the date
+stays, ``forecast.json`` and the README record the revision, its reason and
+every bucket's old and new value, and the original stays in git.
 """
 
 from __future__ import annotations
@@ -51,6 +68,7 @@ import numpy as np
 import pandas as pd
 
 from scout import bargains
+from scout.candidates import COUNT_BUCKETS, count_bucket
 from scout.fsutil import atomic_write_text
 from scout.scouting import (
     ELITE_RANK,
@@ -58,6 +76,7 @@ from scout.scouting import (
     HORIZON_SEASONS,
     STEP_UP_FACTOR,
     STEP_UP_RANK,
+    elite_pool,
 )
 
 log = logging.getLogger(__name__)
@@ -129,6 +148,26 @@ def read_folder(folder: Path) -> tuple[dict, pd.DataFrame, pd.DataFrame]:
     return meta, cand, barg
 
 
+def revision_lines(meta: dict) -> list[str]:
+    lines = []
+    for number, rev in enumerate(meta.get("revisions", []), start=1):
+        lines += [
+            f"### Revision {number}, {rev['date']}",
+            "",
+            rev["reason"],
+            "",
+            f"Changed: {', '.join(rev['changed'])}. The original is in git at commit "
+            f"{rev['replaces_commit']}.",
+            "",
+            "Every bucket of this forecast, old against new: the shown share and the number "
+            "of past players behind it, and how many of this season's players are in it.",
+            "",
+            pd.DataFrame(rev["buckets"]).to_markdown(index=False),
+            "",
+        ]
+    return lines
+
+
 def readme(meta: dict, words: pd.DataFrame) -> str:
     dates = "; ".join(f"{d} for {', '.join(v)}" for d, v in meta["feature_dates"].items())
     rows = meta["rows"]
@@ -147,6 +186,14 @@ def readme(meta: dict, words: pd.DataFrame) -> str:
         f"{meta['valuation_end']} (the latest value in these tables is dated "
         f"{meta['latest_value_date']}).",
         f"* Rows: {rows['candidates']:,} candidates, {rows['bargains']:,} bargains.",
+        *(
+            [
+                f"* Revised: {', '.join(r['date'] for r in meta['revisions'])} (see Revisions); "
+                "the date and the rows are those of the original.",
+            ]
+            if meta.get("revisions")
+            else []
+        ),
         f"* Due: {meta['horizon_seasons']} seasons on, at the feature dates of season "
         f"{meta['season'] + meta['horizon_seasons']} (two years after the dates above); an "
         "interim score is possible after one season.",
@@ -155,14 +202,15 @@ def readme(meta: dict, words: pd.DataFrame) -> str:
         "",
         "## What each column promises",
         "",
-        "Every chance is a historical rate: of past players in the same bucket, the share "
-        "who made it. A well calibrated forecast sees about that share of this season's "
-        "players in the bucket make it too.",
+        "Every chance is a historical rate: of the players that past forecasts, rebuilt for "
+        "each season with the models and buckets of that time and scored two seasons on, put "
+        "in the same bucket, the share who made it (the realized rate, since prompt 14b). A "
+        "well calibrated forecast sees about that share of this season's players in the "
+        "bucket make it too.",
         "",
         "* `elite_chance_pct`: that share of the bucket's players reach the 100 most "
         "valuable players within two seasons (elite pool only: ranked #101 to #1,000, 23 or "
-        "under). Rebuilt forecasts of 2015 to 2023 saw 30.5% of the players shown 40% make "
-        "it, so the top bucket runs high (MODELS.md).",
+        "under).",
         "* `fall_back_risk_pct`: that share of the elite pool players with the same flag "
         "count (0, 1, 2 or more) have a value rank at least twice as bad two seasons on.",
         "* `step_up_chance_pct`: that share of the bucket's players (ranked #101 to #2,000) "
@@ -182,6 +230,8 @@ def readme(meta: dict, words: pd.DataFrame) -> str:
         words.to_markdown(index=False),
         "",
     ]
+    if meta.get("revisions"):
+        lines += ["## Revisions", "", *revision_lines(meta)]
     return "\n".join(lines)
 
 
@@ -195,6 +245,107 @@ def freeze(lists_dir: Path, scouting: pd.DataFrame, leagues: dict, folder: Path)
     season = int(cand["season"].max())
     meta = meta_for(scouting, season, leagues, cand, barg, folder.name, "registered")
     folder.mkdir(parents=True)
+    for name in TABLES:
+        shutil.copyfile(lists_dir / f"{name}.csv", folder / f"{name}.csv")
+    atomic_write_text(folder / META, json.dumps(meta, indent=2, ensure_ascii=False) + "\n")
+    atomic_write_text(folder / "README.md", readme(meta, words))
+    return folder
+
+
+# promise -> (bucket column of the candidates table, its pct and players columns)
+SHOWN = {
+    "elite": ("elite_decile", "elite_chance"),
+    "step_up": ("step_up_decile", "step_up_chance"),
+    "big_move": ("big_move_decile", "big_move_chance"),
+    "fall_back": ("flag_count", "fall_back_risk"),
+}
+
+
+def shown_buckets(cand: pd.DataFrame) -> pd.DataFrame:
+    """The bucket each row was shown in, per promise (missing where the
+    promise is blank): deciles, and the flag count bucket inside the elite
+    pool."""
+    out = pd.DataFrame(index=cand.index)
+    for name, (bucket, _) in SHOWN.items():
+        if name == "fall_back":
+            pool = elite_pool(cand["value_rank"].astype(float), cand["age"])
+            out[name] = count_bucket(cand[bucket].fillna(0)).where(pool)
+        else:
+            out[name] = cand[bucket].astype("Int64")
+    return out
+
+
+def revise_buckets(old: pd.DataFrame, new: pd.DataFrame) -> list[dict]:
+    """Per promise and bucket of this forecast: this season's players in it,
+    the old and the new shown share and its count."""
+    rows = []
+    for name, (_, shown) in SHOWN.items():
+        frames = {}
+        for label, cand in (("old", old), ("new", new)):
+            b = shown_buckets(cand)[name]
+            frames[label] = pd.DataFrame(
+                {
+                    "player_id": cand["player_id"].to_numpy(),
+                    "bucket": b.astype("string").to_numpy(),
+                    "pct": cand[f"{shown}_pct"].to_numpy(),
+                    "n": cand[f"{shown}_players"].to_numpy(),
+                }
+            ).dropna(subset=["bucket"])
+        both = frames["old"].merge(frames["new"], on="player_id", suffixes=("_old", "_new"))
+        if (both["bucket_old"] != both["bucket_new"]).any():
+            raise ValueError(f"{name}: a player changed bucket; only the shown rates may change")
+        order = COUNT_BUCKETS if name == "fall_back" else [str(d) for d in range(1, 11)]
+        for bucket in order:
+            part = both[both["bucket_old"] == bucket]
+            if part.empty:
+                continue
+
+            def cell(pct, n):
+                pct, n = pct.dropna(), n.dropna()
+                if pct.empty:
+                    return "blank"
+                p = int(pct.iloc[0])
+                return f"{'under 5' if p == 0 else p}% (n={int(n.iloc[0]):,})"
+
+            rows.append(
+                {
+                    "promise": name.replace("_", " "),
+                    "bucket": ("decile " if name != "fall_back" else "flags ") + bucket,
+                    "players now": len(part),
+                    "old": cell(part["pct_old"], part["n_old"]),
+                    "new": cell(part["pct_new"], part["n_new"]),
+                }
+            )
+    return rows
+
+
+def revise(lists_dir: Path, folder: Path, reason: str, date: str, commit: str) -> Path:
+    """Rewrite a registered folder from today's lists, keeping its date and
+    rows: only what the columns promise may change. ``forecast.json`` and the
+    README record the revision; ``commit`` is the one holding the original."""
+    if not folder.is_dir():
+        raise FileNotFoundError(f"{folder} is not a registered forecast")
+    meta, old, old_barg = read_folder(folder)
+    new = pd.read_csv(lists_dir / "candidates.csv")
+    barg = pd.read_csv(lists_dir / "bargains.csv")
+    words = pd.read_csv(lists_dir / "dictionary.csv")
+    if int(new["season"].max()) != int(meta["season"]):
+        raise ValueError("today's lists describe another season than the forecast")
+    if set(new["player_id"]) != set(old["player_id"]) or len(barg) != len(old_barg):
+        raise ValueError("today's lists hold other rows than the forecast")
+    changed = [
+        f"{name}.csv"
+        for name in TABLES
+        if (lists_dir / f"{name}.csv").read_bytes() != (folder / f"{name}.csv").read_bytes()
+    ]
+    revision = {
+        "date": date,
+        "reason": reason,
+        "changed": changed,
+        "replaces_commit": commit,
+        "buckets": revise_buckets(old, new),
+    }
+    meta = {**meta, "revisions": [*meta.get("revisions", []), revision]}
     for name in TABLES:
         shutil.copyfile(lists_dir / f"{name}.csv", folder / f"{name}.csv")
     atomic_write_text(folder / META, json.dumps(meta, indent=2, ensure_ascii=False) + "\n")
@@ -480,6 +631,33 @@ def label_agreement(cand: pd.DataFrame, barg: pd.DataFrame, inputs: dict, labels
     return out
 
 
+def outcome_rows(results: dict[int, dict]) -> pd.DataFrame:
+    """Per scored history forecast row: season, the bucket it was shown in
+    for each promise and what happened (``scout.candidates.REALIZED``)."""
+    frames = []
+    for season, r in results.items():
+        cand = r["candidates"]
+        b = shown_buckets(cand)
+        frames.append(
+            pd.DataFrame(
+                {
+                    "season": season,
+                    "player_id": cand["player_id"].astype("int64"),
+                    "elite_decile": b["elite"],
+                    "step_up_decile": b["step_up"],
+                    "big_move_decile": b["big_move"],
+                    "fall_back_bucket": b["fall_back"],
+                    **{name: cand[name].astype(float) for name in PROMISES},
+                }
+            )
+        )
+    return pd.concat(frames, ignore_index=True)
+
+
+def outcomes_path(settings) -> Path:
+    return settings.paths.processed_dir / "forecasts" / "history" / "outcomes.parquet"
+
+
 def pooled(results: dict[int, dict]) -> dict:
     """Every season's rows together: the same tables over 2015 to 2023."""
     cand = pd.concat([r["candidates"] for r in results.values()], ignore_index=True)
@@ -542,27 +720,52 @@ def run_history(settings, seasons=HISTORY) -> Path:
     moves = pd.read_parquet(settings.paths.processed_dir / "models" / "big_move_labels.parquet")
     moves = moves.assign(season=moves["season"].astype(int))
     root = settings.paths.processed_dir / "forecasts" / "history"
-    results, checks = {}, {}
-    for season in seasons:
+
+    def build(season: int, folder: Path, outcomes: pd.DataFrame | None):
         past = history_inputs(inputs, season)
-        cand, barg, _ = lists.season_tables(past, features, rows, profiles, None, leagues, season)
+        cand, barg, _ = lists.season_tables(
+            past, features, rows, profiles, None, leagues, season, outcomes=outcomes
+        )
         meta = meta_for(scouting, season, leagues, cand, barg, f"history-{season}", "history")
-        folder = write_folder(root / str(season), cand, barg, lists.dictionary(), meta)
+        folder = write_folder(folder, cand, barg, lists.dictionary(), meta)
         meta, cand, barg = read_folder(folder)  # score what was written, as for a real one
         rows_end = scouting[scouting["season"].astype(int) == season + HORIZON_SEASONS]
         as_of = pd.Timestamp(rows_end["feature_date"].max())
-        result = score(meta, cand, barg, scouting, transfers, as_of)
-        results[season] = result
-        checks[season] = label_agreement(
-            result["candidates"], result["bargains"], past, {"big_move": moves, "growth": growth}
-        )
         log.info("forecast history %d: %d candidates, %d bargains", season, len(cand), len(barg))
-    return write_history_report(results, checks, settings.paths.reports_dir)
+        return score(meta, cand, barg, scouting, transfers, as_of), past
+
+    old, checks = {}, {}
+    for season in seasons:  # pass 1: in sample rates, fixes buckets and outcomes
+        old[season], past = build(season, root / "in_sample" / str(season), None)
+        checks[season] = label_agreement(
+            old[season]["candidates"],
+            old[season]["bargains"],
+            past,
+            {"big_move": moves, "growth": growth},
+        )
+    outcomes = outcome_rows(old)
+    path = outcomes_path(settings)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    outcomes.to_parquet(path, index=False)
+    new = {}
+    for season in seasons:  # pass 2: realized rates of seasons up to S minus 2
+        new[season], _ = build(season, root / str(season), outcomes)
+    return write_history_report(new, checks, settings.paths.reports_dir, old)
 
 
-def write_history_report(results: dict, checks: dict, reports: Path) -> Path:
-    tables = pooled(results)
+def shown_seasons(results: dict) -> list[int]:
+    """Seasons whose forecast shows an elite chance (the realized rates need
+    a scored forecast two seasons earlier)."""
+    return [s for s, r in results.items() if r["candidates"]["elite_chance_pct"].notna().any()]
+
+
+def write_history_report(
+    results: dict, checks: dict, reports: Path, in_sample: dict | None = None
+) -> Path:
     first, last = min(results), max(results)
+    shown = shown_seasons(results)
+    tables = pooled({s: results[s] for s in shown})
+    old = pooled({s: in_sample[s] for s in shown}) if in_sample else None
     agree = pd.DataFrame(
         [
             {"season": s, "outcome": k, "agreement": v[0], "rows": v[1]}
@@ -579,27 +782,53 @@ def write_history_report(results: dict, checks: dict, reports: Path) -> Path:
         ),
         include_groups=False,
     )
+    span = f"{min(shown)} to {max(shown)}" if shown else "none"
     parts = [
         "# Forecast scoring on the history",
         "",
         f"`scout forecast history`: the two tables of every season {first} to {last} rebuilt "
         "in the folder format of a registered forecast (`data/processed/forecasts/history/"
-        "<season>/`), each from the backtest's out of sample scores and from chance tables "
-        "of seasons whose outcomes were known by then (two seasons earlier and before), then "
-        "scored by `scout forecast score`'s code two seasons on. Pooled over the seasons:",
+        "<season>/`), each from the backtest's out of sample scores, then scored by `scout "
+        "forecast score`'s code two seasons on.",
+        "",
+        "Since prompt 14b every shown chance is the realized rate of these scored forecasts, "
+        "from seasons whose outcome was known by then (two seasons earlier and before), so a "
+        f"season's chances need a scored forecast before it: shown for {span}. Pooled over "
+        f"those seasons, each bucket as shown (realized rate) against what happened"
+        + (
+            ", then the same seasons as shown before prompt 14b (in sample rate: the "
+            "backtest rows of seasons up to two seasons earlier pooled; "
+            "`history/in_sample/<season>/`)."
+            if old
+            else "."
+        ),
         "",
     ]
     for name, (_, words) in PROMISES.items():
-        parts += [f"## {name.replace('_', ' ')}: {words}", "", _md(tables[name]), ""]
+        parts += [f"## {name.replace('_', ' ')}: {words}", "", "Realized rate (shown now):", ""]
+        parts += [_md(tables[name]), ""]
+        if old:
+            parts += ["In sample rate (shown until prompt 14b):", "", _md(old[name]), ""]
+    if old:
+        all_old = pooled(in_sample)
+        parts += [
+            f"In sample rates over every season {min(in_sample)} to {max(in_sample)} (the "
+            "prompt 14 scoring):",
+            "",
+        ]
+        for name in PROMISES:
+            parts += [f"{name.replace('_', ' ')}:", "", _md(all_old[name]), ""]
     parts += [
         f"## bargains: market value rose (top {TOP_K} of each list against the whole list)",
         "",
-        _md(tables["bargains"]),
+        _md(pooled(results)["bargains"]),
         "",
-        "## Per season: base rate and the top bucket",
+        "## Per season: base rate and the top bucket (realized rate shown)",
         "",
         _md(
-            per_season(results).rename(columns={"top_promised": "promised", "top_actual": "actual"})
+            per_season({s: results[s] for s in shown}).rename(
+                columns={"top_promised": "promised", "top_actual": "actual"}
+            )
         ),
         "",
         "## Check: scored outcomes against the stored labels",

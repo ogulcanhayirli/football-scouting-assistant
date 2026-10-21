@@ -5,14 +5,22 @@ to #1,000 by value and 23 or under at the feature date. Each candidate is
 shown with
 
 * **elite chance:** the share of past candidates in the same decile of the
-  elite model's score (out of sample, from the season by season backtest)
-  who entered the top 100 within 2 seasons;
+  elite model's score who entered the top 100 within 2 seasons;
 * **fall back risk:** the share of past candidates with the same number of
   warning flags whose value rank was at least twice as bad 2 seasons later
   (``fall_back`` in ``scout.scouting``);
 * **the flags** with their raw numbers (``scout.flags``).
 
 ``scout.lists`` puts these on the candidates table.
+
+Two ways to measure a bucket's rate live here. ``chance_table`` pools the
+backtest's out of sample rows of every test season (the shown rate until
+prompt 14b, kept for comparison). ``realized_tables`` (prompt 14b, the shown
+rate since) reads the past forecasts rebuilt by ``scout forecast history``,
+each built with the models and buckets available at its time and scored two
+seasons on: the rate a user of those tables would actually have seen come
+true. The second is what the table promises; the first ran high at the top
+of the elite chance (40% shown, 30.5% happened).
 
 Rates are historical frequencies, not model probabilities: a bucket with
 fewer than 30 players is never shown (the lowest deciles are merged until
@@ -147,9 +155,10 @@ def merge_low(counts: pd.Series) -> dict[int, str]:
 
 @dataclass
 class ChanceTable:
-    """Historical rate per score decile, merged at the bottom."""
+    """Historical rate per score decile, merged at the bottom (or per flag
+    count bucket)."""
 
-    mapping: dict[int, str]  # decile -> bucket label
+    mapping: dict  # decile (or flag count bucket) -> bucket label, in order
     table: pd.DataFrame  # rate_table rows, per season and pooled
 
     @property
@@ -158,10 +167,11 @@ class ChanceTable:
 
     @property
     def buckets(self) -> list[str]:
-        return list(dict.fromkeys(self.mapping[d] for d in range(1, DECILES + 1)))
+        return list(dict.fromkeys(self.mapping.values()))
 
     def lookup(self, deciles: pd.Series) -> pd.DataFrame:
-        """bucket, rate, pct and players for each decile."""
+        """bucket, rate, pct and players for each decile (or flag count
+        bucket)."""
         bucket = deciles.map(self.mapping)
         pooled = self.pooled
         return pd.DataFrame(
@@ -181,6 +191,80 @@ def chance_table(predictions: pd.DataFrame, score: str = "score") -> ChanceTable
     mapping = merge_low(deciles.value_counts())
     table = rate_table(predictions["y"], deciles.map(mapping), predictions["season"])
     return ChanceTable(mapping, table)
+
+
+def count_table(y: pd.Series, bucket: pd.Series, season: pd.Series) -> ChanceTable:
+    """Rate per flag count bucket (0, 1, 2 or more)."""
+    return ChanceTable({b: b for b in COUNT_BUCKETS}, rate_table(y, bucket, season))
+
+
+# Realized rates of past forecasts (prompt 14b)
+
+# promise -> (bucket column of a scored forecast, outcome column)
+REALIZED = {
+    "elite": ("elite_decile", "elite"),
+    "step_up": ("step_up_decile", "step_up"),
+    "big_move": ("big_move_decile", "big_move"),
+    "fall_back": ("fall_back_bucket", "fall_back"),
+}
+
+
+def realized_tables(outcomes: pd.DataFrame, through: int | None = None) -> dict[str, ChanceTable]:
+    """Per promise, the share of past forecast players in each bucket whose
+    outcome came true, among those whose outcome is known. ``outcomes``: the
+    scored rows of ``scout forecast history`` (season, the bucket and
+    outcome columns of ``REALIZED``); ``through``: forecast seasons up to it
+    only (a forecast for season S uses S minus 2, the last one scored by
+    then). The lowest deciles are merged until each bucket holds
+    ``MIN_BUCKET`` known outcomes."""
+    rows = outcomes if through is None else outcomes[outcomes["season"] <= through]
+    out = {}
+    for name, (bucket, outcome) in REALIZED.items():
+        known = rows[rows[bucket].notna() & rows[outcome].notna()]
+        if name == "fall_back":
+            out[name] = count_table(known[outcome], known[bucket], known["season"])
+            continue
+        deciles = known[bucket].astype(int)
+        mapping = merge_low(deciles.value_counts())
+        out[name] = ChanceTable(
+            mapping, rate_table(known[outcome], deciles.map(mapping), known["season"])
+        )
+    return out
+
+
+def not_monotonic(table: ChanceTable) -> list[str]:
+    """Sentences for each shown bucket whose pooled rate is below the one
+    before it (the buckets run from least to most likely). Reported, never
+    smoothed."""
+    pooled = table.pooled.reindex(table.buckets).dropna(subset=["rate"])
+    out = []
+    for (low, a), (high, b) in zip(pooled.iterrows(), list(pooled.iterrows())[1:], strict=False):
+        if b["rate"] < a["rate"]:
+            out.append(
+                f"{high} ({b['rate']:.1%}, n={int(b['players']):,}) is below {low} "
+                f"({a['rate']:.1%}, n={int(a['players']):,})"
+            )
+    return out
+
+
+def compare(old: ChanceTable, new: ChanceTable, keys: list) -> pd.DataFrame:
+    """Old against new per decile (or flag count bucket): each table's
+    bucket, its shown cell and, for the new one, the unrounded rate."""
+    o, n = old.pooled, new.pooled
+    rows = []
+    for key in keys:
+        ob, nb = old.mapping.get(key), new.mapping.get(key)
+        row = {"decile" if isinstance(key, int | np.integer) else "flags": key}
+        for label, b, pooled in (("old", ob, o), ("new", nb, n)):
+            found = b is not None and b in pooled.index
+            rate = pooled.loc[b, "rate"] if found else None
+            players = int(pooled.loc[b, "players"]) if found else 0
+            row[f"{label} bucket"] = b or ""
+            row[label] = show_rate(None if rate is None or pd.isna(rate) else rate, players)
+        nr = n.loc[nb, "rate"] if nb is not None and nb in n.index else np.nan
+        row["new rate"] = "" if pd.isna(nr) else f"{nr:.1%}"
+        rows.append(row)
+    return pd.DataFrame(rows)
 
 
 def fall_back_rows(data: pd.DataFrame, label: str = "fall_back") -> pd.DataFrame:

@@ -258,6 +258,29 @@ def cmd_forecast(settings: Settings, args: argparse.Namespace) -> int:
             Path(args.root) / date,
         )
         print(folder)
+    elif args.action == "revise":
+        import subprocess
+
+        import pandas as pd
+
+        if not args.folder or not args.reason:
+            raise SystemExit("forecast revise needs a forecast folder and --reason")
+        folder = Path(args.folder)
+        commit = subprocess.run(
+            ["git", "log", "-1", "--format=%h", "--", str(folder / "candidates.csv")],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+        print(
+            forecast.revise(
+                settings.paths.processed_dir / "lists",
+                folder,
+                args.reason,
+                pd.Timestamp.now(tz="UTC").strftime("%Y-%m-%d"),
+                commit,
+            )
+        )
     elif args.action == "score":
         if not args.folder:
             raise SystemExit("forecast score needs a forecast folder")
@@ -505,17 +528,21 @@ def main(argv: list[str] | None = None) -> int:
     lists = sub.add_parser(
         "lists",
         help="The candidates and bargains tables, their dictionary and reports/candidates.md; "
-        "run after backtest, moves and scouting",
+        "run after backtest, moves, scouting and forecast history",
     )
     lists.set_defaults(func=cmd_lists)
 
     fc = sub.add_parser(
         "forecast",
         help="Registered forecasts: freeze today's lists into forecasts/<date>, score a "
-        "folder at a later feature date, or rebuild and score 2015 to 2023 (history)",
+        "folder at a later feature date, rebuild and score 2015 to 2023 (history; run before "
+        "lists), or revise a folder from today's lists with a recorded reason",
     )
-    fc.add_argument("action", choices=["freeze", "score", "history"])
-    fc.add_argument("folder", nargs="?", help="score: the forecast folder")
+    fc.add_argument("action", choices=["freeze", "score", "history", "revise"])
+    fc.add_argument("folder", nargs="?", help="score, revise: the forecast folder")
+    fc.add_argument(
+        "--reason", help="revise: why the folder is rewritten (kept in forecast.json and README)"
+    )
     fc.add_argument("--as-of", help="score: the later feature date (default: the newest)")
     fc.add_argument("--date", help="freeze: the folder's date (default: today, UTC)")
     fc.add_argument("--root", default="forecasts", help="freeze: where the folder goes")

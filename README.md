@@ -151,6 +151,7 @@ uv run scout featurestore pit --as-of 2023-01-01
 uv run scout backtest      # fair value, against its baseline
 uv run scout moves         # big move
 uv run scout scouting      # ability score, elite, step up, riser
+uv run scout forecast history  # past forecasts rebuilt and scored; their realized rates are the shown chances
 uv run scout lists         # candidates and bargains tables, reports/candidates.md
 
 # Run the fair value backtest in SageMaker: one training job, or automatic model tuning
@@ -180,12 +181,15 @@ The backfill writes `reports/coverage_report.md` and `.json`, logs to
   slightly worse (0.342 against 0.349). A young player's price already holds
   most of what the data says about his chance of becoming elite.
 * **So the product's value is not prediction beyond the market.** It is
-  calibrated odds (each chance is the historical rate of past players in the
-  same bucket, with how many there were), risk flags with the player's own
+  calibrated odds (each chance is the realized rate of past forecasts in the
+  same bucket, with how many players there were), risk flags with the player's own
   numbers, and one consistent treatment of 37 leagues, far more players than
   anyone can price by hand.
 * **The top elite chance runs high.** Rebuilt forecasts of 2015 to 2023 saw
-  30.5% of the players shown 40% make it (MODELS.md).
+  30.5% of the players shown 40% make it. Since prompt 14b every chance shown
+  is the realized rate of those forecasts (the top elite decile now shows
+  35%), but out of sample the top bucket still ran about 7 points high: read
+  it as a ceiling (MODELS.md).
 * **Market values freeze at June 2026.** The Transfermarkt snapshot has had
   no valuations since 12 June 2026 (CLAUDE.md, open questions).
 
