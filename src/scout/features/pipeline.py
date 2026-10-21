@@ -37,13 +37,19 @@ from scout.features.context import (
 from scout.fsutil import atomic_write_text
 from scout.matching import match_players
 from scout.providers.transfermarkt import TransfermarktValuationProvider
-from scout.tables import PARTITION_FILE
+from scout.tables import PARTITION_FILE, read_feature_table
 
 log = logging.getLogger(__name__)
 
 
-def _read_partitions(root: Path) -> pd.DataFrame:
+def _read_partitions(root: Path, keep=None) -> pd.DataFrame:
+    """Every ``league=<key>/season=<year>.parquet`` under ``root``, or those
+    for which ``keep(key, year)`` is true."""
     files = sorted(root.glob("league=*/season=*.parquet"))
+    if keep is not None:
+        files = [
+            f for f in files if keep(f.parent.name.split("=", 1)[1], int(f.stem.split("=", 1)[1]))
+        ]
     if not files:
         return pd.DataFrame()
     return pd.concat([pd.read_parquet(p) for p in files], ignore_index=True)
@@ -111,17 +117,28 @@ def _read_optional(path: Path) -> pd.DataFrame:
     return pd.read_parquet(path) if path.exists() else pd.DataFrame()
 
 
-def load_inputs(settings: Settings) -> Inputs:
+def load_inputs(
+    settings: Settings, season: int | None = None, stored: pd.DataFrame | None = None
+) -> Inputs:
+    """Everything the build reads. With ``season`` (the weekly run), the
+    league match and team stats of that season only, the cup and national
+    team matches of every season (their windows and coverage reach back),
+    and the stored links plus links for players the ``stored`` feature
+    table has never seen."""
     processed = settings.paths.processed_dir
     league_keys = {lg.key for lg in settings.leagues}
     comp_keys = {c.key for c in settings.competitions}
+
+    def wanted(key: str, year: int) -> bool:
+        return season is None or key not in league_keys or year == season
+
     season_stats = _configured(_read_partitions(processed / "player_season_stats"), settings)
     match_stats, comp_matches = _split(
-        _read_partitions(processed / "player_match_stats"), league_keys
+        _read_partitions(processed / "player_match_stats", wanted), league_keys
     )
     match_stats = _configured(match_stats, settings)
     comp_matches = comp_matches[comp_matches["league_key"].isin(comp_keys)]
-    team_stats, _ = _split(_read_partitions(processed / "team_match_stats"), league_keys)
+    team_stats, _ = _split(_read_partitions(processed / "team_match_stats", wanted), league_keys)
     injuries = _read_partitions(processed / "injuries")
     sidelined = _read_optional(processed / "sidelined" / "sidelined.parquet")
     coaches = _read_optional(processed / "coaches" / "coach_spells.parquet")
@@ -130,7 +147,10 @@ def load_inputs(settings: Settings) -> Inputs:
     transfers = pd.read_parquet(transfers_file) if transfers_file.exists() else pd.DataFrame()
     tm = TransfermarktValuationProvider(settings.paths.raw_dir / "transfermarkt")
     tm_players = tm.players(None)
-    links = build_links(season_stats, tm_players)
+    if season is None:
+        links = build_links(season_stats, tm_players)
+    else:
+        links = current_links(processed / "features", season_stats, tm_players, season, stored)
     linked = set(links["tm_player_id"].dropna().astype(int))
     valuations = tm.valuations(None)
     valuations = valuations[valuations["source_player_id"].isin(linked)]
@@ -169,6 +189,34 @@ def load_inputs(settings: Settings) -> Inputs:
         league_regions={lg.key: lg.region for lg in settings.leagues},
         calendar_leagues=frozenset(lg.key for lg in settings.leagues if lg.calendar_year),
     )
+
+
+def current_links(
+    root: Path,
+    season_stats: pd.DataFrame,
+    tm_players: pd.DataFrame,
+    season: int,
+    stored: pd.DataFrame | None,
+) -> pd.DataFrame:
+    """The stored links, plus links for players who play in ``season`` and
+    whom neither the stored links nor the stored feature table know (a new
+    signing after an update). They are matched on all their season rows, as
+    a full build would; the links of known players never change here."""
+    links = pd.read_parquet(root / "player_links.parquet")
+    known = set(links["af_player_id"].dropna().astype(int))
+    if stored is not None and len(stored):
+        known |= set(stored["source_player_id"].dropna().astype(int))
+    played = season_stats[
+        (season_stats["season"].astype(int) == season) & (season_stats["minutes"].fillna(0) > 0)
+    ]
+    new = set(played["source_player_id"].astype(int)) - known
+    if not new:
+        return links
+    found = build_links(
+        season_stats[season_stats["source_player_id"].astype(int).isin(new)], tm_players
+    )
+    log.info("Links: %d new players in season %d, %d linked", len(new), season, len(found))
+    return pd.concat([links, found], ignore_index=True)
 
 
 def _write_partitioned(frame: pd.DataFrame, root: Path) -> int:
@@ -210,6 +258,40 @@ def run_features(settings: Settings) -> tuple[pd.DataFrame, pd.DataFrame]:
     write_feature_report(features, label_table, settings.paths.reports_dir)
     write_injury_report(features, inputs, settings.paths.reports_dir)
     log.info("Wrote %d feature rows in %d league seasons to %s", len(features), n, out)
+    return features, label_table
+
+
+def run_current_features(
+    settings: Settings, season: int | None = None
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """``scout features --current``: rebuild one season (the newest in the
+    season stats when None) and rewrite only its partitions; every earlier
+    season stays as stored. Reads the stored feature table for the history
+    columns and the player links, so it needs a full build once."""
+    out = settings.paths.processed_dir / "features"
+    stored = read_feature_table(out / "player_season_features")
+    if stored.empty:
+        raise FileNotFoundError(f"no stored feature table in {out}: run `scout features` first")
+    if season is None:
+        season_stats = _configured(
+            _read_partitions(settings.paths.processed_dir / "player_season_stats"), settings
+        )
+        season = int(season_stats["season"].max())
+    inputs = load_inputs(settings, season, stored)
+    features, label_table = build_features(inputs, season, stored)
+    validate(PLAYER_SEASON_FEATURES, features)
+    validate(PLAYER_SEASON_LABELS, label_table)
+
+    if len(inputs.links) != len(pd.read_parquet(out / "player_links.parquet")):
+        inputs.links.to_parquet(out / "player_links.parquet", index=False)  # new players
+    tm = TransfermarktValuationProvider(settings.paths.raw_dir / "transfermarkt")
+    profiles = validate(
+        PLAYER_PROFILES, build_profiles(inputs.links, tm.profiles(), inputs.data_end)
+    )
+    profiles.to_parquet(out / "player_profiles.parquet", index=False)
+    n = _write_partitioned(features, out / "player_season_features")
+    _write_partitioned(label_table, out / "player_season_labels")
+    log.info("Wrote %d rows of season %d in %d leagues to %s", len(features), season, n, out)
     return features, label_table
 
 

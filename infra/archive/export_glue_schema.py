@@ -1,12 +1,12 @@
 """Write the Glue column lists for the feature tables, from their Parquet schema.
 
-Usage:
-    uv run python scripts/export_glue_schema.py [--root data/processed/features]
+Usage (from the repository root):
+    uv run python infra/archive/export_glue_schema.py [--root data/processed/features]
 
-The JSON files under infra/scout_infra/schemas/ are what the CDK stack
-declares in Glue. tests/unit/test_glue_schema.py rebuilds the tables from
-synthetic inputs and fails if the pipeline's output no longer matches them,
-so a new feature column can't silently go missing from Athena.
+Archived with the ScoutData stack (infra/archive/README.md). The JSON files
+under infra/archive/scout_infra/schemas/ are what that stack declares in
+Glue; infra/archive/tests/test_glue_schema.py compared them with the
+pipeline's output and is no longer run.
 """
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ from pathlib import Path
 import pyarrow as pa
 import pyarrow.parquet as pq
 
-SCHEMA_DIR = Path(__file__).parents[1] / "infra" / "scout_infra" / "schemas"
+SCHEMA_DIR = Path(__file__).parent / "scout_infra" / "schemas"
 TABLES = ["player_season_features", "player_season_labels"]
 
 

@@ -1,0 +1,7 @@
+{
+  "app": "uv run --project .. python app.py",
+  "context": {
+    "region": "eu-central-1",
+    "sessionUser": "scout-session-sync"
+  }
+}

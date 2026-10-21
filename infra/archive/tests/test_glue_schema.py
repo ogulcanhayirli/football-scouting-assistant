@@ -1,4 +1,7 @@
-"""The Glue tables in infra/ must declare exactly what the feature pipeline writes."""
+"""The Glue tables in infra/ must declare exactly what the feature pipeline writes.
+
+Archived, not run: it needs the main package and tests/unit/test_features.py
+on the path (it lived in tests/unit until the stack was archived)."""
 
 import importlib.util
 import json
@@ -9,12 +12,12 @@ from test_features import _inputs
 from scout.features import build_features
 from scout.features.pipeline import _write_partitioned
 
-ROOT = Path(__file__).parents[2]
+ROOT = Path(__file__).parents[3]
 
 
 def load_exporter():
     spec = importlib.util.spec_from_file_location(
-        "export_glue_schema", ROOT / "scripts" / "export_glue_schema.py"
+        "export_glue_schema", ROOT / "infra" / "archive" / "export_glue_schema.py"
     )
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)

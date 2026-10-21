@@ -58,7 +58,12 @@ fix this file.
 8. **Ask the owner before** uploading to S3 and before deploying AWS stacks.
    Deployments go only through CDK under the `scout-cfn-exec` policy and the
    `scout-boundary` permissions boundary (docs/AWS_SETUP.md). The session's
-   IAM user `scout-session-sync` has no delete rights.
+   IAM user `scout-session-sync` has no delete rights. **The one exception**
+   (owner, prompt 15): the automated weekly run
+   (`.github/workflows/weekly.yml`, IAM user `scout-weekly`) may write
+   `processed/lists/` in the data bucket and the site bucket
+   (`scout-site-<account>`) without asking. Nothing else: a session still
+   asks before any upload, a manual `scout publish` included.
 
 ## Commands
 
@@ -89,18 +94,22 @@ $C elo                                       # team Elo from cached fixtures, re
 $C scouting [--strength v2|transfer|elo|transfer_elo]  # league strength, ability, elite, step up, riser
 $C ability                                  # ability versions: stability, backtest (reports/ability.md)
 $C lists                                    # the two tables and reports/candidates.md; run after backtest, moves, scouting, forecast history
+$C features --current                       # the weekly run: newest season only, earlier ones as stored
+$C score                                    # the weekly run: newest season with the stored models, no training
+$C site                                     # data/site/index.html and the downloads (the static page)
+$C publish [--role scout-site-publisher]    # processed/lists/ and the site bucket ($SCOUT_SITE_BUCKET); weekly run
 $C forecast freeze [--date YYYY-MM-DD]       # copy today's lists into forecasts/<date>; never overwrites
 $C forecast score forecasts/2026-10-21 --as-of 2027-06-30  # promised buckets against what happened
 $C forecast history                         # rebuild and score 2015 to 2023 (reports/forecast_history.md); before lists
 $C forecast revise forecasts/2026-10-21 --reason "..."  # rewrite a registered folder from today's lists, date kept, reason recorded
-$C sync up | down [--dry-run] [--only raw|processed|reports]
+$C sync up | down [--dry-run] [--only raw|processed|reports|transfermarkt]
 uv run python scripts/run_extras.py          # sidelined, coaches, events (done 17 October)
 uv run python scripts/rebuild_match_seasons.py --from-s3 serie_b:2016  # re-parse partitions offline after an adapter repair
 ```
 
 Also `athena "SQL"`, `featurestore ingest | pit --as-of DATE`,
-`train | tune` (SageMaker, fair value), and `--league`, `--season` filters on
-`backfill`. The quota guard (`src/scout/ratelimit.py`) keeps the configured
+`train | tune` (SageMaker, fair value; these four need the archived stacks,
+still deployed), and `--league`, `--season` filters on `backfill`. The quota guard (`src/scout/ratelimit.py`) keeps the configured
 safety margin (500 requests) and persists the day's count in `data/state/api_football_quota.json`;
 when the budget is spent the backfill stops cleanly and the same command
 resumes after 00:00 UTC. In a cloud session, run long downloads as tracked
@@ -131,6 +140,8 @@ bucket named by `$SCOUT_S3_BUCKET` (eu-central-1).
 | Labels | `data/processed/features/player_season_labels/...` | value now, 24 and 36 months (the 24 month growth feeds the bargains backtest) |
 | Team Elo | `data/processed/elo/*.parquet` | per match pre match ratings, club and league seasons |
 | Model outputs | `data/processed/models/*.parquet` | backtest predictions (`backtest_<model>.parquet`), `scouting.parquet`, `big_move_current.parquet`, labels |
+| Stored models | `data/processed/models/stored/` | the boosters behind the newest season's scores (`fair_value_fold_2024`, `fair_value_fold_2025`, `big_move_24m`, `elite`, `step_up`, `riser`; LightGBM text plus a `.json` of columns and training rows) and `ability_v2.json` (the ability fit); written by `backtest`, `moves`, `scouting`, read by `score`. Trained 21 October 2026; **not yet in S3** (owner's yes) |
+| The page | `data/site/` | `index.html` (both tables embedded, 1.4 MB, 0.2 MB gzip) and `data/` (the two tables as CSV and Parquet, `dictionary.csv`); published to `scout-site-<account>` |
 | User facing tables | `data/processed/lists/` | `candidates`, `bargains` (Parquet, CSV), `dictionary.csv` (see Outputs) |
 | Quota state, log | `data/state/` | |
 
@@ -259,7 +270,19 @@ Decision 5: two user facing tables, written by `scout lists`
   in `src/scout/lists.py`; a test checks every column has one).
 
 The one readable report is `reports/candidates.md`: both tables' top 50 and
-every backtest number next to its baseline, then the dictionary. Model
+every backtest number next to its baseline, then the dictionary.
+
+The public face is one static page (`scout site`, `src/scout/site.py` and
+`site_template.html`): both tables as JSON inside one HTML file, plain
+JavaScript (no library), tabs for candidates and bargains (prime,
+experienced), sortable columns, filters for position, age, league and flags,
+a search box, a card layout on phones, and a "how to read this" box (calibrated
+odds from past seasons, not predictions beyond the market; the valuation
+date; the forecast date; the five season window). Live at
+<http://scout-site-098499087060.s3-website.eu-central-1.amazonaws.com/>
+since 21 October 2026. A bargain's rising tag is the riser top 50 of
+`scouting.parquet`, the same set the candidates mark. `scout publish` sends
+only the page and the two tables with the dictionary (an allowlist). Model
 detail stays in `reports/scouting.md`, `reports/moves.md`,
 `reports/backtest_fair_value.md`, `reports/ability.md` and `reports/elo.md`.
 
@@ -340,13 +363,31 @@ detail stays in `reports/scouting.md`, `reports/moves.md`,
 
 ## AWS
 
-CDK app in `infra/` with its own uv environment; stacks `ScoutData` (Glue
-tables with partition projection, Athena workgroup `scout` with a 1 GB scan
-limit, read only `scout-analyst` role), `ScoutFeatureStore` (offline store,
-Iceberg) and `ScoutTraining` (roles `scout-sagemaker-training` and `scout-ml-runner`). Deploy:
-`cd infra && CDK_DEFAULT_ACCOUNT=<account id> npx aws-cdk@2 deploy <Stack>`.
-After a feature column change, run `uv run python scripts/export_glue_schema.py`
-(the Glue schema test compares it with the pipeline) and redeploy `ScoutData`.
+Decision 9, built 21 October 2026 (prompt 15, docs/DEPLOY.md): a weekly
+GitHub Actions run (`.github/workflows/weekly.yml`, Mondays 05:17 UTC or by
+hand) pulls `processed/` and `raw/transfermarkt/`, runs the free tier update
+when `configs/update.free.yaml` exists (skipped with a notice until prompt 4
+creates it; it then calls `scout update`, which prompt 4 must add), then
+`features --current`, `score`, `lists`, `site`, `publish`. It never trains.
+A clean run took 254 seconds on 4 cores (pull 80, features 92, score 56,
+lists 22) and 2.5 GB of memory, and rebuilt the registered tables byte for
+byte. Its credentials are GitHub secrets (`AWS_ACCESS_KEY_ID`,
+`AWS_SECRET_ACCESS_KEY` of the IAM user `scout-weekly`, `API_FOOTBALL_KEY`);
+the bucket names are repository variables (`SCOUT_S3_BUCKET`,
+`SCOUT_SITE_BUCKET`); the first step fails naming any that is missing.
+
+CDK app in `infra/` with its own uv environment: one stack, `ScoutSite`
+(deployed 21 October): the bucket `scout-site-098499087060` with static
+website hosting and public read of objects (not listing), retained on
+delete, and the role `scout-site-publisher` (session user may assume it;
+PutObject on the site bucket only; `scout-boundary` attached). Deploy:
+`cd infra && CDK_DEFAULT_ACCOUNT=<account id> npx aws-cdk@2 deploy ScoutSite`.
+The retired stacks `ScoutData` (Glue, Athena, `scout-analyst`),
+`ScoutFeatureStore` and `ScoutTraining` are in `infra/archive/` with a README
+on why; their tests are not run, and they stay deployed until the owner
+destroys them (`athena`, `featurestore`, `train`, `tune` use them).
+Retraining is manual (docs/DEPLOY.md): `features`, `backtest`, `moves`,
+`scouting`, `forecast history`, `lists`, then `sync up` with the owner's yes.
 
 ## Layout
 
@@ -364,13 +405,17 @@ src/scout/  config, secrets, ratelimit, storage, sync, athena, featurestore,
   candidates.py             decile chance tables, fall back pool and flag count rates
   bargains.py               bargains eligibility, ranking, backtest
   lists.py                  the two user facing tables, their dictionary, reports/candidates.md
+  site.py, site_template.html  the static page (scout site)
+  publish.py                the weekly run's uploads, with an allowlist (scout publish)
   features/                 build.py (core), context.py (cups, team, injuries, transfers), pipeline.py
-  models/                   targets, backtest, estimators, moves, run
+  models/                   targets, backtest, estimators, moves, run, store (the stored models)
 forecasts/  registered forecasts, one dated folder each (committed)
 training/   SageMaker entry point and requirements
-scripts/    feasibility.py, export_glue_schema.py
+scripts/    feasibility.py, run_extras.py, rebuild_match_seasons.py, run_expansion.py
 tests/      unit, contracts, fixtures (synthetic)
-infra/      CDK app and its tests
+infra/      CDK app (ScoutSite) and its tests; archive/ holds the retired stacks
+docs/       DEPLOY.md (the weekly run, secrets, IAM policy, cost), AWS_SETUP.md
+.github/    workflows/ci.yml (tests on pull requests and pushes to main), weekly.yml
 ```
 
 ## Decisions
@@ -385,11 +430,11 @@ Owner decisions of 2026-10-16. Each one line; details in the code and docs once 
 6. Data before 7 November: yes; feeder leagues first (Austria, Switzerland, Croatia, Serbia, Czech Republic, Norway, Sweden, Poland, Mexico, MLS, Colombia, Uruguay, Japan, South Korea, Saudi Arabia, then the second tiers of the big five), then the sidelined endpoint per player, match events, youth competitions, coaches, and a final pull of the current season on 6 November.
 7. New free sources: FBref advanced stats for the big five and the European cups from 2017/18; Elo computed from our own fixtures; ClubElo not used because its API went offline in September 2026. API Football stays for breadth.
 8. Ability score version 2 is built from per 90 stats with minutes shrinkage, without the match rating, and replaces version 1 only if it is more stable year to year and predicts the targets at least as well. Rule set on 19 October: more stable, and elite and step up AUC within 0.005 of version 1 or better; else the most stable version that passes. **Outcome (19 October): adopted.** Stability 0.858 against 0.503, elite AUC 0.881 against 0.880, step up 0.927 against 0.925; `--strength v2` is the default (MODELS.md, `reports/ability.md`).
-9. Serving stack: no Lambda, API Gateway, DynamoDB or Bedrock agent; a weekly GitHub Actions run publishes Parquet, CSV and one static HTML page to S3 static hosting.
+9. Serving stack: no Lambda, API Gateway, DynamoDB or Bedrock agent; a weekly GitHub Actions run publishes Parquet, CSV and one static HTML page to S3 static hosting. **Built 21 October (prompt 15):** see AWS above and docs/DEPLOY.md; the page is live, the weekly run waits for the owner's setup (IAM user, secrets, the stored models in S3).
 
 ## Open questions
 
-These are unresolved or inconsistent in the repository as of 2026-10-16.
+These are unresolved or inconsistent in the repository as of 2026-10-21.
 Settle them with the owner rather than guessing.
 
 * `SCOUTING.md` does not exist; the scouting decisions are in the docstring of
@@ -403,9 +448,24 @@ Settle them with the owner rather than guessing.
   with the old lists; `sync` never deletes, and `scout-session-sync` has no
   delete rights, so removing them is the owner's call.
 * The Transfermarkt dataset (dcaribou) has been paused since its 5 September
-  2026 release, with valuations ending 12 June 2026. Live lists would freeze
-  at June 2026 values, so a replacement value source is needed before the
-  weekly pipeline (decision 9) is worth running.
+  2026 release, with valuations ending 12 June 2026. The weekly run (decision
+  9) is built, but until a replacement value source exists it republishes
+  the same 2025/26 tables: a season in progress (2026) has a feature date of
+  30 June 2027, more than a year after the last valuation, so its rows would
+  have no market value. An in progress season also needs its own feature
+  date rule.
+* Weekly run setup, the owner's part (docs/DEPLOY.md): create the IAM user
+  `scout-weekly` with the policy there, the three GitHub secrets and two
+  variables, and say yes to uploading the 13 stored model files
+  (`processed/models/stored/`, 9 MB; a dry run of `sync up --only processed`
+  found nothing else to copy). The 5 USD budget alarm could not be checked or
+  created: the session user has no Budgets rights, and `scout-cfn-exec`
+  allows no budgets either; the commands are in docs/DEPLOY.md.
+* The free tier update (prompt 4) plugs into the weekly run as
+  `scout update` behind `configs/update.free.yaml`; it must read and write the
+  raw cache in S3 (rule 4: the runner starts empty) and needs IAM rights on
+  `raw/api_football/` and the partitions it writes, which the rule 8
+  exception does not cover.
 * Shared player ids: the adapter now drops the rows of the minority club when
   one id switches clubs back and forth within a league season (two players
   on one id). When the id's real owner is the minority, his rows go
@@ -413,15 +473,17 @@ Settle them with the owner rather than guessing.
   season totals are not repaired the same way yet.
 * Decision 7 adds FBref, but README.md (Data sources and attribution) says no
   site is scraped; FBref's terms and access method need checking first.
-* Decision 9 replaces the planned AWS shape in README.md (Lambda, API Gateway,
-  DynamoDB, Bedrock agent); README.md still describes the old plan.
+* README.md now describes decision 9 (prompt 15); `docs/AWS_SETUP.md` still
+  explains the CDK bootstrap for all `scout-*` stacks, which is still how
+  `ScoutSite` deploys.
 * Decision 4 shows contract expiry, which rule 1 keeps out of features because
   the snapshot describes 2026. It now lives in `player_profiles.parquet` with
   agent and highest value, for the current season's lists only; the feature
   contract and `NOT_FEATURES` both block those columns from models.
-* The Glue schema is regenerated (18 October: 37 leagues, the youth, injury
-  source and coach columns) but `ScoutData` is not redeployed, and the
-  Feature Store group predates the context features.
+* `ScoutData`, `ScoutFeatureStore` and `ScoutTraining` are archived
+  (`infra/archive/`) but still deployed; destroying them is the owner's call.
+  Their Glue schema (18 October) was never redeployed, and the Feature Store
+  group predates the context features.
 * API gaps: no Euro qualifier data at all and no 2026 World Cup qualifiers,
   so recent international minutes are undercounted for everyone; Liga
   Profesional 2023 has no season totals (the API returns the Copa de la Liga).
@@ -458,5 +520,6 @@ Settle them with the owner rather than guessing.
   them.
 * The riser list matches its base rate in 2019 (0.02 against 0.019); every
   other test season it beats it at least three times over.
-* The default branch is `claude/loving-ptolemy-ghpx5n` (prompt 12 merged
-  into it); CI runs on pull requests and pushes to `main`.
+* The default branch is `main` (since prompt 15); CI runs on pull requests
+  and pushes to `main`. `claude/loving-ptolemy-ghpx5n` is no longer on the
+  remote.

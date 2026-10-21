@@ -522,8 +522,28 @@ def history_features(rows: pd.DataFrame) -> pd.DataFrame:
 # Assembly
 
 
-def build_features(inputs: Inputs) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """The feature table and the label table, one row per league, season and player."""
+# What history_features reads from earlier rows.
+HISTORY_INPUTS = [
+    "league_key",
+    "season",
+    "source_player_id",
+    "minutes",
+    "rating",
+    "minutes_share",
+    "goals",
+    "assists",
+    "feature_date",
+]
+
+
+def build_features(
+    inputs: Inputs, season: int | None = None, earlier: pd.DataFrame | None = None
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """The feature table and the label table, one row per league, season and player.
+
+    With ``season``, only that season's rows are built (the weekly run); the
+    history columns then read ``earlier``, the stored feature rows of the
+    seasons before it, so a row comes out as it would from a full build."""
     keys = ["league_key", "season", "source_player_id"]
     dates = feature_dates(inputs.season_stats, inputs.match_stats, inputs.calendar_leagues)
 
@@ -538,16 +558,36 @@ def build_features(inputs: Inputs) -> tuple[pd.DataFrame, pd.DataFrame]:
         (lg, int(se)) not in with_matches
         for lg, se in zip(stats["league_key"], stats["season"], strict=True)
     ]
+    if season is not None:
+        no_matches = [
+            n and int(se) == season for n, se in zip(no_matches, stats["season"], strict=True)
+        ]
     basic = season_tier_features(stats[no_matches]).assign(tier="season")
     rows = pd.concat([detailed, basic], ignore_index=True)
     rows = rows[rows["minutes"].fillna(0) > 0]
+    if season is not None:
+        rows = rows[rows["season"].astype(int) == season]
     rows = rows.merge(dates, on=["league_key", "season"])
 
     profile = profile_features(inputs, rows)
     rows = rows.merge(profile, on=[*keys, "feature_date"])
     rows["regular"] = rows["minutes"] >= REGULAR_MINUTES
     rows = rows.reset_index(drop=True)
-    rows = rows.merge(history_features(rows), on=keys, how="left")
+    history = rows
+    if earlier is not None:
+        # In the order a full build holds them (match tier rows, then season
+        # tier rows, each by league, season and player): history_features
+        # breaks ties in minutes by row order, so the order is the result.
+        columns = [*HISTORY_INPUTS, "tier"]
+        before = earlier[earlier["season"].astype(int) < season][columns]
+        history = pd.concat([before, rows[columns]], ignore_index=True)
+        history = (
+            history.assign(_tier=history["tier"] != "match")
+            .sort_values(["_tier", *keys], kind="stable")
+            .drop(columns=["_tier", "tier"])
+            .reset_index(drop=True)
+        )
+    rows = rows.merge(history_features(history), on=keys, how="left")
     rows = rows.reset_index(drop=True)
     rows = pd.concat([rows, value_features(rows, inputs.valuations)], axis=1)
     rows = add_context(rows, inputs, dates)

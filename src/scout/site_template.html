@@ -1,0 +1,590 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>__TITLE__</title>
+<style>
+:root {
+  --bg: #f7f7f5;
+  --panel: #ffffff;
+  --ink: #1d1f23;
+  --muted: #5f6570;
+  --faint: #8a909a;
+  --line: #e2e3e0;
+  --accent: #1f5fbf;
+  --accent-soft: #e6eefb;
+  --good: #1d7a46;
+  --good-soft: #e3f3ea;
+  --warn: #9a5b00;
+  --warn-soft: #fbf0dc;
+  --risk: #b3261e;
+  --risk-soft: #fbe7e5;
+  --row-hover: #fafaf8;
+  --shadow: 0 1px 2px rgba(0, 0, 0, .05);
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #15171a;
+    --panel: #1d2024;
+    --ink: #e8e9eb;
+    --muted: #a5abb4;
+    --faint: #7d838c;
+    --line: #2e3238;
+    --accent: #7fb0ff;
+    --accent-soft: #1f2d44;
+    --good: #6fd19a;
+    --good-soft: #17301f;
+    --warn: #f0b85a;
+    --warn-soft: #33270f;
+    --risk: #ff8f86;
+    --risk-soft: #3a1c1a;
+    --row-hover: #222529;
+    --shadow: none;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #15171a;
+  --panel: #1d2024;
+  --ink: #e8e9eb;
+  --muted: #a5abb4;
+  --faint: #7d838c;
+  --line: #2e3238;
+  --accent: #7fb0ff;
+  --accent-soft: #1f2d44;
+  --good: #6fd19a;
+  --good-soft: #17301f;
+  --warn: #f0b85a;
+  --warn-soft: #33270f;
+  --risk: #ff8f86;
+  --risk-soft: #3a1c1a;
+  --row-hover: #222529;
+  --shadow: none;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+.wrap { max-width: 1280px; margin: 0 auto; padding: 20px 16px 48px; }
+header h1 { font-size: 24px; line-height: 1.2; margin: 0 0 4px; letter-spacing: -.01em; }
+header p { margin: 0; color: var(--muted); }
+a { color: var(--accent); }
+.howto {
+  margin: 18px 0;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: var(--shadow);
+}
+.howto summary { cursor: pointer; padding: 12px 16px; font-weight: 600; }
+.howto .body { padding: 0 16px 14px; }
+.howto ul { margin: 0; padding-left: 18px; }
+.howto li { margin: 6px 0; max-width: 92ch; }
+.tabs { display: flex; gap: 6px; margin: 18px 0 10px; flex-wrap: wrap; }
+.tab, .seg button {
+  font: inherit;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--ink);
+  border-radius: 999px;
+  padding: 7px 14px;
+  cursor: pointer;
+}
+.tab[aria-selected="true"], .seg button[aria-pressed="true"] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--panel);
+}
+.tab .n { opacity: .75; font-variant-numeric: tabular-nums; }
+.controls {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 10px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 12px;
+  box-shadow: var(--shadow);
+}
+.controls label { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--muted); }
+.controls input, .controls select {
+  font: inherit;
+  font-size: 14px;
+  color: var(--ink);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 6px 8px;
+  min-width: 0;
+}
+.controls .search { grid-column: span 2; }
+.controls .ages { display: flex; gap: 6px; }
+.controls .ages input { width: 100%; }
+.controls .checks { display: flex; flex-direction: column; gap: 4px; justify-content: flex-end; font-size: 13px; color: var(--ink); }
+.controls .checks label { flex-direction: row; align-items: center; gap: 6px; font-size: 13px; color: var(--ink); }
+.controls .actions { display: flex; align-items: flex-end; gap: 6px; }
+.controls button {
+  font: inherit; font-size: 13px; border: 1px solid var(--line); background: var(--bg);
+  color: var(--ink); border-radius: 6px; padding: 6px 10px; cursor: pointer; white-space: nowrap;
+}
+.seg { display: flex; gap: 6px; flex-wrap: wrap; margin: 10px 0 0; }
+.status { color: var(--muted); font-size: 13px; margin: 12px 2px 8px; }
+table { width: 100%; border-collapse: collapse; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+th {
+  text-align: left; font-size: 12px; font-weight: 600; color: var(--muted);
+  padding: 8px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; vertical-align: bottom;
+}
+th button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; text-align: left; }
+th[aria-sort="ascending"] button::after { content: " \25B2"; }
+th[aria-sort="descending"] button::after { content: " \25BC"; }
+td { padding: 9px 10px 3px; vertical-align: top; font-variant-numeric: tabular-nums; }
+tbody.row { border-top: 1px solid var(--line); }
+tbody.row:hover { background: var(--row-hover); }
+tr.why td { padding: 0 10px 10px; color: var(--muted); font-size: 13px; }
+.name { font-weight: 600; }
+.meta { color: var(--muted); font-size: 12.5px; }
+.num { white-space: nowrap; }
+.small { display: block; color: var(--faint); font-size: 11.5px; }
+.blank { color: var(--faint); font-size: 12.5px; }
+.badge {
+  display: inline-block; font-size: 11px; font-weight: 600; border-radius: 999px;
+  padding: 1px 7px; margin-left: 6px; vertical-align: 1px; white-space: nowrap;
+}
+.badge.rising { background: var(--good-soft); color: var(--good); }
+.badge.loan, .badge.stale { background: var(--warn-soft); color: var(--warn); }
+.flags { margin: 0; padding: 0; list-style: none; font-size: 12.5px; }
+.flags li { color: var(--risk); }
+.flags li + li { margin-top: 2px; }
+.none { color: var(--faint); font-size: 12.5px; }
+.chance { font-weight: 600; }
+.more { display: block; margin: 14px auto 0; font: inherit; padding: 8px 18px; border-radius: 999px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); cursor: pointer; }
+.empty { padding: 28px; text-align: center; color: var(--muted); }
+details.dict { margin-top: 22px; }
+details.dict summary { cursor: pointer; font-weight: 600; }
+details.dict dl { margin: 10px 0 0; }
+details.dict dt { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12.5px; margin-top: 8px; }
+details.dict dd { margin: 2px 0 0; color: var(--muted); max-width: 92ch; }
+footer { margin-top: 28px; color: var(--muted); font-size: 13px; border-top: 1px solid var(--line); padding-top: 14px; }
+footer p { margin: 6px 0; max-width: 100ch; }
+@media (max-width: 760px) {
+  .wrap { padding: 16px 16px 40px; }
+  header h1 { font-size: 21px; }
+  .controls { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .controls input, .controls select { width: 100%; }
+  .controls .actions { grid-column: 1 / -1; }
+  .controls .search { grid-column: 1 / -1; }
+  table, thead, tbody, tr, td { display: block; }
+  table { border: 0; background: none; }
+  thead { display: none; }
+  tbody.row {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+    margin: 0 0 10px; padding: 6px 0 2px; box-shadow: var(--shadow);
+  }
+  tbody.row:hover { background: var(--panel); }
+  tr.main { display: grid; grid-template-columns: 1fr 1fr; }
+  tr.main td { padding: 6px 12px; }
+  tr.main td.player, tr.main td.wide { grid-column: 1 / -1; }
+  tr.main td[data-label]::before {
+    content: attr(data-label); display: block; font-size: 11px; color: var(--faint); margin-bottom: 1px;
+  }
+  tr.why td { padding: 2px 12px 10px; }
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Scouting lists</h1>
+    <p id="subtitle"></p>
+  </header>
+
+  <details class="howto" id="howto" open>
+    <summary>How to read this: calibrated odds from past seasons, not predictions beyond the market</summary>
+    <div class="body"><ul id="howto-list"></ul></div>
+  </details>
+
+  <div class="tabs" role="tablist">
+    <button class="tab" role="tab" id="tab-candidates" data-tab="candidates">Candidates <span class="n"></span></button>
+    <button class="tab" role="tab" id="tab-bargains" data-tab="bargains">Bargains <span class="n"></span></button>
+  </div>
+
+  <div class="controls" id="controls">
+    <label class="search">Search player or club
+      <input type="search" id="q" placeholder="for example Bellingham, Como" autocomplete="off">
+    </label>
+    <label>Position <select id="position"></select></label>
+    <label>League <select id="league"></select></label>
+    <label>Age
+      <span class="ages">
+        <input type="number" id="age-min" inputmode="numeric" min="14" max="46" placeholder="from">
+        <input type="number" id="age-max" inputmode="numeric" min="14" max="46" placeholder="to">
+      </span>
+    </label>
+    <label>Flags <select id="flag"></select></label>
+    <label>Sort by <select id="sort"></select></label>
+    <div class="checks" id="checks"></div>
+    <div class="actions">
+      <button type="button" id="dir" title="Change the sort direction">Reverse order</button>
+      <button type="button" id="reset">Clear filters</button>
+    </div>
+  </div>
+  <div class="seg" id="lists" hidden>
+    <button type="button" data-list="prime">Prime, 29 and under <span class="n"></span></button>
+    <button type="button" data-list="experienced">Experienced, 30 to 33 <span class="n"></span></button>
+  </div>
+
+  <p class="status" id="status" aria-live="polite"></p>
+  <table id="table">
+    <thead><tr id="head"></tr></thead>
+  </table>
+  <button type="button" class="more" id="more" hidden>Show 50 more</button>
+
+  <details class="dict" id="dict">
+    <summary>What each column means</summary>
+    <dl id="dict-list"></dl>
+  </details>
+
+  <footer id="footer"></footer>
+</div>
+
+<script type="application/json" id="data">__DATA__</script>
+<script>
+(function () {
+  "use strict";
+  var D = JSON.parse(document.getElementById("data").textContent);
+  var PAGE = 50;
+
+  // Data
+
+  function fold(s) {
+    return String(s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase()
+      .replace(/ı/g, "i").replace(/ø/g, "o").replace(/æ/g, "ae").replace(/ß/g, "ss")
+      .replace(/đ/g, "d").replace(/ł/g, "l");
+  }
+  function rows(table) {
+    return table.rows.map(function (r, i) {
+      var o = { _i: i };
+      table.columns.forEach(function (c, j) { o[c] = r[j]; });
+      o._q = fold(o.player + " " + o.club);
+      return o;
+    });
+  }
+  var DATA = { candidates: rows(D.candidates), bargains: rows(D.bargains) };
+
+  // Formatting
+
+  var MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August",
+    "September", "October", "November", "December"];
+  function day(iso) {
+    if (!iso) return "";
+    var p = iso.split("-");
+    return Number(p[2]) + " " + MONTHS[Number(p[1]) - 1] + " " + p[0];
+  }
+  function esc(s) {
+    return String(s).replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
+  }
+  function money(v) {
+    if (v == null) return '<span class="blank">no value</span>';
+    if (v >= 1e6) return "€" + (v >= 1e7 ? Math.round(v / 1e6) : (v / 1e6).toFixed(1).replace(/\.0$/, "")) + "m";
+    if (v >= 1e3) return "€" + Math.round(v / 1e3) + "k";
+    return "€" + Math.round(v);
+  }
+  var WORDS = ["no", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten"];
+  function words(n) { return n >= 0 && n < WORDS.length ? WORDS[n] : String(n); }
+  function times(n) { return n === 1 ? "once" : n === 2 ? "twice" : words(n) + " times"; }
+  function int(v) { return v == null ? "" : Math.round(v).toLocaleString("en"); }
+  function chance(pct, players, decile, reason) {
+    if (pct == null) return '<span class="blank">' + reason + "</span>";
+    var shown = pct < 5 ? "under 5%" : pct + "%";
+    return '<span class="chance">' + shown + '</span><span class="small">of ' + int(players) +
+      " past players" + (decile != null ? ", decile " + decile : "") + "</span>";
+  }
+  function flagList(o) {
+    if (!o.flag_count) return '<span class="none">none</span>';
+    return '<ul class="flags">' + String(o.flags).split("; ").map(function (f) {
+      return "<li>" + esc(f) + "</li>";
+    }).join("") + "</ul>";
+  }
+  function player(o, extra) {
+    var badges = "";
+    if (o.rising) badges += '<span class="badge rising" title="The riser model\'s top 50 this season">Rising</span>';
+    if (o.on_loan) badges += '<span class="badge loan" title="' + esc(D.tags.on_loan) + '">On loan</span>';
+    if (o.stale_value) badges += '<span class="badge stale" title="' + esc(D.tags.stale_value) + '">Stale value</span>';
+    var meta = [o.position, o.age != null ? Math.floor(o.age) + " years" : null, o.club, o.league]
+      .filter(Boolean).map(esc).join(" · ");
+    return (extra || "") + '<span class="name">' + esc(o.player) + "</span>" + badges +
+      '<div class="meta">' + meta + "</div>";
+  }
+
+  // Columns: label, cell renderer, sort value, mobile label
+
+  function nulls(v) { return v == null ? null : v; }
+  var COLUMNS = {
+    candidates: [
+      { key: "player", label: "Player", cls: "player", cell: function (o) { return player(o); }, sort: function (o) { return fold(o.player); } },
+      { key: "value", label: "Value", cell: function (o) { return '<span class="num">' + money(o.value_eur) + "</span>" + (o.value_rank != null ? '<span class="small">rank #' + int(o.value_rank) + "</span>" : ""); }, sort: function (o) { return nulls(o.value_eur); }, desc: true },
+      { key: "fair", label: "Fair value", cell: function (o) { return '<span class="num">' + money(o.fair_value_eur) + "</span>"; }, sort: function (o) { return nulls(o.fair_value_eur); }, desc: true },
+      { key: "elite", label: "Elite chance", cell: function (o) { return chance(o.elite_chance_pct, o.elite_chance_players, o.elite_decile, "outside the elite pool"); }, sort: function (o) { return o.elite_chance_pct == null ? null : o.elite_chance_pct * 100 + o.elite_decile; }, desc: true },
+      { key: "step_up", label: "Step up chance", cell: function (o) { return chance(o.step_up_chance_pct, o.step_up_chance_players, o.step_up_decile, "not rated"); }, sort: function (o) { return o.step_up_chance_pct == null ? null : o.step_up_chance_pct * 100 + o.step_up_decile; }, desc: true },
+      { key: "big_move", label: "Big move chance", cell: function (o) { return chance(o.big_move_chance_pct, o.big_move_chance_players, o.big_move_decile, o.value_rank != null && o.value_rank <= 2000 ? "at a top 20 club" : "not rated"); }, sort: function (o) { return o.big_move_chance_pct == null ? null : o.big_move_chance_pct * 100 + o.big_move_decile; }, desc: true },
+      { key: "fall_back", label: "Fall back risk", cell: function (o) { return chance(o.fall_back_risk_pct, o.fall_back_risk_players, null, "outside the elite pool"); }, sort: function (o) { return nulls(o.fall_back_risk_pct); }, desc: true },
+      { key: "flags", label: "Flags", cls: "wide", cell: flagList, sort: function (o) { return o.flag_count; }, desc: true },
+      { key: "ability", label: "Ability", cell: function (o) { return o.ability_pct == null ? '<span class="blank">none</span>' : int(o.ability_pct) + '<span class="small">percentile</span>'; }, sort: function (o) { return nulls(o.ability_pct); }, desc: true },
+      { key: "age", label: "Age", hidden: true, sort: function (o) { return nulls(o.age); } },
+      { key: "order", label: "Table order", hidden: true, sort: function (o) { return o._i; } }
+    ],
+    bargains: [
+      { key: "rank", label: "#", cell: function (o) { return int(o.list_rank); }, sort: function (o) { return o.list_rank; } },
+      { key: "player", label: "Player", cls: "player", cell: function (o) { return player(o); }, sort: function (o) { return fold(o.player); } },
+      { key: "value", label: "Value", cell: function (o) { return '<span class="num">' + money(o.value_eur) + '</span><span class="small">' + (o.value_date ? "dated " + day(o.value_date) : "") + "</span>"; }, sort: function (o) { return nulls(o.value_eur); }, desc: true },
+      { key: "fair", label: "Fair value", cell: function (o) { return '<span class="num">' + money(o.fair_value_eur) + "</span>"; }, sort: function (o) { return nulls(o.fair_value_eur); }, desc: true },
+      { key: "ratio", label: "Price against fair", cell: function (o) { return '<span class="chance">' + Math.round(o.value_to_fair * 100) + '% of fair</span><span class="small">cheapest ' + (o.value_to_fair_pct < 1 ? "1" : int(o.value_to_fair_pct)) + "% of his position group</span>"; }, sort: function (o) { return o.value_to_fair; } },
+      { key: "ability", label: "Ability", cell: function (o) { return int(o.ability_pct) + '<span class="small">percentile</span>'; }, sort: function (o) { return nulls(o.ability_pct); }, desc: true },
+      { key: "minutes", label: "Minutes", cell: function (o) { return Math.round(o.minutes_share * 100) + '%<span class="small">of team minutes</span>'; }, sort: function (o) { return o.minutes_share; }, desc: true },
+      { key: "contract", label: "Contract until", cell: function (o) { return o.contract_expiry ? day(o.contract_expiry) : '<span class="blank">not known</span>'; }, sort: function (o) { return o.contract_expiry || null; } },
+      { key: "flags", label: "Flags", cls: "wide", cell: flagList, sort: function (o) { return o.flag_count; }, desc: true },
+      { key: "age", label: "Age", hidden: true, sort: function (o) { return nulls(o.age); } }
+    ]
+  };
+  var DEFAULT_SORT = { candidates: "order", bargains: "rank" };
+
+  // State
+
+  var state = {
+    tab: location.hash === "#bargains" ? "bargains" : "candidates",
+    list: "prime",
+    shown: PAGE,
+    sort: { candidates: { key: "order", dir: 1 }, bargains: { key: "rank", dir: 1 } }
+  };
+  var $ = function (id) { return document.getElementById(id); };
+
+  function options(select, values, all) {
+    select.innerHTML = '<option value="">' + all + "</option>" + values.map(function (v) {
+      return '<option value="' + esc(v) + '">' + esc(v) + "</option>";
+    }).join("");
+  }
+  function unique(list, key) {
+    var seen = {};
+    list.forEach(function (o) { if (o[key]) seen[o[key]] = true; });
+    return Object.keys(seen).sort(function (a, b) { return a.localeCompare(b); });
+  }
+
+  function checks() {
+    var box = $("checks");
+    if (state.tab === "candidates") {
+      box.innerHTML = '<label><input type="checkbox" id="only-rising"> Rising only</label>' +
+        '<label><input type="checkbox" id="only-pool"> Elite pool only</label>';
+    } else {
+      box.innerHTML = '<label><input type="checkbox" id="hide-loan"> Hide players on loan</label>' +
+        '<label><input type="checkbox" id="hide-stale"> Hide stale values</label>';
+    }
+    box.querySelectorAll("input").forEach(function (i) { i.addEventListener("change", refresh); });
+  }
+
+  function setupTab() {
+    var list = DATA[state.tab];
+    options($("position"), unique(list, "position"), "All positions");
+    options($("league"), unique(list, "league"), "All leagues");
+    $("flag").innerHTML = [
+      ["", "Any"], ["none", "No flags"], ["some", "At least one flag"]
+    ].concat(Object.keys(D.flags).map(function (k) { return [k, D.flags[k]]; })).map(function (p) {
+      return '<option value="' + p[0] + '">' + esc(p[1]) + "</option>";
+    }).join("");
+    $("sort").innerHTML = COLUMNS[state.tab].map(function (c) {
+      return '<option value="' + c.key + '">' + esc(c.label === "#" ? "List rank" : c.label) + "</option>";
+    }).join("");
+    checks();
+    document.querySelectorAll(".tab").forEach(function (t) {
+      t.setAttribute("aria-selected", String(t.dataset.tab === state.tab));
+    });
+    $("lists").hidden = state.tab !== "bargains";
+    head();
+    dictionary();
+  }
+
+  function head() {
+    var s = state.sort[state.tab];
+    $("head").innerHTML = COLUMNS[state.tab].filter(function (c) { return !c.hidden; }).map(function (c) {
+      var sort = s.key === c.key ? (s.dir > 0 ? "ascending" : "descending") : "none";
+      return '<th aria-sort="' + sort + '"><button type="button" data-sort="' + c.key + '">' + esc(c.label) + "</button></th>";
+    }).join("");
+    $("head").querySelectorAll("button").forEach(function (b) {
+      b.addEventListener("click", function () { sortBy(b.dataset.sort, true); });
+    });
+    $("sort").value = s.key;
+  }
+
+  function sortBy(key, toggle) {
+    var s = state.sort[state.tab];
+    var col = COLUMNS[state.tab].filter(function (c) { return c.key === key; })[0];
+    if (toggle && s.key === key) s.dir = -s.dir;
+    else { s.key = key; s.dir = col.desc ? -1 : 1; }
+    state.shown = PAGE;
+    head();
+    draw();
+  }
+
+  function filtered() {
+    var q = fold($("q").value.trim());
+    var pos = $("position").value, lg = $("league").value, flag = $("flag").value;
+    var lo = parseFloat($("age-min").value), hi = parseFloat($("age-max").value);
+    var el = function (id) { var e = $(id); return e && e.checked; };
+    var rising = el("only-rising"), pool = el("only-pool"), loan = el("hide-loan"), stale = el("hide-stale");
+    return DATA[state.tab].filter(function (o) {
+      if (state.tab === "bargains" && o.list !== state.list) return false;
+      if (q && o._q.indexOf(q) < 0) return false;
+      if (pos && o.position !== pos) return false;
+      if (lg && o.league !== lg) return false;
+      if (!isNaN(lo) && !(o.age >= lo)) return false;
+      if (!isNaN(hi) && !(Math.floor(o.age) <= hi)) return false;
+      if (flag === "none" && o.flag_count) return false;
+      if (flag === "some" && !o.flag_count) return false;
+      if (flag && flag !== "none" && flag !== "some" && o.flag_keys.indexOf(flag) < 0) return false;
+      if (rising && !o.rising) return false;
+      if (pool && o.elite_chance_pct == null) return false;
+      if (loan && o.on_loan) return false;
+      if (stale && o.stale_value) return false;
+      return true;
+    });
+  }
+
+  function sorted(list) {
+    var s = state.sort[state.tab];
+    var col = COLUMNS[state.tab].filter(function (c) { return c.key === s.key; })[0];
+    return list.map(function (o) { return [col.sort(o), o]; }).sort(function (a, b) {
+      if (a[0] == null && b[0] == null) return a[1]._i - b[1]._i;
+      if (a[0] == null) return 1;
+      if (b[0] == null) return -1;
+      if (a[0] < b[0]) return -s.dir;
+      if (a[0] > b[0]) return s.dir;
+      return a[1]._i - b[1]._i;
+    }).map(function (p) { return p[1]; });
+  }
+
+  function draw() {
+    var table = $("table");
+    table.querySelectorAll("tbody").forEach(function (b) { b.remove(); });
+    var list = sorted(filtered());
+    var cols = COLUMNS[state.tab].filter(function (c) { return !c.hidden; });
+    var html = list.slice(0, state.shown).map(function (o) {
+      var cells = cols.map(function (c) {
+        return '<td class="' + (c.cls || "") + '"' + (c.cls === "player" ? "" : ' data-label="' + esc(c.label === "#" ? "List rank" : c.label) + '"') + ">" + c.cell(o) + "</td>";
+      }).join("");
+      return '<tbody class="row"><tr class="main">' + cells + '</tr><tr class="why"><td colspan="' + cols.length + '">' + esc(o.explanation || "") + "</td></tr></tbody>";
+    }).join("");
+    if (!list.length) html = '<tbody><tr><td class="empty" colspan="' + cols.length + '">No player matches these filters.</td></tr></tbody>';
+    table.insertAdjacentHTML("beforeend", html);
+    var total = state.tab === "bargains" ? DATA.bargains.filter(function (o) { return o.list === state.list; }).length : DATA.candidates.length;
+    $("status").textContent = "Showing " + Math.min(state.shown, list.length).toLocaleString("en") + " of " +
+      list.length.toLocaleString("en") + " matching players" + (list.length !== total ? " (" + total.toLocaleString("en") + " in the table)" : "") + ".";
+    $("more").hidden = list.length <= state.shown;
+  }
+
+  function refresh() { state.shown = PAGE; draw(); }
+
+  function dictionary() {
+    var words = D.dictionary.rows.filter(function (r) { return r[0] === state.tab; });
+    $("dict-list").innerHTML = words.map(function (r) {
+      return "<dt>" + esc(r[1]) + "</dt><dd>" + esc(r[2]) + "</dd>";
+    }).join("");
+  }
+
+  // The fixed text
+
+  function howto() {
+    var w = D.window, pool = D.elite_pool, dates = Object.keys(D.feature_dates).sort();
+    var main = dates[dates.length - 1], other = dates.slice(0, -1);
+    var when = "Players are described as they stood on " + day(main) + ", at the end of the " + D.season_label + " season" + (other.length ? other.map(function (d) {
+      return " (on " + day(d) + " in the " + words(D.feature_dates[d].length) + " calendar year leagues, at the end of their " + D.season + " season: " + D.feature_dates[d].map(esc).join(", ") + ")";
+    }).join("") : "") + ".";
+    var reg = D.forecasts.length ? " The forecast of record was registered on " + day(D.forecasts[0].date) +
+      (D.forecasts[0].revisions ? " (revised " + times(D.forecasts[0].revisions) + " the same day, each change recorded)" : "") +
+      "; it is scored once " + words(D.horizon) + " seasons have passed." : "";
+    var fb = D.fall_back.map(function (b) {
+      return (b.flags === "1" ? "1 flag " : b.flags + " flags ") + b.pct + "% (of " + int(b.players) + ")";
+    }).join(", ");
+    var items = [
+      "<b>Calibrated odds from past seasons, not predictions beyond the market.</b> Every chance is what actually happened before: of the players that past forecasts, rebuilt with the models of their time, put in the same bucket, the share who did it within " + words(D.horizon) + " seasons. The small number under it is how many past players it rests on. Rates are rounded to the nearest 5% and never shown for fewer than 30 players.",
+      "<b>A " + words(w.seasons) + " season window.</b> The rates pool the last " + words(w.seasons) + " scored seasons, " + w.first + " to " + w.last + ", so they follow recent seasons rather than the whole history.",
+      "<b>The market already knows most of it.</b> Among young players the elite model is barely better than a simple rule from value rank and age, so read a high elite chance as the market's own view, measured honestly. What these tables add is calibrated odds, risk flags with each player's own numbers, and the same treatment for all " + D.tracked + " leagues tracked.",
+      "<b>Valuation date.</b> Market values are Transfermarkt valuations up to " + day(D.valuation_end) + (D.latest_value_date ? " (the latest used is dated " + day(D.latest_value_date) + ")" : "") + ". The source has published nothing newer, so values stay frozen there until a new source is added.",
+      "<b>Forecast date.</b> " + when + " These tables were built on " + day(D.built) + "." + reg,
+      "<b>Blank chances.</b> Elite chance and fall back risk exist only for the elite pool (ranked #" + pool.from + " to #" + int(pool.to) + " by value and " + pool.max_age + " or under). Big move is blank at a top 20 club. Rising players valued below #2,000 are added without chances.",
+      "<b>Flags</b> are low minutes, injured and value falling, each shown with the player's own number. Fall back risk in the elite pool by flags: " + fb + ".",
+      "<b>Bargains</b> are regular players (half of team minutes or more, ability at the 70th percentile of their position or better) whose market value is low against the fair value model, which was trained on earlier seasons only. Prime is 29 and under, experienced 30 to 33."
+    ];
+    $("howto-list").innerHTML = items.map(function (t) { return "<li>" + t + "</li>"; }).join("");
+  }
+
+  function header() {
+    $("subtitle").textContent = "Season " + D.season_label + ", players from " + D.leagues + " of the " + D.tracked + " leagues tracked, built " + day(D.built) + ".";
+    $("tab-candidates").querySelector(".n").textContent = DATA.candidates.length.toLocaleString("en");
+    $("tab-bargains").querySelector(".n").textContent = DATA.bargains.length.toLocaleString("en");
+    document.querySelectorAll("#lists button").forEach(function (b) {
+      b.querySelector(".n").textContent = DATA.bargains.filter(function (o) { return o.list === b.dataset.list; }).length.toLocaleString("en");
+    });
+    $("footer").innerHTML =
+      "<p>Downloads: <a href=\"data/candidates.csv\">candidates.csv</a>, <a href=\"data/bargains.csv\">bargains.csv</a>, " +
+      "<a href=\"data/dictionary.csv\">dictionary.csv</a>; the same tables as Parquet: <a href=\"data/candidates.parquet\">candidates</a>, " +
+      "<a href=\"data/bargains.parquet\">bargains</a>.</p>" +
+      "<p>Sources: player statistics from API Football (api-football.com), used under the owner's subscription; raw responses are not published. " +
+      "Market values and transfers from transfermarkt-datasets by dcaribou (github.com/dcaribou/transfermarkt-datasets), derived from Transfermarkt (transfermarkt.com), used for non commercial purposes only and credited here. No club logos or photos are stored or shown.</p>" +
+      "<p>A non commercial project. Every chance is a historical rate with its count, not a promise about a single player.</p>";
+  }
+
+  // Wiring
+
+  document.querySelectorAll(".tab").forEach(function (t) {
+    t.addEventListener("click", function () {
+      state.tab = t.dataset.tab;
+      history.replaceState(null, "", state.tab === "bargains" ? "#bargains" : "#candidates");
+      ["q", "age-min", "age-max"].forEach(function (id) { $(id).value = ""; });
+      state.shown = PAGE;
+      setupTab();
+      draw();
+    });
+  });
+  document.querySelectorAll("#lists button").forEach(function (b) {
+    b.addEventListener("click", function () {
+      state.list = b.dataset.list;
+      document.querySelectorAll("#lists button").forEach(function (x) { x.setAttribute("aria-pressed", String(x === b)); });
+      refresh();
+    });
+  });
+  ["position", "league", "flag"].forEach(function (id) { $(id).addEventListener("change", refresh); });
+  ["q", "age-min", "age-max"].forEach(function (id) { $(id).addEventListener("input", refresh); });
+  $("sort").addEventListener("change", function () { sortBy($("sort").value, false); });
+  $("dir").addEventListener("click", function () {
+    state.sort[state.tab].dir = -state.sort[state.tab].dir; state.shown = PAGE; head(); draw();
+  });
+  $("reset").addEventListener("click", function () {
+    ["q", "age-min", "age-max"].forEach(function (id) { $(id).value = ""; });
+    ["position", "league", "flag"].forEach(function (id) { $(id).value = ""; });
+    document.querySelectorAll("#checks input").forEach(function (i) { i.checked = false; });
+    state.sort[state.tab] = { key: DEFAULT_SORT[state.tab], dir: 1 };
+    head(); refresh();
+  });
+  $("more").addEventListener("click", function () { state.shown += PAGE; draw(); });
+
+  header();
+  howto();
+  if (window.matchMedia && window.matchMedia("(max-width: 760px)").matches) $("howto").open = false;
+  document.querySelector('#lists button[data-list="prime"]').setAttribute("aria-pressed", "true");
+  document.querySelector('#lists button[data-list="experienced"]').setAttribute("aria-pressed", "false");
+  setupTab();
+  draw();
+})();
+</script>
+</body>
+</html>

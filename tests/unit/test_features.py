@@ -470,3 +470,42 @@ def test_build_profiles_keeps_one_row_per_linked_player():
     assert out.loc[0, "contract_expiry"] == pd.Timestamp("2028-06-30")
     assert pd.isna(out.loc[1, "agent"])  # linked but not in the profile source
     assert (out["as_of"] == pd.Timestamp("2026-06-12")).all()
+
+
+def test_one_season_rebuild_matches_the_full_build():
+    """The weekly run rebuilds the newest season only, reading the stored
+    rows of the seasons before it for the history columns."""
+    base = _inputs()
+    earlier = frame(
+        [
+            match_row(100 + i, f"2022-08-{i + 1:02d}", 1, 2, 10, goals=1, season=2022)
+            for i in range(6)
+        ]
+        + [match_row(100 + i, f"2022-08-{i + 1:02d}", 1, 2, 11, season=2022) for i in range(6)]
+    )
+    stats = pd.concat(
+        [base.season_stats, base.season_stats.iloc[:2].assign(season=2022)], ignore_index=True
+    )
+    inputs = Inputs(
+        stats,
+        pd.concat([earlier, base.match_stats], ignore_index=True),
+        base.links,
+        base.tm_players,
+        base.valuations,
+        base.data_end,
+    )
+    full, full_labels = build_features(inputs)
+    assert set(full["season"].astype(int)) == {2014, 2022, 2023}
+    newest = Inputs(
+        stats, base.match_stats, base.links, base.tm_players, base.valuations, base.data_end
+    )
+    one, one_labels = build_features(newest, season=2023, earlier=full)
+    assert set(one["season"].astype(int)) == {2023}
+    expected = full[full["season"] == 2023].reset_index(drop=True)
+    pd.testing.assert_frame_equal(one, expected)
+    pd.testing.assert_frame_equal(
+        one_labels.reset_index(drop=True),
+        full_labels[full_labels["season"] == 2023].reset_index(drop=True),
+    )
+    assert one["career_seasons"].tolist() == [2, 1]  # 2014 and 2022 for player 10
+    assert one["prev_minutes"].notna().all()

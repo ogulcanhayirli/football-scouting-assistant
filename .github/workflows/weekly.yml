@@ -1,0 +1,108 @@
+name: Weekly lists and page
+
+# Decision 9: once a week, rebuild the current season's two tables from the
+# processed tables in S3 with the stored models (nothing is retrained) and
+# publish them with the static page. Setup, secrets and the IAM policy:
+# docs/DEPLOY.md. Retraining stays a manual command (docs/DEPLOY.md).
+
+on:
+  schedule:
+    - cron: "17 5 * * 1" # Mondays 05:17 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: weekly
+  cancel-in-progress: false
+
+env:
+  UV_FROZEN: "1"
+  CONFIG: configs/backfill.ultra.yaml
+  # Created by prompt 4 on 6 November; until then the update is skipped.
+  UPDATE_CONFIG: configs/update.free.yaml
+  AWS_DEFAULT_REGION: eu-central-1
+
+jobs:
+  weekly:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      API_FOOTBALL_KEY: ${{ secrets.API_FOOTBALL_KEY }}
+      SCOUT_S3_BUCKET: ${{ vars.SCOUT_S3_BUCKET }}
+      SCOUT_SITE_BUCKET: ${{ vars.SCOUT_SITE_BUCKET }}
+    steps:
+      - name: Check secrets and variables
+        run: |
+          echo "STARTED=$(date +%s)" >> "$GITHUB_ENV"
+          missing=0
+          for name in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY API_FOOTBALL_KEY; do
+            if [ -z "${!name}" ]; then
+              echo "::error title=Missing secret::Repository secret $name is not set (Settings, Secrets and variables, Actions, Secrets). See docs/DEPLOY.md."
+              missing=1
+            fi
+          done
+          for name in SCOUT_S3_BUCKET SCOUT_SITE_BUCKET; do
+            if [ -z "${!name}" ]; then
+              echo "::error title=Missing variable::Repository variable $name is not set (Settings, Secrets and variables, Actions, Variables). See docs/DEPLOY.md."
+              missing=1
+            fi
+          done
+          exit $missing
+
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+          enable-cache: true
+
+      - name: Install
+        run: uv sync --extra aws --no-dev
+
+      - name: Pull the processed tables and the Transfermarkt snapshot
+        run: |
+          uv run scout --config "$CONFIG" sync down --only processed --workers 16
+          uv run scout --config "$CONFIG" sync down --only transfermarkt
+
+      - name: Free tier update
+        run: |
+          if [ ! -f "$UPDATE_CONFIG" ]; then
+            echo "::notice title=Update skipped::$UPDATE_CONFIG does not exist yet (prompt 4 creates it on 6 November); rebuilding from the tables in S3."
+            exit 0
+          fi
+          if ! uv run scout --config "$UPDATE_CONFIG" update --help > /dev/null 2>&1; then
+            echo "::error title=Update not wired::$UPDATE_CONFIG exists but there is no 'scout update' command yet. Prompt 4 must add it, with the raw cache read from and written to S3 (rule 4) and the IAM rights it needs (docs/DEPLOY.md, The free tier update)."
+            exit 1
+          fi
+          uv run scout --config "$UPDATE_CONFIG" update
+
+      - name: Rebuild the current season's features
+        run: uv run scout --config "$CONFIG" features --current
+
+      - name: Score with the stored models
+        run: uv run scout --config "$CONFIG" score
+
+      - name: Rebuild the two tables and the explanations
+        run: uv run scout --config "$CONFIG" lists
+
+      - name: Build the page
+        run: uv run scout --config "$CONFIG" site
+
+      - name: Publish
+        run: uv run scout --config "$CONFIG" publish | tee publish.txt
+
+      - name: Summary
+        if: always()
+        run: |
+          minutes=$(( ($(date +%s) - STARTED) / 60 ))
+          seconds=$(( ($(date +%s) - STARTED) % 60 ))
+          {
+            echo "### Weekly run"
+            echo ""
+            echo "Runtime: ${minutes} min ${seconds} s"
+            if [ -f publish.txt ]; then echo ""; sed 's/^/    /' publish.txt; fi
+          } >> "$GITHUB_STEP_SUMMARY"

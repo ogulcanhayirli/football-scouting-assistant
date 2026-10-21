@@ -170,18 +170,27 @@ def group_rate(train: pd.DataFrame, test: pd.DataFrame, columns: list[str]) -> n
     return pred.fillna(train["y"].mean()).to_numpy()
 
 
-def lightgbm_classifier(rounds: int = 400):
-    params = {
-        "objective": "binary",
-        "seed": 7,
-        "deterministic": True,
-        "verbosity": -1,
-        **DEFAULT_PARAMS,
-    }
+CLASSIFIER_PARAMS = {
+    "objective": "binary",
+    "seed": 7,
+    "deterministic": True,
+    "verbosity": -1,
+    **DEFAULT_PARAMS,
+}
+CLASSIFIER_ROUNDS = 400
+
+
+def fit_classifier(
+    train: pd.DataFrame, columns: list[str], rounds: int = CLASSIFIER_ROUNDS
+) -> lgb.Booster:
+    return lgb.train(CLASSIFIER_PARAMS, lgb.Dataset(train[columns], label=train["y"]), rounds)
+
+
+def lightgbm_classifier(rounds: int = CLASSIFIER_ROUNDS):
+    params = CLASSIFIER_PARAMS
 
     def model(train: pd.DataFrame, test: pd.DataFrame, columns: list[str]) -> np.ndarray:
-        booster = lgb.train(params, lgb.Dataset(train[columns], label=train["y"]), rounds)
-        return booster.predict(test[columns])
+        return fit_classifier(train, columns, rounds).predict(test[columns])
 
     model.params = params
     model.rounds = rounds
@@ -379,8 +388,8 @@ def write_move_report(
 TRANSFERS_DATA_END = pd.Timestamp("2026-10-11")  # the /transfers download
 
 
-def run_moves(settings) -> pd.DataFrame:
-    """``scout moves``: labels, backtest, report and shortlist."""
+def _move_inputs(settings):
+    """Features, top clubs, labels, the labelled rows and their columns."""
     from scout.backfill.transfers import transfers_path
     from scout.tables import read_feature_table
 
@@ -390,6 +399,35 @@ def run_moves(settings) -> pd.DataFrame:
     top = top_clubs(features)
     labels = move_labels(features, transfers, top, TRANSFERS_DATA_END)
     data, columns = move_dataset(features, labels)
+    return features, top, labels, data, columns
+
+
+def score_stored_moves(settings) -> pd.DataFrame:
+    """The weekly run: the newest season scored by the stored big move model,
+    written to ``big_move_current.parquet``. Nothing is trained."""
+    from scout.models.store import BIG_MOVE, load_booster, store_dir
+
+    features, _, labels, data, columns = _move_inputs(settings)
+    stored = load_booster(store_dir(settings.paths.processed_dir), BIG_MOVE)
+    if stored.columns != columns:
+        raise ValueError(
+            "the big move columns changed since the stored model was trained: "
+            "retrain with `scout moves` (docs/DEPLOY.md, Retraining)"
+        )
+    current = current_scores(
+        features, labels, data, columns, lambda train, test, cols: stored.predict(test)
+    )
+    out_dir = settings.paths.processed_dir / "models"
+    current.to_parquet(out_dir / "big_move_current.parquet", index=False)
+    log.info("big move: %d current rows scored with the stored model", len(current))
+    return current
+
+
+def run_moves(settings) -> pd.DataFrame:
+    """``scout moves``: labels, backtest, report, shortlist and the stored model."""
+    from scout.models.store import BIG_MOVE, save_booster, store_dir
+
+    features, top, labels, data, columns = _move_inputs(settings)
     log.info(
         "big move: %d rows, %d movers, %d columns", len(data), int(data["y"].sum()), len(columns)
     )
@@ -399,7 +437,23 @@ def run_moves(settings) -> pd.DataFrame:
     out_dir.mkdir(parents=True, exist_ok=True)
     predictions.to_parquet(out_dir / "backtest_big_move_24m.parquet", index=False)
     labels.to_parquet(out_dir / "big_move_labels.parquet", index=False)
-    current = current_scores(features, labels, data, columns, models["lightgbm"])
+    # The model behind the current scores, trained on every labelled row and
+    # stored for the weekly run (scout score).
+    booster = fit_classifier(data, columns)
+    save_booster(
+        booster,
+        store_dir(settings.paths.processed_dir),
+        BIG_MOVE,
+        columns,
+        model="big_move_24m",
+        trained_rows=len(data),
+        trained_seasons=[int(data["season"].min()), int(data["season"].max())],
+        newest_season=int(features["season"].max()),
+        created=pd.Timestamp.now(tz="UTC").strftime("%Y-%m-%d"),
+    )
+    current = current_scores(
+        features, labels, data, columns, lambda train, test, cols: booster.predict(test[cols])
+    )
     current.to_parquet(out_dir / "big_move_current.parquet", index=False)
     short = current.drop(columns=KEYS[1:]).head(50)
     settings.paths.reports_dir.mkdir(parents=True, exist_ok=True)

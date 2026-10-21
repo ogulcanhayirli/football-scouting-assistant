@@ -141,9 +141,25 @@ def cmd_transfermarkt(settings: Settings, args: argparse.Namespace) -> int:
 
 
 def cmd_features(settings: Settings, args: argparse.Namespace) -> int:
+    if args.current or args.season is not None:
+        from scout.features import run_current_features
+
+        run_current_features(settings, args.season)
+        return 0
     from scout.features import run_features
 
     run_features(settings)
+    return 0
+
+
+def cmd_score(settings: Settings, args: argparse.Namespace) -> int:
+    from scout.models.moves import score_stored_moves
+    from scout.models.run import score_stored_fair_value
+    from scout.scouting import score_stored
+
+    score_stored_fair_value(settings)
+    score_stored(settings)
+    score_stored_moves(settings)
     return 0
 
 
@@ -407,6 +423,50 @@ def cmd_train(settings: Settings, args: argparse.Namespace) -> int:
     return 0 if job["HyperParameterTuningJobStatus"] == "Completed" else 1
 
 
+def cmd_site(settings: Settings, args: argparse.Namespace) -> int:
+    from scout.site import build_site
+
+    for path in build_site(settings, args.out):
+        print(path)
+    return 0
+
+
+def cmd_publish(settings: Settings, args: argparse.Namespace) -> int:
+    import os
+
+    from scout.publish import publish, website_url
+
+    log = logging.getLogger(__name__)
+    data_bucket = args.bucket or os.environ.get("SCOUT_S3_BUCKET")
+    site_bucket = args.site_bucket or os.environ.get("SCOUT_SITE_BUCKET")
+    if not data_bucket or not site_bucket:
+        log.error("Set SCOUT_S3_BUCKET and SCOUT_SITE_BUCKET (or pass --bucket, --site-bucket)")
+        return 1
+    import boto3  # optional extra: uv sync --extra aws
+
+    region = os.environ.get("AWS_DEFAULT_REGION", "eu-central-1")
+    site_dir = Path(args.site) if args.site else settings.paths.processed_dir.parent / "site"
+    site_client = None
+    if args.role:
+        from scout.athena import analyst_session
+
+        site_client = analyst_session(region, args.role).client("s3")
+    lists, sent = publish(
+        boto3.client("s3", region_name=region),
+        data_bucket,
+        site_bucket,
+        settings.paths.processed_dir / "lists",
+        site_dir,
+        args.dry_run,
+        site_client,
+    )
+    suffix = " (dry run)" if args.dry_run else ""
+    print(f"processed/lists: {lists.summary()}{suffix}")
+    print(f"site: {len(sent)} files to {site_bucket}{suffix}")
+    print(f"page: {website_url(site_bucket, region)}")
+    return 0
+
+
 def cmd_sync(settings: Settings, args: argparse.Namespace) -> int:
     import os
 
@@ -424,8 +484,10 @@ def cmd_sync(settings: Settings, args: argparse.Namespace) -> int:
         "processed": settings.paths.processed_dir,
         "reports": settings.paths.reports_dir,
     }
+    # Narrower than raw: just the Transfermarkt snapshot (the weekly run).
+    extra = {"transfermarkt": ("raw/transfermarkt", settings.paths.raw_dir / "transfermarkt")}
     if args.only:
-        folders = {name: folders[name] for name in args.only}
+        folders = dict(extra.get(name, (name, folders.get(name))) for name in args.only)
     client = boto3.client("s3", config=Config(max_pool_connections=args.workers + 2))
     results = sync_data(
         client, bucket, folders, args.direction, args.prefix, args.dry_run, args.workers
@@ -473,7 +535,21 @@ def main(argv: list[str] | None = None) -> int:
     tm.set_defaults(func=cmd_transfermarkt)
 
     features = sub.add_parser("features", help="Build point in time feature and label tables")
+    features.add_argument(
+        "--current",
+        action="store_true",
+        help="rebuild only the newest season and keep every earlier one as stored (the "
+        "weekly run); needs one full build first",
+    )
+    features.add_argument("--season", type=int, help="with --current: this season instead")
     features.set_defaults(func=cmd_features)
+
+    score = sub.add_parser(
+        "score",
+        help="Score the newest season with the stored models, no training: fair value, "
+        "elite, step up, riser, big move (the weekly run; run after features --current)",
+    )
+    score.set_defaults(func=cmd_score)
 
     athena_cmd = sub.add_parser("athena", help="Run a SQL query on the feature tables")
     athena_cmd.add_argument("sql", help="Query, for example SELECT * FROM player_season_features")
@@ -560,11 +636,42 @@ def main(argv: list[str] | None = None) -> int:
     )
     ability.set_defaults(func=cmd_ability)
 
+    site = sub.add_parser(
+        "site",
+        help="The static page: index.html with both tables embedded, and the downloads "
+        "(data/site/); run after lists",
+    )
+    site.add_argument("--out", type=Path, help="Folder to write (default: data/site)")
+    site.set_defaults(func=cmd_site)
+
+    pub = sub.add_parser(
+        "publish",
+        help="Upload the lists to processed/lists/ and the page to the site bucket, nothing else "
+        "(the weekly run)",
+    )
+    pub.add_argument("--bucket", help="Data bucket; defaults to $SCOUT_S3_BUCKET")
+    pub.add_argument("--site-bucket", help="Site bucket; defaults to $SCOUT_SITE_BUCKET")
+    pub.add_argument(
+        "--site", type=Path, help="Folder written by `scout site` (default: data/site)"
+    )
+    pub.add_argument(
+        "--role",
+        help="Assume this role for the site bucket, for example scout-site-publisher (a "
+        "session publishing by hand; the weekly run's user needs none)",
+    )
+    pub.add_argument("--dry-run", action="store_true", help="List what would be sent")
+    pub.set_defaults(func=cmd_publish)
+
     sync = sub.add_parser("sync", help="Copy data/raw, data/processed and reports to or from S3")
     sync.add_argument("direction", choices=["up", "down"])
     sync.add_argument("--bucket", help="Defaults to $SCOUT_S3_BUCKET")
     sync.add_argument("--prefix", default="", help="Key prefix inside the bucket")
-    sync.add_argument("--only", action="append", choices=["raw", "processed", "reports"])
+    sync.add_argument(
+        "--only",
+        action="append",
+        choices=["raw", "processed", "reports", "transfermarkt"],
+        help="repeatable; transfermarkt is raw/transfermarkt alone",
+    )
     sync.add_argument("--dry-run", action="store_true", help="List what would be copied")
     sync.add_argument("--workers", type=int, default=8, help="Parallel transfers (default 8)")
     sync.set_defaults(func=cmd_sync)

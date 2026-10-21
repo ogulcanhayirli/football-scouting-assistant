@@ -1,103 +1,115 @@
 # Football Scouting Assistant
 
-A scouting assistant for the English Premier League and the Turkish Süper Lig,
-built to run on AWS for 10 to 20 USD a month. It will estimate what a player is
-worth from performance data, flag players whose market value sits below that
-estimate, predict how values will move over the next two to three years, find
-similar players across the two leagues, and answer scouting questions in
-English and Turkish through a Bedrock agent whose numbers all come from tools.
+Finds footballers likely to reach elite level (the level of Liverpool,
+Barcelona or Bayern regulars) before the market prices it in, and bargains:
+players already very good but cheap, at any age. It covers **37 leagues**
+(the big five, their second tiers, the rest of Europe's main leagues, Brazil,
+Argentina, Colombia, Uruguay, Liga MX, MLS, Japan, South Korea and Saudi
+Arabia) and runs on AWS for a few cents a month.
 
-The emphasis is on engineering quality and honest evaluation: strict point in
-time features, a backtest that decides between models, and a simple baseline
-that is reported even when it wins.
+The result is **two tables**, published once a week with one static page:
+<http://scout-site-098499087060.s3-website.eu-central-1.amazonaws.com/>
+
+* **Candidates:** every regular player ranked #101 to #2,000 by market value
+  in the newest season (1,830 rows for 2025/26, including the riser model's
+  top 50 valued below #2,000). Each row has the elite chance, step up chance,
+  fall back risk and big move chance, each with the number of past players it
+  rests on; the warning flags with the player's own numbers; a one line
+  explanation; the rising tag; value, fair value and ability percentile.
+* **Bargains:** regular players at the 70th ability percentile of their
+  position or better whose market value is low against the fair value model,
+  in two lists: prime (29 and under, 1,249 players) and experienced (30 to
+  33, 353 players), with the same flags and explanation and two context tags
+  (on loan, stale value).
+
+The emphasis is on honest evaluation: strict point in time features, season
+by season backtests, a simple baseline reported next to every model, and
+chances shown as the rates that past forecasts actually achieved.
 
 ## Status
 
 | Part | State |
 |---|---|
-| Repository skeleton, CI, data contracts | Done |
-| Quota aware, resumable backfill | Done, tested against a mocked API |
-| Free tier proof run (one league, one season) | Done: EPL 2023 took 51 requests and 1,074 rows passed the contract; the second run made 0 requests |
-| Full historical backfill | Done: all 31 past seasons (EPL 2010 to 2025, Süper Lig 2011 to 2025) complete, 1,178 requests |
-| Match level player stats | Done: EPL and Süper Lig 2015 to 2025, 275,003 player match rows, 7,898 requests on the Ultra plan |
-| Private S3 copy of the data | Done: `scout sync up` stored 2,387 files; a second run copies nothing |
-| Feasibility check and `FEASIBILITY.md` | Done: go. Full features from 2015, basic from 2010; 88% of players linked to Transfermarkt, precision 179 of 179 on a hand check |
-| Point in time feature and label tables (`FEATURES.md`) | Done: 16,264 player seasons, 87 feature columns, contracts check the point in time rule |
-| Glue and Athena over the features (`infra/`, CDK) | Deployed to eu-central-1 (stack `ScoutData`); `scout athena "SQL"` queries it |
-| SageMaker Feature Store (`ScoutFeatureStore` stack) | Deployed: 16,264 records, offline store (Iceberg); its point in time answers match our tables exactly |
-| Expanding window backtest, baselines, first LightGBM (`MODELS.md`) | Done: fair value clearly beats the baseline (37 leagues: error 0.395 against 0.780); the growth model never did and is retired (decision 5) |
-| Automatic model tuning in SageMaker (`ScoutTraining` stack) | Done once, for the retired 24 month growth model: 20 jobs, about 7 cents; `train` and `tune` now take fair value only |
-| 17 leagues, 19 cups and national team competitions, team stats, lineups, injuries, transfers | Done: about 245,000 requests on the Ultra plan; 2.2 million player match rows, 285,797 transfers; all in S3 |
-| Features on all leagues plus cup, team, injury and transfer context | Done: 130,631 player seasons, 129 columns; fair value error 0.536 to 0.391 on the original EPL and Süper Lig test rows |
-| Big move model (`scout moves`) | Done: AUC 0.928 against 0.803 for the baseline over 37 leagues; 38.5% of each season's top 50 join a top 20 club within two years (base rate 1.4%) |
-| 37 leagues (20 added: feeder leagues, Americas, Asia, second tiers), sidelined, coaches, match events | Done 16 to 18 October; features on all 37 leagues, 233,272 player seasons |
-| Ability score version 2 (`scout ability`) | Done: per 90 composite, more stable year to year (0.858 against 0.503), elite and step up AUC as good |
-| Elite, step up and riser models (`scout scouting`) | Done: elite AUC 0.774 against 0.771 on the 23 and under pool; step up 0.927 against 0.912; riser top 50 precision 0.093 against a base rate of 0.017 |
-| Fall back risk and warning flags (`src/scout/flags.py`) | Done: 17.2% of the elite pool fall back; three flags, each raising the risk 1.33 to 1.40 times |
-| The two tables, candidates and bargains (`scout lists`) | Done: Parquet, CSV and a data dictionary in `data/processed/lists/`; one report, `reports/candidates.md` |
-| One line explanations on both tables (`src/scout/explain.py`) | Done: the three stats furthest from position and age peers, from the same table as the flags |
-| Registered forecast (`forecasts/2026-10-21/`, `scout forecast`) | Done: frozen 21 October 2026; scoring tested on the rebuilt 2015 to 2023 forecasts (MODELS.md) |
-| Athena, Feature Store and tuning on the new data | Not yet: Glue schema regenerated, redeploy pending |
-| Similarity search, agent, rest of the AWS stack | Not started |
+| Data: API Football raw cache, 37 leagues and 24 cups or national team competitions, seasons 2010 to 2025 | Done on the Ultra plan (254,398 cached responses); all in the private S3 bucket |
+| Transfermarkt snapshot (values, transfers) | Release of 5 September 2026; valuations end 12 June 2026, upstream paused |
+| Point in time feature and label tables (`FEATURES.md`) | Done: 233,272 player seasons, 135 columns, contracts check the point in time rule |
+| Fair value model | Done: error 0.395 against 0.780 for the baseline (log units, 37 leagues) |
+| Big move model | Done: AUC 0.928 against 0.803; 38.5% of each season's top 50 join a top 20 club within two years |
+| Ability score version 2 | Done: more stable year to year (0.858 against 0.503 for version 1) |
+| Elite, step up, riser models | Done: elite AUC 0.774 against 0.771 on the 23 and under pool; step up 0.927 against 0.912; riser top 50 precision 0.093 against a base rate of 0.017 |
+| Fall back risk and warning flags | Done: 17.2% of the elite pool fall back; three flags, each raising the risk 1.33 to 1.40 times |
+| The two tables and their dictionary (`scout lists`) | Done: chances are the realized rates of rebuilt past forecasts, last five scored seasons |
+| Registered forecast (`forecasts/2026-10-21/`) | Frozen 21 October 2026, revised twice that day (both recorded); final in 2028 |
+| Stored models (`scout score`) | Done: trained once by the manual commands, reproduce the registered tables byte for byte |
+| Weekly run (`.github/workflows/weekly.yml`) | Built; waits for the `scout-weekly` user, the GitHub secrets and the stored models in S3 (docs/DEPLOY.md). A clean run of the same steps took 4 minutes 14 seconds on a 4 core machine |
+| Static page (`scout site`) and its bucket (`ScoutSite`) | Live since 21 October 2026 |
+| Free tier update of the current season | Not started: prompt 4, from 6 November; the weekly run skips it until its config exists |
+| Glue and Athena, Feature Store, SageMaker training stacks | Retired by decision 9, code in `infra/archive/`; still deployed until the owner removes them |
 
 ## Architecture
 
-Current scope (this repository today):
-
 ```
- API Football v3 ──► ApiFootballClient ──► raw cache (JSON, byte for byte, + metadata)
-   (QuotaGuard: per minute window,              │
-    daily budget, server headers)               ▼
-                                         ApiFootballStatsProvider ──┐
-                                                                    ├─► pandera contracts ─► Parquet
- transfermarkt-datasets ──► snapshot CSVs ──► TransfermarktValuationProvider ┘
-                                                                    │
-                                                    matching (DOB block + fuzzy names + club)
-```
-
-Planned AWS shape (serverless, no always on cost):
-
-```
- CloudFront ─► API Gateway (per user rate limits) ─► Lambda: models, similarity, filters
-                                                  └► Lambda: Bedrock agent (tools = the above)
- S3: raw cache, Parquet, model artifacts, embeddings    DynamoDB: player profiles, usage
- EventBridge schedule ─► Lambda: free tier update of the current season
- AWS Budgets alarm, everything in AWS CDK (Python)
+ API Football v3 ──► raw cache (byte for byte) ──► adapters + pandera contracts ──► Parquet tables
+ transfermarkt-datasets ──► snapshot CSVs ─────────────────────────────────────────────┘
+                                                                                        │
+ manual, on a machine with about 10 GB:                                                 ▼
+   scout features ─► backtest, moves, scouting (train and store the models) ─► forecast history
+                                                                                        │ sync up
+                                                                                        ▼
+ S3 data bucket (private): raw/, processed/ (tables, models/stored/, lists/), reports/
+            │ read processed/ and raw/transfermarkt/            ▲ write processed/lists/
+            ▼                                                   │
+ GitHub Actions, weekly:  features --current ─► score (stored models, no training)
+                          ─► lists ─► site ─► publish ──────────┤
+                                                                ▼ write
+                         S3 site bucket (public read, static website hosting)
+                         index.html with both tables embedded, data/*.csv, data/*.parquet
 ```
 
-Deliberately excluded to stay inside the budget: SageMaker real time endpoints,
-OpenSearch Serverless, NAT Gateways and RDS. Models are served inside Lambda and
-similarity search runs on embeddings loaded from S3.
+Deliberately small: one scheduled job and one static page, no servers. The
+site bucket is the only public resource; it holds the two tables and the
+dictionary and nothing else (`scout publish` refuses any other file). The
+only infrastructure code is the `ScoutSite` CDK stack in `infra/`, which
+creates that bucket; the earlier analysis stacks are archived in
+`infra/archive/` with a note on why. Setup, secrets, the IAM policy and the
+cost: [docs/DEPLOY.md](docs/DEPLOY.md).
+
+Expected monthly AWS cost, at eu-central-1 prices: the data bucket's storage
+(8.7 GB of current objects, mostly the raw cache: about 0.21 USD, plus any
+old versions the bucket keeps), a few cents for the weekly run and the page
+(requests; the transfer stays inside AWS's free 100 GB a month), and next to
+nothing for the retired stacks while they stay deployed (a Glue catalog, an
+idle Athena workgroup, a small offline feature store). About 0.25 to 0.50
+USD a month in all, far under the 5 USD alarm.
 
 ## Layout
 
 ```
 src/scout/
-  config.py                 YAML settings validated with pydantic
-  secrets.py                API key from the environment, then SSM Parameter Store
-  ratelimit.py              QuotaGuard: per minute window and persisted daily budget
-  storage.py                RawStore interface and local implementation
-  providers/base.py         StatsProvider and ValuationProvider interfaces
-  providers/api_football/   HTTP client, season adapter, match adapter
-  providers/transfermarkt/  snapshot downloader and adapter
-  contracts/                pandera schemas for the canonical tables
+  config.py, secrets.py     YAML settings (pydantic); API key from the environment or SSM
+  ratelimit.py, storage.py  quota guard; raw cache, written last through an atomic rename
+  providers/                API Football client and adapters; Transfermarkt snapshot
+  contracts/                pandera schemas for every table
   matching.py               player matching between sources
-  feasibility.py            analysis functions used by scripts/feasibility.py
-  backfill/                 season and match runners, coverage reports
-  features/                 point in time feature and label tables
-  sync.py                   copy data/raw and data/processed to or from S3
-  athena.py                 run SQL on the feature tables as the scout-analyst role
-  featurestore.py           Feature Store ingestion and the point in time comparison
-  models/                   targets, expanding window backtest, baselines, LightGBM
-  cli.py                    `scout backfill | coverage | transfermarkt | sync`
-configs/                    backfill.free.yaml, backfill.pro.yaml
-scripts/feasibility.py      feasibility check (free tier sample, or every backfilled season)
-FEASIBILITY.md              results of the feasibility check and the decisions they support
-FEATURES.md                 data dictionary of the feature and label tables
-MODELS.md                   targets, the backtest design and its results
+  backfill/                 season, match, injury and transfer runners, coverage reports
+  features/                 point in time feature and label tables (full, or --current)
+  elo.py                    team Elo from the cached fixtures
+  models/                   targets, backtest, estimators, big move, stored models (store.py)
+  scouting.py               league strength, ability score, elite, step up, riser
+  candidates.py, flags.py   chance tables, fall back risk, warning flags
+  bargains.py, explain.py   bargains lists; one line explanations
+  lists.py                  the two tables, their dictionary, reports/candidates.md
+  forecast.py               registered forecasts: freeze, score, history, revise
+  site.py, site_template.html   the static page
+  publish.py, sync.py       the weekly upload; copying data to and from S3
+  cli.py                    `scout <command>`
+configs/                    backfill.ultra.yaml (current), free, pro, expansion
+forecasts/<date>/           registered forecasts (committed)
+infra/                      ScoutSite CDK stack (own uv environment); archive/ holds the retired stacks
+docs/DEPLOY.md              the weekly run: setup, secrets, IAM policy, cost, retraining
+docs/AWS_SETUP.md           one time account setup that lets a session deploy, narrowly
+FEATURES.md, MODELS.md, FEASIBILITY.md   data dictionary, models and results, feasibility check
 tests/unit, tests/contracts, tests/fixtures (synthetic sample)
-infra/                      AWS CDK app (own uv environment): Glue, Athena, query role
-docs/AWS_SETUP.md           one time account setup that lets the session deploy, narrowly
 ```
 
 ## Running it
@@ -110,68 +122,38 @@ set -a; source .env; set +a
 uv run pytest                     # unit and contract tests, no network
 uv run ruff check . && uv run ruff format --check .
 
-# Proof run on the free tier: one league, one season. Run it twice; the
-# second run makes zero requests.
-uv run scout --config configs/backfill.free.yaml backfill --league epl --season 2023
+C="uv run scout --config configs/backfill.ultra.yaml"
 
-# Feasibility check, capped at 40 new requests
-uv run python scripts/feasibility.py --config configs/backfill.free.yaml --max-requests 40
+# Restore the data from the private bucket ($SCOUT_S3_BUCKET) into a fresh checkout
+$C sync down --only processed && $C sync down --only transfermarkt
 
-# Feasibility on every backfilled season (after the backfill and
-# `scout transfermarkt`); spends no requests when the cache is complete
-uv run python scripts/feasibility.py --config configs/backfill.pro.yaml --no-download --from-processed
+# The weekly run, as GitHub Actions runs it (docs/DEPLOY.md)
+$C features --current     # the newest season only, earlier ones as stored
+$C score                  # the newest season with the stored models, no training
+$C lists                  # candidates and bargains, reports/candidates.md
+$C site                   # data/site/index.html and the downloads
+$C publish                # processed/lists/ and the site bucket ($SCOUT_SITE_BUCKET)
 
-# Full historical backfill during the Pro month
-uv run scout --config configs/backfill.pro.yaml backfill
+# Retraining, by hand (about 10 GB of memory; the models are stored as they train)
+$C features               # full rebuild
+$C backtest               # fair value, against its baseline
+$C moves                  # big move
+$C scouting               # ability score, elite, step up, riser
+$C forecast history       # past forecasts rebuilt and scored; their realized rates are the shown chances
+$C lists && $C site
 
-# Per match player stats (one request per match), for seasons that have them
-uv run scout --config configs/backfill.ultra.yaml backfill --level match
-# The same per match for team stats, lineups; per league season for injuries;
-# add --scope competitions for the cups and national team competitions
-uv run scout --config configs/backfill.ultra.yaml backfill --level team
-uv run scout --config configs/backfill.ultra.yaml backfill --level lineup
-uv run scout --config configs/backfill.ultra.yaml backfill --level injuries
-# Transfer history, one request per club in the downloaded leagues (about 640)
-uv run scout --config configs/backfill.ultra.yaml backfill --level transfers
+# Downloads (each spends API requests; the raw cache is never fetched twice)
+$C backfill               # season totals; --level match | team | lineup | injuries | transfers
+$C transfermarkt          # the snapshot, once; --refresh for a newer release
 
-# Point in time feature and label tables (needs the Transfermarkt snapshot)
-uv run scout --config configs/backfill.ultra.yaml features
-
-# Big move model: backtest, report and shortlist in reports/moves.md
-uv run scout --config configs/backfill.ultra.yaml moves
-
-# Deploy the Glue catalog and Athena workgroup (see docs/AWS_SETUP.md first)
-cd infra && CDK_DEFAULT_ACCOUNT=<account id> npx aws-cdk@2 deploy ScoutData && cd ..
-
-# Load the features into SageMaker Feature Store, then check its point in time view
-uv run scout featurestore ingest
-uv run scout featurestore pit --as-of 2023-01-01
-
-# The models, then the two user facing tables (decision 5)
-uv run scout backtest      # fair value, against its baseline
-uv run scout moves         # big move
-uv run scout scouting      # ability score, elite, step up, riser
-uv run scout forecast history  # past forecasts rebuilt and scored; their realized rates are the shown chances
-uv run scout lists         # candidates and bargains tables, reports/candidates.md
-
-# Run the fair value backtest in SageMaker: one training job, or automatic model tuning
-uv run scout train
-uv run scout tune --max-jobs 20 --parallel 2
-uv run scout backtest --tuning-job <tuning job name>
-
-# Query the feature tables in Athena, as the read only scout-analyst role
-uv run scout athena "SELECT player_name, goals_per90 FROM player_season_features
-                     WHERE league = 'epl' AND season = 2024 AND regular
-                     ORDER BY goals_per90 DESC LIMIT 10"
-
-# Copy the data to the private bucket in $SCOUT_S3_BUCKET, or restore it
-# into a fresh checkout. Files already on the other side are skipped.
-uv run scout sync up                # or: sync down, --dry-run, --only raw, --workers 16
+# Registered forecasts
+$C forecast freeze        # copy today's lists into forecasts/<date>; never overwrites
+$C forecast score forecasts/2026-10-21 --as-of 2027-06-30
 ```
 
-The backfill writes `reports/coverage_report.md` and `.json`, logs to
-`data/state/scout.log`, and stores Parquet under
-`data/processed/player_season_stats/league=<key>/season=<year>.parquet`.
+Uploading to S3 (`sync up`) and deploying a stack need the owner's yes
+(CLAUDE.md, rule 8); the weekly run's writes to `processed/lists/` and the
+site bucket are the one exception.
 
 ## Limits
 
@@ -193,7 +175,14 @@ The backfill writes `reports/coverage_report.md` and `.json`, logs to
   to 2023. The test seasons can barely tell the two rules apart, so read the
   top chance with that in mind (MODELS.md).
 * **Market values freeze at June 2026.** The Transfermarkt snapshot has had
-  no valuations since 12 June 2026 (CLAUDE.md, open questions).
+  no valuations since 12 June 2026 (CLAUDE.md, open questions). Until a new
+  value source arrives, every weekly run republishes the same 2025/26
+  tables; a season in progress cannot be listed, because its rows would have
+  no market value.
+* **The weekly run does not retrain.** It scores with the models stored on
+  21 October 2026; new seasons of data need the manual retraining above.
+* **The page is plain HTTP.** S3 website hosting has no HTTPS, and
+  CloudFront is left out on purpose; the page holds public tables only.
 
 ## Data sources and attribution
 
@@ -305,25 +294,22 @@ restart. Season totals are used only where no match data exists (2010 to
 agree again.
 
 **D13. AWS region eu-central-1 (Frankfurt).** Chosen by the account owner.
-Bedrock model availability (Amazon Nova Lite, Claude Haiku 4.5) is checked in
-the current AWS documentation before the agent is deployed; the data and
-feature stack does not depend on it.
+Both buckets live there.
 
 **D14. Data lake first, Feature Store second.** Features are Parquet on S3,
 partitioned by league and season, catalogued in Glue and queried with
 Athena. SageMaker Feature Store comes after, as a feature group over the same
 table, to compare its point in time queries with ours. Point in time
-correctness lives in our code either way. *Would change if* the API needed
-low latency lookups that DynamoDB could not serve.
+correctness lives in our code either way. Retired by D20: the stacks are in
+`infra/archive/`, still deployed until the owner removes them.
 
 **D15. Feature Store as a mirror, not the source of truth.** The Parquet
 tables stay the source for training; the feature group holds the same rows,
 keyed by league and player with the feature date as event time, offline
 store only. Its point in time answers were checked against ours: identical
 for every player as of 2023-01-01 (4,426 rows) and 2020-07-15 (3,318 rows,
-inside the COVID season, where the 2019/20 rows must not show yet). *Would
-change if* the API needed online lookups; the group would then get an online
-store, and Feature Store would become the serving path.
+inside the COVID season, where the 2019/20 rows must not show yet). Retired
+with the other analysis stacks by D20; the check it made stays recorded here.
 
 **D16. Expanding window backtest, never random folds.** Each season is
 predicted by a model trained on earlier seasons only, with a gap as long as
@@ -352,3 +338,23 @@ European season that ended last before its feature date, so a calendar year
 league's season ending in December (feature date January) sits with the
 European season before it. Folding by season number would make every growth
 label of the European rows two seasons back look late and purge them.
+
+**D20. Serve with a weekly job and one static page (decision 9).** A
+GitHub Actions run rebuilds the newest season every Monday and puts the two
+tables and one HTML page, with the data embedded and a little plain
+JavaScript, into a public S3 website bucket; the data bucket stays private.
+Nothing runs between the weekly runs, so nothing costs anything then. Its
+IAM user may read the processed tables and write only `processed/lists/`
+and the site bucket. *Would change if* the tables needed answers between
+runs (a chat over the tables is a version 2 direction) or HTTPS became a
+requirement (CloudFront in front of the same bucket).
+
+**D21. Score with stored models; retrain by hand.** The models that score
+the newest season are saved when they are trained (LightGBM's text format
+with the column list, and the ability score's fit), and the weekly run only
+loads them, so a run takes about four minutes, needs 2.5 GB of memory and
+cannot quietly change a model. A full feature build (9 GB) and retraining
+stay manual commands. The weekly path was checked end to end: from the
+tables in S3 it reproduces the registered tables of 21 October 2026 byte for
+byte. *Would change if* new data arrived every week; until a live value
+source exists it does not (Limits).

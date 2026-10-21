@@ -63,7 +63,8 @@ from scout.features.build import value_asof
 from scout.fsutil import atomic_write_text
 from scout.models.backtest import check_no_leak, expanding_folds, fold_season
 from scout.models.estimators import DEFAULT_PARAMS
-from scout.models.moves import auc, average_precision, precision_at
+from scout.models.moves import auc, average_precision, fit_classifier, precision_at
+from scout.models.store import AbilityFit
 from scout.models.targets import CATEGORICAL, NOT_FEATURES
 
 log = logging.getLogger(__name__)
@@ -432,26 +433,32 @@ def ability_v2(
     terms: pd.DataFrame,
     weights: pd.DataFrame,
     pool: bool = True,
+    fit: AbilityFit | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame, float, dict]:
     """Version 2: the per 90 composite, less the transfer league effect and
     the Elo team term (both refitted in composite units on the same player
     pairs as the rating version), pooled over two seasons by minutes, shrunk
     towards the position mean with the fitted prior strength, as a
     percentile within position group and season. Returns (scores, league
-    strength, team coefficient, prior minutes per position group)."""
+    strength, team coefficient, prior minutes per position group). With a
+    stored ``fit`` nothing is fitted: its league effects, team coefficient
+    and prior are used as they are (the weekly run, ``scout score``)."""
     inputs = composite_inputs(features)
     base = composite(features, inputs, weights)
-    on_base = features.drop(columns=terms.columns, errors="ignore").assign(rating=base)
-    strength, team_coef = league_strength(
-        pd.concat([on_base, terms], axis=1), team_column="elo_team"
-    )
+    if fit is None:
+        on_base = features.drop(columns=terms.columns, errors="ignore").assign(rating=base)
+        strength, team_coef = league_strength(
+            pd.concat([on_base, terms], axis=1), team_column="elo_team"
+        )
+    else:
+        strength, team_coef = fit.strength, fit.team_coef
     effect = features["league_key"].map(strength.set_index("league_key")["effect"]).astype(float)
     adjusted = base - effect - team_coef * terms["elo_team"]
     group = position_group(features)
     season = features["season"].astype(int)
     minutes = features["minutes"].astype(float).fillna(0)
-    prior = {}
-    for g in sorted(group.dropna().unique()):
+    prior = {} if fit is None else dict(fit.prior)
+    for g in sorted(group.dropna().unique()) if fit is None else []:
         rows = (group == g) & adjusted.notna()
         if rows.sum() >= MIN_PRIOR_ROWS:  # a group without measures has no score
             prior[g] = prior_minutes(adjusted[rows], minutes[rows], [season[rows]])
@@ -480,9 +487,11 @@ def ability_scores(
     elo_tables: tuple[pd.DataFrame, pd.DataFrame] | None = None,
     step_up: pd.Series | None = None,
     pool: bool = True,
+    fit: AbilityFit | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame, float, dict]:
     """The ability score of one version: (scores, league strength, team
-    coefficient, details). ``v2`` needs the step up labels for its weights."""
+    coefficient, details). ``v2`` needs the step up labels for its weights,
+    or a stored ``fit``."""
     if source == "transfer":
         strength, team_effect = league_strength(features)
         return ability(features, strength, team_effect), strength, team_effect, {}
@@ -495,10 +504,13 @@ def ability_scores(
     if source == "transfer_elo":
         return (*ability_transfer_elo(features, terms), {})
     if source == "v2":
-        if step_up is None:
+        if fit is not None:
+            weights = fit.weights
+        elif step_up is None:
             raise ValueError("ability v2 needs the step up labels to choose its measures")
-        weights = composite_weights(features, composite_inputs(features), step_up)
-        scores, strength, team_coef, prior = ability_v2(features, terms, weights, pool=pool)
+        else:
+            weights = composite_weights(features, composite_inputs(features), step_up)
+        scores, strength, team_coef, prior = ability_v2(features, terms, weights, pool, fit)
         return scores, strength, team_coef, {"weights": weights, "prior_minutes": prior}
     raise ValueError(f"unknown strength source {source!r}; one of {STRENGTH_SOURCES}")
 
@@ -864,23 +876,25 @@ def build(
     elo_tables: tuple[pd.DataFrame, pd.DataFrame] | None = None,
     pool: bool = True,
     weights_until: int | None = None,
+    fit: AbilityFit | None = None,
 ):
     """Ability score of the chosen version, targets, traits. Returns (data,
     league strength, team coefficient, details of the version).
     ``weights_until`` chooses the version 2 measures from the step up labels
-    of seasons up to that one only (the look ahead check)."""
+    of seasons up to that one only (the look ahead check). ``fit``: the
+    stored version 2 fit, so nothing about the score is refitted."""
     step_up = None
-    if strength_source == "v2":
+    if strength_source == "v2" and fit is None:
         blank = pd.DataFrame({"ability_pct": np.nan}, index=features.index)
         step_up = targets(features, blank, valuations, data_end)["step_up"]
         if weights_until is not None:
             step_up = step_up.where(features["season"].astype(int) <= weights_until)
     scores, strength, team_effect, details = ability_scores(
-        features, strength_source, elo_tables, step_up, pool=pool
+        features, strength_source, elo_tables, step_up, pool=pool, fit=fit
     )
     extra = pd.concat([scores, team_shares(features)], axis=1)
     if strength_source == "v2":  # the riser is defined on one season scores
-        one, *_ = ability_scores(features, "v2", elo_tables, step_up, pool=False)
+        one, *_ = ability_scores(features, "v2", elo_tables, step_up, pool=False, fit=fit)
         extra["ability_pct_1s"] = one["ability_pct"]
     data = pd.concat([features, extra], axis=1)
     pct = league_percentiles(data, TRAIT_STATS).add_prefix("pct_")
@@ -928,11 +942,24 @@ def target_rows(data: pd.DataFrame, target: str) -> pd.DataFrame:
     return rows.assign(y=rows[target]).reset_index(drop=True)
 
 
+def newest_rows(data: pd.DataFrame) -> pd.DataFrame:
+    """The regular rows of the newest season, the ones the current scores are for."""
+    return data[(data["season"] == data["season"].max()) & data["regular"].astype(bool)]
+
+
 def run_scouting(settings, strength_source: str = DEFAULT_STRENGTH) -> Path:
+    from scout.models.store import save_ability, save_booster, store_dir
+
     features, valuations, data_end, elo_tables = load_inputs(settings, strength_source)
     data, strength, team_effect, details = build(
         features, valuations, data_end, strength_source, elo_tables
     )
+    store = store_dir(settings.paths.processed_dir)
+    created = pd.Timestamp.now(tz="UTC").strftime("%Y-%m-%d")
+    newest_season = int(data["season"].max())
+    if strength_source == "v2":
+        fit = AbilityFit(details["weights"], strength, team_effect, details["prior_minutes"])
+        save_ability(fit, store)
     columns = prepare_models(data)
     log.info("scouting: %d rows, %d model columns", len(data), len(columns))
 
@@ -955,11 +982,70 @@ def run_scouting(settings, strength_source: str = DEFAULT_STRENGTH) -> Path:
         scored[target] = predictions
         predictions.to_parquet(out_dir / f"backtest_{target}.parquet", index=False)
         log.info("%s: %s", target, {k: round(v, 3) for k, v in results[target].items()})
-        newest = data[
-            (data["season"] == data["season"].max()) & data["regular"].astype(bool)
-        ].copy()
-        data.loc[newest.index, f"score_{target}"] = classifier()(rows, newest, use)
+        # The model behind the current scores, trained on every labelled
+        # row and stored for the weekly run (scout score).
+        booster = fit_classifier(rows, use)
+        save_booster(
+            booster,
+            store,
+            target,
+            use,
+            model=target,
+            strength=strength_source,
+            trained_rows=len(rows),
+            trained_seasons=[int(rows["season"].min()), int(rows["season"].max())],
+            newest_season=newest_season,
+            created=created,
+        )
+        newest = newest_rows(data)
+        data.loc[newest.index, f"score_{target}"] = booster.predict(newest[use])
 
+    write_scouting(data, out_dir)
+    path = write_report(
+        data,
+        strength,
+        team_effect,
+        results,
+        scored,
+        settings.paths.reports_dir,
+        strength_source,
+        details,
+    )
+    log.info("Scouting report: %s", path)
+    return path
+
+
+def score_stored(settings, strength_source: str = DEFAULT_STRENGTH) -> Path:
+    """The weekly run: the ability score with the stored version 2 fit and
+    the newest season scored by the stored elite, step up and riser models,
+    written to ``scouting.parquet``. Nothing is trained or refitted; the
+    report is left as ``scout scouting`` wrote it."""
+    from scout.models.store import load_ability, load_booster, store_dir
+
+    if strength_source != "v2":
+        raise ValueError("only the default ability score (v2) has stored models")
+    store = store_dir(settings.paths.processed_dir)
+    fit = load_ability(store)
+    features, valuations, data_end, elo_tables = load_inputs(settings, strength_source)
+    data, *_ = build(features, valuations, data_end, strength_source, elo_tables, fit=fit)
+    columns = set(prepare_models(data)) | set(RISER_COLUMNS)
+    newest = newest_rows(data)
+    for target in SCOUTING_TARGETS:
+        stored = load_booster(store, target)
+        missing = [c for c in stored.columns if c not in columns]
+        if missing:
+            raise ValueError(
+                f"{target}: columns {missing} are gone since the stored model was trained; "
+                "retrain with `scout scouting` (docs/DEPLOY.md, Retraining)"
+            )
+        data.loc[newest.index, f"score_{target}"] = stored.predict(newest)
+    out_dir = settings.paths.processed_dir / "models"
+    path = write_scouting(data, out_dir)
+    log.info("scouting: %d newest rows scored with the stored models", len(newest))
+    return path
+
+
+def write_scouting(data: pd.DataFrame, out_dir: Path) -> Path:
     keep = [
         *KEYS,
         "player_name",
@@ -985,20 +1071,8 @@ def run_scouting(settings, strength_source: str = DEFAULT_STRENGTH) -> Path:
         *SCOUTING_TARGETS,
         "fall_back",
     ]
-    data[keep + [c for c in data.columns if c.startswith("score_")]].to_parquet(
-        out_dir / "scouting.parquet", index=False
-    )
-    path = write_report(
-        data,
-        strength,
-        team_effect,
-        results,
-        scored,
-        settings.paths.reports_dir,
-        strength_source,
-        details,
-    )
-    log.info("Scouting report: %s", path)
+    path = out_dir / "scouting.parquet"
+    data[keep + [c for c in data.columns if c.startswith("score_")]].to_parquet(path, index=False)
     return path
 
 

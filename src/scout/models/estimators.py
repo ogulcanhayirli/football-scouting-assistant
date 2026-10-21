@@ -14,6 +14,8 @@ import lightgbm as lgb
 import numpy as np
 import pandas as pd
 
+from scout.models.backtest import fold_season
+
 AGE_BANDS = [0, 20, 23, 26, 29, 32, 50]
 MIN_GROUP = 15
 
@@ -54,7 +56,15 @@ def group_median(train: pd.DataFrame, test: pd.DataFrame, columns: list[str]) ->
     return pred.fillna(train["y"].median()).to_numpy()
 
 
-def make_lightgbm(params: dict | None = None, rounds: int = NUM_BOOST_ROUND, seed: int = 7):
+def make_lightgbm(
+    params: dict | None = None,
+    rounds: int = NUM_BOOST_ROUND,
+    seed: int = 7,
+    keep: dict | None = None,
+):
+    """``keep``: a dict that receives each fold's booster, keyed by the fold
+    season of its test rows, so ``scout backtest`` can store the ones that
+    score the newest season (``scout.models.store``)."""
     settings = {
         "objective": "regression",
         "seed": seed,
@@ -67,15 +77,18 @@ def make_lightgbm(params: dict | None = None, rounds: int = NUM_BOOST_ROUND, see
     def lightgbm_model(train: pd.DataFrame, test: pd.DataFrame, columns: list[str]) -> np.ndarray:
         dataset = lgb.Dataset(train[columns], label=train["y"], free_raw_data=False)
         booster = lgb.train(settings, dataset, num_boost_round=rounds)
+        if keep is not None:
+            keep[int(fold_season(test["feature_date"]).max())] = booster
         return booster.predict(test[columns])
 
     return lightgbm_model
 
 
-def models_for(target_name: str, tuned: dict | None = None) -> dict:
+def models_for(target_name: str, tuned: dict | None = None, keep: dict | None = None) -> dict:
     """The models to compare. ``tuned`` holds settings found by automatic model
-    tuning (LightGBM parameters plus ``num_boost_round``), added as ``lightgbm_tuned``."""
-    models = {"group_median": group_median, "lightgbm": make_lightgbm()}
+    tuning (LightGBM parameters plus ``num_boost_round``), added as ``lightgbm_tuned``.
+    ``keep`` collects the plain LightGBM model's booster of each fold."""
+    models = {"group_median": group_median, "lightgbm": make_lightgbm(keep=keep)}
     if tuned:
         params = dict(tuned)
         rounds = int(params.pop("num_boost_round", NUM_BOOST_ROUND))
