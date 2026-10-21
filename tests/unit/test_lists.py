@@ -98,11 +98,22 @@ def test_candidates_cover_ranks_101_to_2000_with_chances_only_where_measured():
     assert out["big_move_chance_pct"].notna().all()
     assert (out["league"] == "Premier League").all()
     assert (out["fair_value_eur"] == 2e6).all()
-    # sorted by elite chance, the pool first
+    # sorted by elite decile, the pool first; here the chances rise with it
     assert out["elite_chance_pct"].iloc[: int(pool.sum())].notna().all()
+    assert out["elite_decile"].dropna().is_monotonic_decreasing
     shown = out["elite_chance_pct"].dropna()
     assert shown.is_monotonic_decreasing
     assert out["rising"].sum() <= 50
+
+
+def test_the_order_follows_the_decile_when_a_shown_rate_dips():
+    inputs = _inputs()
+    tables = chance_tables(inputs)
+    before = candidates_table(inputs, tables, {"epl": "Premier League"})
+    rates = tables["elite"].table
+    rates.loc[(rates["season"] == "all") & (rates["bucket"] == "1"), "rate"] = 0.99
+    after = candidates_table(inputs, tables, {"epl": "Premier League"})
+    assert after["player_id"].tolist() == before["player_id"].tolist()
 
 
 def test_rising_is_the_riser_models_top_50_among_half_of_team_minutes():

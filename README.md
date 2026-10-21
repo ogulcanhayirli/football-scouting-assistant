@@ -187,9 +187,11 @@ The backfill writes `reports/coverage_report.md` and `.json`, logs to
   anyone can price by hand.
 * **The top elite chance runs high.** Rebuilt forecasts of 2015 to 2023 saw
   30.5% of the players shown 40% make it. Since prompt 14b every chance shown
-  is the realized rate of those forecasts (the top elite decile now shows
-  35%), but out of sample the top bucket still ran about 7 points high: read
-  it as a ceiling (MODELS.md).
+  is the realized rate of those forecasts, and since prompt 14c only of the
+  last five scored seasons (2019 to 2023 for the 2025 table): the top elite
+  decile now shows 30%, against 27.6% to 32.1% made it in each season 2020
+  to 2023. The test seasons can barely tell the two rules apart, so read the
+  top chance with that in mind (MODELS.md).
 * **Market values freeze at June 2026.** The Transfermarkt snapshot has had
   no valuations since 12 June 2026 (CLAUDE.md, open questions).
 

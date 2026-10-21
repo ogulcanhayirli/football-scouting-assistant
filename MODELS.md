@@ -722,6 +722,103 @@ record the revision, the reason and every bucket's old and new value; the
 original is commit e012805, and the revised one carries the git tag
 `forecast-2026-10-21`.
 
+## A rolling window of five scored seasons (prompt 14c, 21 October 2026)
+
+The prompt 14b check showed the realized rates pooled from 2015 on still
+leaning on 2015 to 2017: the top elite decile made it 27.6% to 32.1% in each
+season 2020 to 2023 against 35% shown, and the top fall back bucket showed
+35% against 23.4%. The owner's decision: every shown chance (elite by
+decile, step up and big move by decile, fall back by flag count) pools only
+the **last five scored seasons**, so a forecast for season S reads seasons
+S minus 6 to S minus 2 and the 2025 table reads 2019 to 2023
+(`WINDOW` and `realized_tables` in `src/scout/candidates.py`). The 30
+player floor on known outcomes, the rounding to 5% and the count stay. A
+bucket under the floor merges with its neighbour (deciles upward from the
+bottom, a short top bucket into the one below; flag counts the same way, as
+"1 or more"), and `reports/candidates.md` names every merge. In the 2025
+table no bucket fell under the floor.
+
+Old (every scored season, 2015 to 2023) against new (2019 to 2023), every
+bucket of the 2025 table, n in brackets:
+
+| promise | bucket | old | new | new, unrounded |
+|---|---|---|---|---:|
+| elite | decile 1 | under 5% (240) | **5%** (137) | 2.9% |
+| | decile 2 | under 5% (244) | under 5% (140) | 0.7% |
+| | decile 3 / 4 / 5 | 5% (243 / 246 / 244) | 5% (138 / 141 / 139) | 2.9% / 4.3% / 4.3% |
+| | decile 6 | 10% (242) | 10% (139) | 8.6% |
+| | decile 7 / 8 | 15% (245 / 244) | 15% (140 / 139) | 13.6% / 16.5% |
+| | decile 9 | 20% (243) | 20% (139) | 21.6% |
+| | decile 10 | 35% (249) | **30%** (142) | 31.7% |
+| step up | deciles 1 to 5 | under 5% (1,543 to 1,573) | under 5% (865 to 876) | 0.0% to 1.3% |
+| | decile 6 / 7 | 5% (1,573 / 1,575) | 5% (877 / 876) | 3.5% / 6.5% |
+| | decile 8 / 9 | 10% (1,576 / 1,575) | 10% (877 / 875) | 9.9% / 12.0% |
+| | decile 10 | 20% (1,583) | **25%** (878) | 22.9% |
+| big move | deciles 1 to 3 | under 5% (about 1,325 each) | under 5% (about 736 each) | 0.7% / 0.8% / 1.2% |
+| | deciles 4 to 6 | 5% (about 1,327 each) | 5% (about 736 each) | 2.7% / 4.1% / 5.2% |
+| | decile 7 | 5% (1,326) | **10%** (736) | 7.6% |
+| | decile 8 / 9 / 10 | 10% / 15% / 25% (1,328 / 1,327 / 1,331) | 10% / 15% / 25% (737 / 736 / 739) | 10.9% / 16.2% / 26.4% |
+| fall back | 0 / 1 / 2 or more flags | 15% / 20% / 25% (1,298 / 720 / 384) | 15% / 20% / 25% (691 / 418 / 260) | 13.6% / 21.1% / 22.7% |
+
+Elite decile 1 (2.9%, 4 of 137) now sits above decile 2 (0.7%, 1 of 140):
+shown as it is, not smoothed. The candidates used to be sorted by the
+unrounded rate, which would have lifted decile 1 players above deciles 2
+and 3; they are now sorted by elite decile, then step up decile, which
+gives the prompt 14b order exactly while the rates rise with the decile
+(checked: revision 1 rebuilds byte for byte under either sort). 33 elite
+pool players show a lower elite chance and 32 a higher one, 180 a higher
+step up chance, 145 a higher big move chance; no fall back risk changed.
+Players, order, deciles, flags, explanations, values and the bargains table
+are identical to revision 1 (checked column by column).
+
+**Out of sample check** (`reports/forecast_history.md`, section "Old
+against new"). `scout forecast history` now runs a third pass with the
+prompt 14b rule (`history/all_seasons/<season>/`) next to the five season
+one (`history/<season>/`), on the same players, buckets and outcomes. A
+test season up to 2021 has at most five scored seasons before it, so both
+rules show the same there; they differ only in 2022 (2016 to 2020 against
+2015 to 2020) and 2023 (2017 to 2021 against 2015 to 2021), on 140 of 1,956
+elite rows and 148 of 10,351 big move rows, and on no step up or fall back
+row. Shown (averaged over the bucket's players) against happened, 2017 to
+2023:
+
+| promise | bucket | happened | shown, every season | shown, last five |
+|---|---|---:|---:|---:|
+| elite | decile 1 / 2 / 3 | 2.1% / 1.0% / 2.6% | 0.7% / 5.7% / 4.3% | 1.4% / 5.0% / 3.6% |
+| | decile 4 / 5 / 6 | 4.1% / 4.1% / 9.3% | 4.3% / 7.2% / 10.0% | same |
+| | decile 7 / 8 | 13.3% / 14.8% | 15.0% / 15.7% | same |
+| | decile 9 | 23.1% | 20.7% | 22.1% |
+| | **decile 10** | **33.2%** (199) | **36.5%** | **36.5%** |
+| fall back | 0 / 1 flags | 14.7% / 20.0% | 17.2% / 20.0% | same |
+| | **2 or more** | **22.8%** (324) | **29.6%** | **29.6%** |
+| step up | deciles 1 to 10 | 0.0% to 22.3% | within 3.0 points | same |
+| big move | deciles 1 to 10 | 0.5% to 26.5% | within 2.4 points | within 1.7 points |
+
+Mean absolute gap, weighted by known outcomes: elite 2.0% (every season)
+against 1.7% (last five), fall back 2.5% against 2.5%, step up 0.8%
+against 0.8%, big move 1.1% against 1.0%.
+
+* **Top elite decile.** Shown 40% in 2020 and 2021 (both rules) and 35% in
+  2022 and 2023 under both rules: in those two seasons rounding hid the
+  difference. It made it 31.0%, 30.8%, 32.1% and 27.6%. For the 2025 table
+  the window lowers it from 34.5% to 31.7%, shown 30%, inside that recent
+  range.
+* **Top fall back bucket.** The 35% shown bucket (64 known, 23.4% happened)
+  and the 30% one (24.7%) are the same under both rules (no fall back row
+  differs; the thin early tables of 2017 to 2019 made them); two or more flags made it 19.6%, 23.8%, 12.8% and 25.6% in 2020 to
+  2023 against 30%, 30%, 25%, 25% shown. In the 2025 table it stays 25%
+  (22.7% unrounded, from 24.7%).
+
+The honest reading: the out of sample test cannot separate the two rules
+well, because five seasons of history only exist from 2022 on. What it
+shows is that every season from 2020 to 2023 ran below the long pooled
+rate at the top, which is the case for the window; the 2025 table is the
+first where the window moves the top elite bucket.
+
+`forecasts/2026-10-21/` is revision 2 (`scout forecast revise`): same date
+and rows, the reason and every bucket's old and new value in
+`forecast.json` and its README; revision 1 is commit 38a8a4b.
+
 ## Next
 
 1. The clean check above: tune on earlier seasons, score on later ones.

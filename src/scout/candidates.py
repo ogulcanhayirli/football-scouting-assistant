@@ -20,15 +20,20 @@ rate since) reads the past forecasts rebuilt by ``scout forecast history``,
 each built with the models and buckets available at its time and scored two
 seasons on: the rate a user of those tables would actually have seen come
 true. The second is what the table promises; the first ran high at the top
-of the elite chance (40% shown, 30.5% happened).
+of the elite chance (40% shown, 30.5% happened). Since prompt 14c the
+realized rate pools only the last ``WINDOW`` (five) scored seasons, so the
+2025 table reads 2019 to 2023: pooling every season from 2015 still leaned
+on 2015 to 2017 and showed the top elite decile and the top fall back bucket
+too high for recent seasons.
 
 Rates are historical frequencies, not model probabilities: a bucket with
-fewer than 30 players is never shown (the lowest deciles are merged until
-each holds 30), every rate is rounded to the nearest 5%, and the number of
-players behind it is carried along. Flags are counted only from 2015, when
-per match data (minutes share, ability) starts; a missing raw number raises
-no flag. The three year fall back was a check run once and is not shipped
-(decision 1; MODELS.md).
+fewer than 30 players is never shown (a bucket under the floor is merged
+with its neighbour, the lowest deciles upward and a short top bucket into
+the one below, and the reports name every merge), every rate is rounded to
+the nearest 5%, and the number of players behind it is carried along.
+Flags are counted only from 2015, when per match data (minutes share,
+ability) starts; a missing raw number raises no flag. The three year fall
+back was a check run once and is not shipped (decision 1; MODELS.md).
 """
 
 from __future__ import annotations
@@ -46,6 +51,7 @@ log = logging.getLogger(__name__)
 MIN_BUCKET = 30
 ROUND_TO = 5
 DECILES = 10
+WINDOW = 5  # scored seasons pooled for the realized rate (prompt 14c)
 FLAG_START = 2015  # minutes share and ability come from per match data
 # Two or more flags is one bucket (prompt 14): the 3+ bucket held few players
 # and its rate dipped below the bucket of 2.
@@ -132,16 +138,17 @@ def score_deciles(score: pd.Series, season: pd.Series) -> pd.Series:
     return np.ceil(pct * DECILES).clip(1, DECILES).astype(int)
 
 
-def merge_low(counts: pd.Series) -> dict[int, str]:
-    """Bucket label per decile: the lowest deciles are merged until each
-    bucket holds ``MIN_BUCKET`` players ("1 to 3"); a short top remainder
-    joins the bucket below it."""
-    groups: list[list[int]] = []
-    current: list[int] = []
+def merge_low(counts: pd.Series, keys: list | None = None) -> dict:
+    """Bucket label per key (deciles 1 to 10 unless ``keys`` gives the order):
+    the lowest keys are merged upward until each bucket holds ``MIN_BUCKET``
+    players ("1 to 3"); a short top remainder joins the bucket below it."""
+    keys = list(range(1, DECILES + 1)) if keys is None else keys
+    groups: list[list] = []
+    current: list = []
     total = 0
-    for decile in range(1, DECILES + 1):
-        current.append(decile)
-        total += int(counts.get(decile, 0))
+    for key in keys:
+        current.append(key)
+        total += int(counts.get(key, 0))
         if total >= MIN_BUCKET:
             groups.append(current)
             current, total = [], 0
@@ -150,7 +157,24 @@ def merge_low(counts: pd.Series) -> dict[int, str]:
             groups[-1] += current
         else:
             groups.append(current)
-    return {d: str(g[0]) if len(g) == 1 else f"{g[0]} to {g[-1]}" for g in groups for d in g}
+    return {k: _group_label(g) for g in groups for k in g}
+
+
+def _group_label(group: list) -> str:
+    if len(group) == 1:
+        return str(group[0])
+    if group[-1] == COUNT_BUCKETS[-1]:
+        return f"{group[0]} or more"
+    return f"{group[0]} to {group[-1]}"
+
+
+def merges(table: ChanceTable) -> list[str]:
+    """The buckets that merge several deciles (or flag counts) because one
+    was under the floor."""
+    groups: dict[str, list] = {}
+    for key, label in table.mapping.items():
+        groups.setdefault(label, []).append(key)
+    return [label for label, keys in groups.items() if len(keys) > 1]
 
 
 @dataclass
@@ -194,8 +218,10 @@ def chance_table(predictions: pd.DataFrame, score: str = "score") -> ChanceTable
 
 
 def count_table(y: pd.Series, bucket: pd.Series, season: pd.Series) -> ChanceTable:
-    """Rate per flag count bucket (0, 1, 2 or more)."""
-    return ChanceTable({b: b for b in COUNT_BUCKETS}, rate_table(y, bucket, season))
+    """Rate per flag count bucket (0, 1, 2 or more); a bucket under the floor
+    merges with its neighbour ("1 or more")."""
+    mapping = merge_low(bucket[y.notna()].value_counts(), COUNT_BUCKETS)
+    return ChanceTable(mapping, rate_table(y, bucket.map(mapping), season))
 
 
 # Realized rates of past forecasts (prompt 14b)
@@ -209,15 +235,22 @@ REALIZED = {
 }
 
 
-def realized_tables(outcomes: pd.DataFrame, through: int | None = None) -> dict[str, ChanceTable]:
+def realized_tables(
+    outcomes: pd.DataFrame, through: int | None = None, window: int | None = WINDOW
+) -> dict[str, ChanceTable]:
     """Per promise, the share of past forecast players in each bucket whose
     outcome came true, among those whose outcome is known. ``outcomes``: the
     scored rows of ``scout forecast history`` (season, the bucket and
     outcome columns of ``REALIZED``); ``through``: forecast seasons up to it
     only (a forecast for season S uses S minus 2, the last one scored by
-    then). The lowest deciles are merged until each bucket holds
-    ``MIN_BUCKET`` known outcomes."""
-    rows = outcomes if through is None else outcomes[outcomes["season"] <= through]
+    then); ``window``: only the last ``window`` seasons up to ``through``
+    (None pools every season, the prompt 14b rate). A bucket under
+    ``MIN_BUCKET`` known outcomes merges with its neighbour."""
+    rows = outcomes
+    if through is not None:
+        rows = rows[rows["season"] <= through]
+        if window is not None:
+            rows = rows[rows["season"] > through - window]
     out = {}
     for name, (bucket, outcome) in REALIZED.items():
         known = rows[rows[bucket].notna() & rows[outcome].notna()]

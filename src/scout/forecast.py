@@ -37,7 +37,7 @@ count stands next to every share.
 2023 in the same folder format (``data/processed/forecasts/history``), each
 from the backtest's out of sample scores, and scores it two seasons on, so
 the command is tested on nine seasons before the first registered forecast
-comes due in 2027. It runs twice (prompt 14b):
+comes due in 2027. It runs three times (prompts 14b, 14c):
 
 1. with the in sample chance tables (the backtest rows of seasons up to S
    minus 2 pooled; ``history/in_sample/<season>``). Its scored rows, the
@@ -45,9 +45,13 @@ comes due in 2027. It runs twice (prompt 14b):
    ``history/outcomes.parquet``; the buckets do not depend on the rate
    shown, so this pass fixes them.
 2. with the realized rates of those scored forecasts, again from seasons up
-   to S minus 2 only (``history/<season>``): the rate shown since prompt
-   14b. 2015 and 2016 have no scored forecast before them and show no
-   chance, so the new rates are tested on 2017 to 2023.
+   to S minus 2 only and of those the last five (``history/<season>``):
+   the rate shown since prompt 14c. 2015 and 2016 have no scored forecast
+   before them and show no chance, so the rates are tested on 2017 to 2023.
+3. with the realized rates of every scored season up to S minus 2
+   (``history/all_seasons/<season>``): the prompt 14b rate, kept for the
+   comparison. It equals pass 2 up to 2021, which has five scored seasons
+   before it, and differs from 2022 on.
 
 ``scout lists`` reads ``outcomes.parquet`` for the current table.
 
@@ -68,7 +72,7 @@ import numpy as np
 import pandas as pd
 
 from scout import bargains
-from scout.candidates import COUNT_BUCKETS, count_bucket
+from scout.candidates import COUNT_BUCKETS, WINDOW, count_bucket
 from scout.fsutil import atomic_write_text
 from scout.scouting import (
     ELITE_RANK,
@@ -721,10 +725,10 @@ def run_history(settings, seasons=HISTORY) -> Path:
     moves = moves.assign(season=moves["season"].astype(int))
     root = settings.paths.processed_dir / "forecasts" / "history"
 
-    def build(season: int, folder: Path, outcomes: pd.DataFrame | None):
+    def build(season: int, folder: Path, outcomes: pd.DataFrame | None, window=WINDOW):
         past = history_inputs(inputs, season)
         cand, barg, _ = lists.season_tables(
-            past, features, rows, profiles, None, leagues, season, outcomes=outcomes
+            past, features, rows, profiles, None, leagues, season, outcomes=outcomes, window=window
         )
         meta = meta_for(scouting, season, leagues, cand, barg, f"history-{season}", "history")
         folder = write_folder(folder, cand, barg, lists.dictionary(), meta)
@@ -747,10 +751,160 @@ def run_history(settings, seasons=HISTORY) -> Path:
     path = outcomes_path(settings)
     path.parent.mkdir(parents=True, exist_ok=True)
     outcomes.to_parquet(path, index=False)
-    new = {}
-    for season in seasons:  # pass 2: realized rates of seasons up to S minus 2
+    new, every = {}, {}
+    for season in seasons:  # pass 2: realized rates, last five seasons up to S minus 2
         new[season], _ = build(season, root / str(season), outcomes)
-    return write_history_report(new, checks, settings.paths.reports_dir, old)
+    for season in seasons:  # pass 3: every season up to S minus 2 (prompt 14b)
+        every[season], _ = build(season, root / "all_seasons" / str(season), outcomes, None)
+    return write_history_report(new, checks, settings.paths.reports_dir, old, every)
+
+
+def _shown_rows(results: dict, seasons: list[int], name: str) -> pd.DataFrame:
+    """Per forecast row of ``seasons``: bucket, shown share and outcome of one
+    promise, where a share was shown."""
+    pct = PROMISES[name][0]
+    frames = []
+    for season in seasons:
+        cand = results[season]["candidates"]
+        frames.append(
+            pd.DataFrame(
+                {
+                    "season": season,
+                    "player_id": cand["player_id"].astype("int64").to_numpy(),
+                    "bucket": shown_buckets(cand)[name].astype("string").to_numpy(),
+                    "shown": cand[pct].astype(float).to_numpy() / 100,
+                    "outcome": cand[name].astype(float).to_numpy(),
+                }
+            )
+        )
+    out = pd.concat(frames, ignore_index=True)
+    return out[out["bucket"].notna() & out["shown"].notna()]
+
+
+def method_rows(old: dict, new: dict, seasons: list[int], name: str) -> pd.DataFrame:
+    """The same forecast rows under both methods: shown old and new, outcome."""
+    a, b = _shown_rows(old, seasons, name), _shown_rows(new, seasons, name)
+    both = a.merge(b, on=["season", "player_id"], suffixes=("_old", "_new"))
+    if (both["bucket_old"] != both["bucket_new"]).any():
+        raise ValueError(f"{name}: the methods put a player in different buckets")
+    return both.rename(columns={"bucket_old": "bucket", "outcome_old": "outcome"})
+
+
+def _order(name: str) -> list[str]:
+    return list(COUNT_BUCKETS) if name == "fall_back" else [str(d) for d in range(1, 11)]
+
+
+def bucket_comparison(old: dict, new: dict, seasons: list[int], name: str) -> pd.DataFrame:
+    """Per decile (or flag count bucket): forecast players, known outcomes,
+    the average share shown by each method and the share that happened."""
+    both = method_rows(old, new, seasons, name)
+    out = []
+    for bucket in _order(name):
+        g = both[both["bucket"] == bucket]
+        if g.empty:
+            continue
+        y = g["outcome"].dropna()
+        out.append(
+            {
+                "bucket": ("flags " if name == "fall_back" else "decile ") + bucket,
+                "players": len(g),
+                "known": len(y),
+                "happened": y.mean() if len(y) else np.nan,
+                "shown, every season": g["shown_old"].mean(),
+                "shown, last five": g["shown_new"].mean(),
+            }
+        )
+    frame = pd.DataFrame(out)
+    frame["gap, every season"] = frame["shown, every season"] - frame["happened"]
+    frame["gap, last five"] = frame["shown, last five"] - frame["happened"]
+    return frame
+
+
+def mean_gap(table: pd.DataFrame) -> tuple[float, float]:
+    """Mean absolute gap between shown and happened, weighted by known
+    outcomes: (every season, last five)."""
+    w = table["known"]
+    return tuple(
+        float((table[f"gap, {m}"].abs() * w).sum() / w.sum()) for m in ("every season", "last five")
+    )
+
+
+def top_by_season(old: dict, new: dict, seasons: list[int], name: str) -> pd.DataFrame:
+    """The top bucket (decile 10, or two or more flags) per season."""
+    both = method_rows(old, new, seasons, name)
+    top = _order(name)[-1]
+    rows = []
+    for season, g in both[both["bucket"] == top].groupby("season"):
+        y = g["outcome"].dropna()
+        rows.append(
+            {
+                "season": season,
+                "known": len(y),
+                "happened": y.mean() if len(y) else np.nan,
+                "shown, every season": g["shown_old"].mean(),
+                "shown, last five": g["shown_new"].mean(),
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def _pct_md(frame: pd.DataFrame) -> str:
+    out = frame.copy()
+    for c in out.columns:
+        if c.startswith(("happened", "shown", "gap")):
+            out[c] = out[c].map(lambda v: "" if pd.isna(v) else f"{v:.1%}")
+    return out.to_markdown(index=False)
+
+
+def comparison_md(old: dict, new: dict, seasons: list[int]) -> list[str]:
+    """Prompt 14c: every bucket, shown by each method against what happened,
+    with the top elite decile and the top fall back buckets called out."""
+    span = f"{min(seasons)} to {max(seasons)}"
+    parts = [
+        "## Old against new: every scored season (prompt 14b) against the last five (prompt 14c)",
+        "",
+        f"The same forecasts of {span} (same players, buckets and outcomes), each bucket's "
+        "shown share averaged over its players under both methods, against the share that "
+        f"happened. Up to 2021 a forecast has at most {WINDOW} scored seasons before it, so "
+        "both methods show the same; they differ in 2022 and 2023, and in the 2025 table "
+        "(2019 to 2023 against 2015 to 2023). Gap: shown minus happened.",
+        "",
+    ]
+    for name, (_, words) in PROMISES.items():
+        table = bucket_comparison(old, new, seasons, name)
+        gap_old, gap_new = mean_gap(table)
+        rows = method_rows(old, new, seasons, name)
+        moved = rows[rows["shown_old"] != rows["shown_new"]]
+        where = ", ".join(str(x) for x in sorted(moved["season"].unique())) or "no season"
+        parts += [
+            f"### {name.replace('_', ' ')}: {words}",
+            "",
+            _pct_md(table),
+            "",
+            f"Mean absolute gap, weighted by known outcomes: {gap_old:.1%} every season, "
+            f"{gap_new:.1%} last five. The shown share differs on {len(moved):,} of "
+            f"{len(rows):,} rows ({where}).",
+            "",
+        ]
+    late = [s for s in seasons if s >= 2020]
+    for name, title in (("elite", "Top elite decile"), ("fall_back", "Two or more flags")):
+        parts += [
+            f"### {title} per season",
+            "",
+            _pct_md(top_by_season(old, new, late, name)),
+            "",
+        ]
+    parts += [
+        "### Top fall back buckets as shown",
+        "",
+        "Fall back risk grouped by the share shown (the view where 35% was shown and 23.4% "
+        "happened), each method on its own:",
+        "",
+    ]
+    for label, results in (("Every season (prompt 14b)", old), ("Last five (prompt 14c)", new)):
+        cand = pd.concat([results[s]["candidates"] for s in seasons], ignore_index=True)
+        parts += [f"{label}:", "", _md(promise_table(cand, "fall_back_risk_pct", "fall_back")), ""]
+    return parts
 
 
 def shown_seasons(results: dict) -> list[int]:
@@ -760,12 +914,17 @@ def shown_seasons(results: dict) -> list[int]:
 
 
 def write_history_report(
-    results: dict, checks: dict, reports: Path, in_sample: dict | None = None
+    results: dict,
+    checks: dict,
+    reports: Path,
+    in_sample: dict | None = None,
+    every: dict | None = None,
 ) -> Path:
     first, last = min(results), max(results)
     shown = shown_seasons(results)
     tables = pooled({s: results[s] for s in shown})
     old = pooled({s: in_sample[s] for s in shown}) if in_sample else None
+    prev = pooled({s: every[s] for s in shown}) if every else None
     agree = pd.DataFrame(
         [
             {"season": s, "outcome": k, "agreement": v[0], "rows": v[1]}
@@ -793,8 +952,15 @@ def write_history_report(
         "",
         "Since prompt 14b every shown chance is the realized rate of these scored forecasts, "
         "from seasons whose outcome was known by then (two seasons earlier and before), so a "
-        f"season's chances need a scored forecast before it: shown for {span}. Pooled over "
-        f"those seasons, each bucket as shown (realized rate) against what happened"
+        f"season's chances need a scored forecast before it: shown for {span}. Since prompt "
+        f"14c the rate pools only the last {WINDOW} of those seasons. Pooled over "
+        f"{span}, each bucket as shown (realized rate, last {WINDOW}) against what happened"
+        + (
+            ", then as shown in prompt 14b (realized rate of every scored season; "
+            "`history/all_seasons/<season>/`)"
+            if every
+            else ""
+        )
         + (
             ", then the same seasons as shown before prompt 14b (in sample rate: the "
             "backtest rows of seasons up to two seasons earlier pooled; "
@@ -805,8 +971,21 @@ def write_history_report(
         "",
     ]
     for name, (_, words) in PROMISES.items():
-        parts += [f"## {name.replace('_', ' ')}: {words}", "", "Realized rate (shown now):", ""]
-        parts += [_md(tables[name]), ""]
+        parts += [
+            f"## {name.replace('_', ' ')}: {words}",
+            "",
+            f"Realized rate, last {WINDOW} scored seasons (shown now):",
+            "",
+            _md(tables[name]),
+            "",
+        ]
+        if every:
+            parts += [
+                "Realized rate, every scored season (shown in prompt 14b):",
+                "",
+                _md(prev[name]),
+                "",
+            ]
         if old:
             parts += ["In sample rate (shown until prompt 14b):", "", _md(old[name]), ""]
     if old:
@@ -831,6 +1010,7 @@ def write_history_report(
             )
         ),
         "",
+        *(comparison_md(every, results, shown) if every else []),
         "## Check: scored outcomes against the stored labels",
         "",
         "The scorer reads later seasons' value ranks from the feature rows; the model "

@@ -7,8 +7,10 @@ from scout.candidates import (
     ability_decision,
     chance_table,
     count_bucket,
+    count_table,
     flag_effects,
     merge_low,
+    merges,
     not_monotonic,
     rate_table,
     realized_tables,
@@ -190,3 +192,26 @@ def test_not_monotonic_names_a_bucket_below_the_one_before():
     found = not_monotonic(realized_tables(flipped)["elite"])
     assert len(found) == 1
     assert found[0].startswith("2 (0.0%, n=40) is below 1 (100.0%, n=40)")
+
+
+def test_realized_tables_pool_only_the_last_five_scored_seasons():
+    one = _outcomes().query("season == 2020")
+    out = pd.concat([one.assign(season=s) for s in range(2015, 2022)])
+    out = out.assign(elite=np.where(out["season"] <= 2016, 1.0, out["elite"]))
+    five = realized_tables(out, through=2021)["elite"]  # 2017 to 2021
+    every = realized_tables(out, through=2021, window=None)["elite"]
+    assert five.pooled.loc["1", "players"] == 5 * 20
+    assert every.pooled.loc["1", "players"] == 7 * 20
+    assert five.pooled.loc["1", "rate"] == 0.0  # the 2015 and 2016 successes are left out
+    assert every.pooled.loc["1", "rate"] == pytest.approx(2 / 7)
+
+
+def test_a_flag_count_bucket_under_the_floor_merges_with_its_neighbour():
+    bucket = pd.Series(["0"] * 50 + ["1"] * 40 + ["2 or more"] * 10)
+    y = pd.Series([0.0] * 90 + [1.0] * 10)
+    table = count_table(y, bucket, pd.Series([2020] * 100))
+    assert table.mapping == {"0": "0", "1": "1 or more", "2 or more": "1 or more"}
+    assert table.pooled.loc["1 or more", "rate"] == pytest.approx(10 / 50)
+    assert merges(table) == ["1 or more"]
+    full = count_table(y, pd.Series(["0"] * 40 + ["1"] * 30 + ["2 or more"] * 30), y * 0)
+    assert merges(full) == []

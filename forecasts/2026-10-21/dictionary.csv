@@ -8,20 +8,20 @@ candidates,club,The club he played most league minutes for that season.
 candidates,league,The league of that club.
 candidates,value_rank,Where his market value ranks among all players we track (1 is the dearest); blank when he has no market value.
 candidates,elite_decile,"Where the elite model puts him among this season's elite pool, from 1 (least likely) to 10 (most likely); blank outside the pool."
-candidates,elite_chance_pct,"Of the players that past forecasts, rebuilt with the models of their time, showed in the same elite decile, the share who became one of the 100 most valuable players within two seasons, rounded to 5; blank outside the elite pool (ranked 101 to 1,000 and 23 or under)."
-candidates,elite_chance_players,How many past forecast players with a known outcome that elite chance is based on.
+candidates,elite_chance_pct,"Of the players that past forecasts of the last five scored seasons, rebuilt with the models of their time, showed in the same elite decile, the share who became one of the 100 most valuable players within two seasons, rounded to 5; blank outside the elite pool (ranked 101 to 1,000 and 23 or under)."
+candidates,elite_chance_players,"How many players of those past forecasts, with a known outcome, that elite chance is based on."
 candidates,step_up_decile,"Where the step up model puts him among this season's candidates, from 1 to 10."
-candidates,step_up_chance_pct,"Of the players ranked 101 to 2,000 that past forecasts showed in the same step up decile, the share whose value rank became at least three times better, inside the top 500, within two seasons, rounded to 5."
-candidates,step_up_chance_players,How many past forecast players with a known outcome that step up chance is based on.
-candidates,fall_back_risk_pct,"Of the elite pool players that past forecasts showed with the same number of flags, the share whose value rank was at least twice as bad two seasons later, rounded to 5; blank outside the elite pool, where it was never measured."
-candidates,fall_back_risk_players,How many past forecast players with a known outcome that fall back risk is based on.
+candidates,step_up_chance_pct,"Of the players ranked 101 to 2,000 that past forecasts of the last five scored seasons showed in the same step up decile, the share whose value rank became at least three times better, inside the top 500, within two seasons, rounded to 5."
+candidates,step_up_chance_players,"How many players of those past forecasts, with a known outcome, that step up chance is based on."
+candidates,fall_back_risk_pct,"Of the elite pool players that past forecasts of the last five scored seasons showed with the same number of flags, the share whose value rank was at least twice as bad two seasons later, rounded to 5; blank outside the elite pool, where it was never measured."
+candidates,fall_back_risk_players,"How many players of those past forecasts, with a known outcome, that fall back risk is based on."
 candidates,flag_count,"How many warning flags he raises: low minutes, injured, value falling."
 candidates,flags,"The raised flags, each with his own number, or none."
 candidates,explanation,"The 3 stats where he stands furthest from regulars of his position and age band this season, each with his number and where it ranks (top means better, even for stats where less is better); a neutral sentence when nothing is in the top or bottom 10%. It reads the same numbers as the flags."
 candidates,rising,"True when the riser model has him in this season's top 50: likely to play clearly better in each of the next two seasons and end at the 70th percentile of his position or better (players with at least 50% of team minutes). Risers valued below #2,000 are added as rows of their own, with the chances blank."
 candidates,big_move_decile,"Where the big move model puts him among this season's candidates, from 1 to 10; blank when he already plays for a top 20 club."
-candidates,big_move_chance_pct,"Of the players ranked 101 to 2,000 that past forecasts showed in the same big move decile, the share who joined a top 20 club (by squad value) within 24 months, rounded to 5."
-candidates,big_move_chance_players,How many past forecast players with a known outcome that big move chance is based on.
+candidates,big_move_chance_pct,"Of the players ranked 101 to 2,000 that past forecasts of the last five scored seasons showed in the same big move decile, the share who joined a top 20 club (by squad value) within 24 months, rounded to 5."
+candidates,big_move_chance_players,"How many players of those past forecasts, with a known outcome, that big move chance is based on."
 candidates,value_eur,"His Transfermarkt market value at the feature date, in euros."
 candidates,fair_value_eur,"What the fair value model, trained on earlier seasons only, says a player with his record is worth, in euros."
 candidates,ability_pct,"His ability score as a percentile among regulars of his position that season (100 is the best), from per 90 stats of the last two seasons."

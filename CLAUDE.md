@@ -209,7 +209,8 @@ October 2026, from MODELS.md and `reports/`:
   the top (shown 40%, happened 30.5%). Bargains: prime top 50 value rose
   67.0% against 47.6% for the whole list, experienced 14.4% against 7.1%.
   Since prompt 14b every shown chance is the realized rate of these
-  forecasts (Forecasts below); the top elite decile now shows 35%.
+  forecasts, since prompt 14c of the last five scored seasons only
+  (Forecasts below); the top elite decile now shows 30%.
 * Ability score stability (year to year): version 2 0.858 against 0.503 for
   version 1 and 0.537 for the rating with the Elo team term (37 leagues);
   0.656 against 0.431 two seasons apart, where pooling cannot help.
@@ -242,8 +243,9 @@ Decision 5: two user facing tables, written by `scout lists`
   (flag count 0, 1 or 2 or more, rate and players, blank outside the elite
   pool); flag count and flags with raw numbers; explanation; rising (the
   riser model's top 50); big move chance (blank at a top 20 club); value,
-  fair value, ability percentile. Sorted by elite chance, then step up
-  chance; the added risers come last with every chance blank.
+  fair value, ability percentile. Sorted by elite decile, then step up
+  decile (prompt 14c; the chance order while the rates rise with the
+  decile); the added risers come last with every chance blank.
 * `bargains`: the prime (1,249) and experienced (353) lists, ranked by value
   against fair value, with the shared flags, the explanation and the on
   loan and stale value tags.
@@ -290,6 +292,24 @@ detail stays in `reports/scouting.md`, `reports/moves.md`,
   27.6% to 32.1% in each season 2020 to 2023 against 34.5% pooled, so 35%
   is likely still a few points high; weighting recent seasons is the
   owner's call. MODELS.md.
+* **Revision 2 (prompt 14c, 21 October 2026).** The owner's call on that:
+  every displayed chance uses a rolling window of the **last five scored
+  seasons** (`WINDOW` in `src/scout/candidates.py`), so the 2025 table reads
+  2019 to 2023. Floor, rounding and count kept; a bucket under the floor
+  merges with its neighbour and `reports/candidates.md` says so (none did).
+  Changed buckets: elite decile 1 under 5% to 5% (2.9%, above decile 2's
+  0.7%, shown as it is) and decile 10 35% to 30% (31.7%); step up decile 10
+  20% to 25%; big move decile 7 5% to 10%; fall back unchanged (2 or more
+  flags 22.7%, still 25%); every n about 40% smaller. Candidates are now
+  sorted by decile instead of the unrounded rate, which the decile 1 dip
+  would have reordered; players, order, deciles, flags and bargains are
+  identical to revision 1 (commit 38a8a4b). The owner tags the final
+  commit. Out of sample the two rules differ only in 2022 and 2023 (five
+  scored seasons exist only from then), on 140 elite and 148 big move rows
+  and no fall back row; the top elite decile and the 2 or more flags
+  bucket show the same under both there (36.5% and 29.6% averaged, 33.2%
+  and 22.8% happened). Mean absolute gap: elite 2.0% to 1.7%, big move
+  1.1% to 1.0%, step up and fall back unchanged. MODELS.md.
 * `scout forecast score FOLDER --as-of DATE` (`src/scout/forecast.py`)
   reads a folder and the local tables up to that date and writes
   `reports/forecast_<folder>_at_<date>.md`: elite chance bucket against the
@@ -303,10 +323,12 @@ detail stays in `reports/scouting.md`, `reports/moves.md`,
 * `scout forecast history` rebuilds 2015 to 2023 in the same folder format
   under `data/processed/forecasts/history/` and scores each two seasons on
   (`reports/forecast_history.md`); the scorer agrees with the stored labels
-  on 96.7% to 99.9% of rows. It runs twice: in sample rates first
+  on 96.7% to 99.9% of rows. It runs three times: in sample rates first
   (`history/in_sample/`), whose scored buckets and outcomes go to
-  `history/outcomes.parquet`; then the realized rates of seasons up to S
-  minus 2 (`history/<season>/`; 2015 and 2016 show none). `scout lists`
+  `history/outcomes.parquet`; then the realized rates of the last five
+  seasons up to S minus 2 (`history/<season>/`; 2015 and 2016 show none);
+  then the prompt 14b rule, every season up to S minus 2
+  (`history/all_seasons/<season>/`), for the old against new section. `scout lists`
   reads `outcomes.parquet`, so run it after `forecast history`.
 
 ## Version 2 directions
@@ -411,13 +433,14 @@ Settle them with the owner rather than guessing.
   drawn, duels; prior 2,100 minutes): a full goalkeeper season counts about
   60% against the position mean. A goalkeeper specific base (goals conceded against the
   team's expected) would need xG, which the API has only from 2023/24.
-* The prompt 12 rebuild was in S3 by 21 October. The prompt 14 and 14b
-  rebuild (`data/processed/lists/`, `data/processed/models/bargains_backtest.parquet`,
-  `data/processed/forecasts/history/` with `outcomes.parquet`,
-  `reports/candidates.md`, `reports/forecast_history.md`) is local only; the
-  owner syncs it up. A fresh session needs `sync down` plus
+* The prompt 14c rebuild is in S3 (synced up 21 October with the owner's
+  approval: `processed/lists/`, `processed/forecasts/history/` with
+  `outcomes.parquet` and `all_seasons/`, `reports/candidates.md`,
+  `reports/forecast_history.md`); a dry run after the upload found nothing
+  left to copy. A fresh session needs `sync down` plus
   `raw/transfermarkt/players.csv.gz.meta.json` (the snapshot date for
-  contract expiry) to rebuild the lists byte for byte.
+  contract expiry) to rebuild the lists byte for byte; from those files the
+  prompt 14b code rebuilt revision 1 byte for byte.
   `reports/scouting_elo.md` is still the 17 league Elo run.
 * Elite on the young: among the 23 and under pool the elite model barely
   beats the value rank and age baseline (AUC 0.774 against 0.771) and its
@@ -425,8 +448,10 @@ Settle them with the owner rather than guessing.
   MODELS.md and README.md (prompt 14): the product's value is calibrated
   odds, risk flags and coverage of 37 leagues, not prediction beyond the
   market. The top elite decile ran high (shown 40%, happened 30.5%); the
-  owner settled it in prompt 14b with realized rates (now 35%), but out of
-  sample the top bucket still ran about 7 points high (Forecasts).
+  owner settled it in prompt 14b with realized rates and in prompt 14c with
+  a five season window (now 30%, against 27.6% to 32.1% made it in each
+  season 2020 to 2023); the out of sample test can barely tell the window
+  from pooling every season (Forecasts).
 * The ability flag would pass the 1.3 rule below the 50th percentile (x1.33)
   but not at 55 (x1.26); the threshold was not moved after looking.
   Bargains need half of team minutes, so the minutes flag never fires on

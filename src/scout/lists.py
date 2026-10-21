@@ -4,7 +4,8 @@
   in the newest season, with his elite chance (elite pool only), step up
   chance, fall back risk (elite pool only), flags, explanation, rising tag,
   big move chance, current and fair value, and ability percentile. Sorted by
-  elite chance, then step up chance. The riser model's top 50 are added as
+  elite decile, then step up decile (the chance order while the rates rise
+  with the decile). The riser model's top 50 are added as
   rows when they are valued below #2,000 (or have no value), with the
   chances blank: those were never measured there (prompt 14).
 * **bargains**: the prime and experienced lists of ``scout.bargains`` with
@@ -17,12 +18,15 @@ Every chance is a historical rate, not a model probability: of the players
 shown in the same bucket (score decile, or flag count) by the past
 forecasts that ``scout forecast history`` rebuilt with the models and
 buckets of their time, the share who made it two seasons on (prompt 14b;
-``scout.candidates.realized_tables``), rounded to the nearest 5%, never
-shown for a bucket of fewer than 30 players with a known outcome, with that
-number of players. Step up and big move deciles are taken among players
-ranked #101 to #2,000, the players this table shows. Until prompt 14b the
-rate pooled the backtest rows of every test season, which ran high at the
-top of the elite chance; ``reports/candidates.md`` shows both.
+``scout.candidates.realized_tables``), pooled over the last five scored
+seasons since prompt 14c (2019 to 2023 for the 2025 table), rounded to the
+nearest 5%, never shown for a bucket of fewer than 30 players with a known
+outcome (such a bucket merges with its neighbour), with that number of
+players. Step up and big move deciles are taken among players ranked #101
+to #2,000, the players this table shows. Until prompt 14b the rate pooled
+the backtest rows of every test season, which ran high at the top of the
+elite chance; ``reports/candidates.md`` shows the in sample tables, and
+the prompt 14b rate (every scored season) against the current one.
 
 Both tables go to ``data/processed/lists/`` as Parquet and CSV with
 ``dictionary.csv``; ``reports/candidates.md`` shows their top 50 and every
@@ -89,25 +93,26 @@ DICTIONARY = {
         "blank when he has no market value.",
         "elite_decile": "Where the elite model puts him among this season's elite pool, from 1 "
         "(least likely) to 10 (most likely); blank outside the pool.",
-        "elite_chance_pct": "Of the players that past forecasts, rebuilt with the models of "
-        "their time, showed in the same elite decile, the share who became one of the 100 most "
-        "valuable players within two seasons, rounded to 5; blank outside the elite pool "
-        f"(ranked 101 to 1,000 and {ELITE_MAX_AGE} or under).",
-        "elite_chance_players": "How many past forecast players with a known outcome that elite "
-        "chance is based on.",
+        "elite_chance_pct": "Of the players that past forecasts of the last five scored "
+        "seasons, rebuilt with the models of their time, showed in the same elite decile, the "
+        "share who became one of the 100 most valuable players within two seasons, rounded to "
+        f"5; blank outside the elite pool (ranked 101 to 1,000 and {ELITE_MAX_AGE} or under).",
+        "elite_chance_players": "How many players of those past forecasts, with a known "
+        "outcome, that elite chance is based on.",
         "step_up_decile": "Where the step up model puts him among this season's candidates, "
         "from 1 to 10.",
-        "step_up_chance_pct": "Of the players ranked 101 to 2,000 that past forecasts showed in "
-        "the same step up decile, the share whose value rank became at least three times "
-        "better, inside the top 500, within two seasons, rounded to 5.",
-        "step_up_chance_players": "How many past forecast players with a known outcome that "
-        "step up chance is based on.",
-        "fall_back_risk_pct": "Of the elite pool players that past forecasts showed with the "
-        "same number of flags, the share whose value rank was at least twice as bad two "
-        "seasons later, rounded to 5; blank outside the elite pool, where it was never "
-        "measured.",
-        "fall_back_risk_players": "How many past forecast players with a known outcome that "
-        "fall back risk is based on.",
+        "step_up_chance_pct": "Of the players ranked 101 to 2,000 that past forecasts of the "
+        "last five scored seasons showed in the same step up decile, the share whose value "
+        "rank became at least three times better, inside the top 500, within two seasons, "
+        "rounded to 5.",
+        "step_up_chance_players": "How many players of those past forecasts, with a known "
+        "outcome, that step up chance is based on.",
+        "fall_back_risk_pct": "Of the elite pool players that past forecasts of the last five "
+        "scored seasons showed with the same number of flags, the share whose value rank was "
+        "at least twice as bad two seasons later, rounded to 5; blank outside the elite pool, "
+        "where it was never measured.",
+        "fall_back_risk_players": "How many players of those past forecasts, with a known "
+        "outcome, that fall back risk is based on.",
         "flag_count": "How many warning flags he raises: low minutes, injured, value falling.",
         "flags": "The raised flags, each with his own number, or none.",
         "explanation": EXPLANATION,
@@ -118,11 +123,11 @@ DICTIONARY = {
         "rows of their own, with the chances blank.",
         "big_move_decile": "Where the big move model puts him among this season's candidates, "
         "from 1 to 10; blank when he already plays for a top 20 club.",
-        "big_move_chance_pct": "Of the players ranked 101 to 2,000 that past forecasts showed in "
-        "the same big move decile, the share who joined a top 20 club (by squad value) within "
-        "24 months, rounded to 5.",
-        "big_move_chance_players": "How many past forecast players with a known outcome that "
-        "big move chance is based on.",
+        "big_move_chance_pct": "Of the players ranked 101 to 2,000 that past forecasts of the "
+        "last five scored seasons showed in the same big move decile, the share who joined a "
+        "top 20 club (by squad value) within 24 months, rounded to 5.",
+        "big_move_chance_players": "How many players of those past forecasts, with a known "
+        "outcome, that big move chance is based on.",
         "value_eur": "His Transfermarkt market value at the feature date, in euros.",
         "fair_value_eur": "What the fair value model, trained on earlier seasons only, says a "
         "player with his record is worth, in euros.",
@@ -319,8 +324,11 @@ def candidates_table(
     rows["fall_back_risk_players"] = fall["players"].reindex(rows.index).astype("Int64")
     rows["rising"] = rows["source_player_id"].isin(risers)
 
+    # By decile, not by the shown rate: the rates are calibration and can dip
+    # out of order (prompt 14c, elite decile 1 above decile 2); while they
+    # rise with the decile, as in prompt 14b, both give the same order.
     rows = rows.sort_values(
-        ["elite_chance_rate", "step_up_chance_rate", "score_elite", "score_step_up"],
+        ["elite_decile", "step_up_decile", "score_elite", "score_step_up"],
         ascending=False,
         na_position="last",
     )
@@ -559,9 +567,10 @@ CHANCES = {
 }
 
 
-def revision_md(old: dict, new: dict, through: int) -> str:
-    """Old (in sample) against new (realized) for every bucket, with counts,
-    and the buckets whose realized rate is out of order."""
+def revision_md(old: dict, new: dict) -> str:
+    """Old (every scored season) against new (the last five) for every
+    bucket, with counts, the buckets merged under the floor and those whose
+    rate is out of order."""
     parts = []
     for name, title in CHANCES.items():
         keys = COUNT_BUCKETS if name == "fall_back" else list(range(1, DECILES + 1))
@@ -569,6 +578,13 @@ def revision_md(old: dict, new: dict, through: int) -> str:
             f"{title}:",
             "",
             candidates.compare(old[name], new[name], keys).to_markdown(index=False),
+            "",
+        ]
+        merged = candidates.merges(new[name])
+        parts += [
+            f"Merged under the {candidates.MIN_BUCKET} player floor: " + ", ".join(merged) + "."
+            if merged
+            else f"No bucket is under the {candidates.MIN_BUCKET} player floor; none merged.",
             "",
         ]
         out_of_order = candidates.not_monotonic(new[name])
@@ -590,6 +606,7 @@ def write_report(
     reports: Path,
     size: int = REPORT_SIZE,
     old_tables: dict | None = None,
+    in_sample: dict | None = None,
 ) -> Path:
     season = int(cand["season"].max())
     added = cand[~in_ranks(cand["value_rank"].astype(float))]
@@ -606,7 +623,9 @@ def write_report(
     move = inputs["big_move"].merge(inputs["scouting"][[*KEYS, "value_rank"]], on=KEYS)
     move = move[in_ranks(move["value_rank"])]
     verdict = "passes" if s["ability_passes"] else "fails"
-    in_sample = old_tables or tables
+    through = season - HORIZON_SEASONS
+    window = f"{through - candidates.WINDOW + 1} to {through}"
+    in_sample = in_sample or tables
     pooled_bargains = bargain_results[bargain_results["season"] == "pooled"].drop(columns="season")
     pooled_bargains = pooled_bargains.assign(
         outcome=pooled_bargains["outcome"].map(bargains.OUTCOMES)
@@ -623,8 +642,9 @@ def write_report(
         "**How to read it.** Every chance is what happened to past forecasts: of the",
         "players that our tables, rebuilt for each past season with the models of that",
         "time, put in the same tenth (decile) of a model's score (or with the same number",
-        "of flags), the share who made it two seasons on, rounded to 5%, with the number",
-        "of players behind it (n). Elite chance and fall back risk",
+        "of flags), the share who made it two seasons on, over the last five seasons whose",
+        "outcome is known, rounded to 5%, with the number of players behind it (n). Elite",
+        "chance and fall back risk",
         f"are only given inside the elite pool (ranked #101 to #1,000, {ELITE_MAX_AGE} or",
         "under), where they were measured. Flags are reasons for doubt, each with the",
         "player's own number. Rising: in the riser model's top 50 of the season. The",
@@ -663,20 +683,21 @@ def write_report(
         "",
         models.to_markdown(index=False),
         "",
-        "### Shown chances: realized rates of past forecasts (prompt 14b)",
+        "### Shown chances: realized rates of the last five scored seasons (prompt 14c)",
         "",
         "Every chance in the table is the realized rate of the forecasts that",
-        "`scout forecast history` rebuilt for seasons 2015 to "
-        f"{season - HORIZON_SEASONS} (`data/processed/forecasts/history/`),",
-        "each with the models and buckets available at the time and scored two seasons on.",
-        "Until prompt 14b the table showed the in sample rate (old): the backtest rows of",
-        "every test season pooled, which promised 40% at the top of the elite chance while",
-        "30.5% happened. n is the number of players behind the rate (old: backtest rows;",
-        "new: forecast players with a known outcome). Old against new, every bucket:",
+        "`scout forecast history` rebuilt (`data/processed/forecasts/history/`), each with",
+        "the models and buckets available at the time and scored two seasons on, pooled",
+        f"over the last {candidates.WINDOW} scored seasons: {window}. Prompt 14b pooled every",
+        f"scored season, 2015 to {through} (old); out of sample that leaned on 2015 to 2017",
+        "and showed the top elite decile and the top fall back bucket too high for recent",
+        "seasons (`reports/forecast_history.md`). A bucket under the 30 player floor merges",
+        "with its neighbour and is named below. n is the number of forecast players with",
+        "a known outcome behind the rate. Old against new, every bucket:",
         "",
-        revision_md(old_tables, tables, season - HORIZON_SEASONS) if old_tables else "",
+        revision_md(old_tables, tables) if old_tables else "",
         "",
-        "### In sample chance tables (pooled over the test seasons, shown until prompt 14b)",
+        "### In sample chance tables (backtest rows pooled, shown until prompt 14b)",
         "",
         f"Elite chance, elite pool, by decile of the elite score ({len(elite_pool_rows):,} "
         "players):",
@@ -772,18 +793,21 @@ def season_tables(
     leagues: dict[str, str],
     season: int | None = None,
     outcomes: pd.DataFrame | None = None,
+    window: int | None = candidates.WINDOW,
 ) -> tuple[pd.DataFrame, pd.DataFrame, dict]:
     """(candidates, bargains, chance tables) of one season, the newest when
     None. Chances are the realized rates of the scored past forecasts in
     ``outcomes`` (``scout forecast history``), or without them the in sample
     rates of the backtest; either from seasons up to ``season`` minus 2
-    only, so a past season's tables are what we could have published then."""
+    only, so a past season's tables are what we could have published then.
+    ``window``: the realized rates pool that many scored seasons (None:
+    every one, the prompt 14b rate)."""
     season = int(inputs["scouting"]["season"].max()) if season is None else season
     through = season - HORIZON_SEASONS
     if outcomes is None:
         tables = chance_tables(inputs, through=through)
     else:
-        tables = candidates.realized_tables(outcomes, through=through)
+        tables = candidates.realized_tables(outcomes, through=through, window=window)
     profile = explain.peer_table(explain.population(features, season))
     cand = candidates_table(inputs, tables, leagues, profile, season)
     lists = bargains.current_lists(bargain_rows, profiles, snapshot, season)
@@ -802,7 +826,9 @@ def run_lists(settings) -> Path:
         inputs, features, rows, profiles, snapshot, leagues, outcomes=outcomes
     )
     season = int(cand["season"].max())
-    old_tables = chance_tables(inputs, through=season - HORIZON_SEASONS)
+    through = season - HORIZON_SEASONS
+    old_tables = candidates.realized_tables(outcomes, through=through, window=None)
+    in_sample = chance_tables(inputs, through=through)
     added = int((~in_ranks(cand["value_rank"].astype(float))).sum())
     log.info("lists: %d risers valued below #%d added to the candidates", added, RANKS[1])
     results = bargains.backtest(rows)
@@ -812,7 +838,14 @@ def run_lists(settings) -> Path:
     write_tables({"candidates": cand, "bargains": barg, "dictionary": dictionary()}, out_dir)
     log.info("lists: %d candidates, %d bargains in %s", len(cand), len(barg), out_dir)
     path = write_report(
-        cand, barg, inputs, tables, results, settings.paths.reports_dir, old_tables=old_tables
+        cand,
+        barg,
+        inputs,
+        tables,
+        results,
+        settings.paths.reports_dir,
+        old_tables=old_tables,
+        in_sample=in_sample,
     )
     log.info("Report: %s", path)
     return path

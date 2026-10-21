@@ -293,6 +293,248 @@
           "new": "25% (n=384)"
         }
       ]
+    },
+    {
+      "date": "2026-10-21",
+      "reason": "Prompt 14c, the owner's decision on the prompt 14b report. Pooling the realized rates of every scored season from 2015 still leaned on 2015 to 2017: the top elite decile made it 27.6% to 32.1% in each season 2020 to 2023 against 35% shown, and the top fall back bucket showed 35% against 23.4% realized. Every displayed chance (elite by decile, step up and big move by decile, fall back by flag count) now uses a rolling window of the last five scored seasons, so this season 2025 table reads the forecasts of 2019 to 2023 instead of 2015 to 2023. The 30 player floor on known outcomes, the rounding to 5% and the count stay; a bucket under the floor would merge with its neighbour, and none did. The candidates are now sorted by elite decile, then step up decile, instead of by the unrounded rate: over 2019 to 2023 elite decile 1 (2.9%) came out above decile 2 (0.7%), which would have moved players; while the rates rise with the decile, as in revision 1, both give the same order. Players, order, deciles, flags, explanations, values and the bargains table are unchanged.",
+      "changed": [
+        "candidates.csv",
+        "dictionary.csv"
+      ],
+      "replaces_commit": "38a8a4b",
+      "buckets": [
+        {
+          "promise": "elite",
+          "bucket": "decile 1",
+          "players now": 32,
+          "old": "under 5% (n=240)",
+          "new": "5% (n=137)"
+        },
+        {
+          "promise": "elite",
+          "bucket": "decile 2",
+          "players now": 33,
+          "old": "under 5% (n=244)",
+          "new": "under 5% (n=140)"
+        },
+        {
+          "promise": "elite",
+          "bucket": "decile 3",
+          "players now": 33,
+          "old": "5% (n=243)",
+          "new": "5% (n=138)"
+        },
+        {
+          "promise": "elite",
+          "bucket": "decile 4",
+          "players now": 33,
+          "old": "5% (n=246)",
+          "new": "5% (n=141)"
+        },
+        {
+          "promise": "elite",
+          "bucket": "decile 5",
+          "players now": 33,
+          "old": "5% (n=244)",
+          "new": "5% (n=139)"
+        },
+        {
+          "promise": "elite",
+          "bucket": "decile 6",
+          "players now": 33,
+          "old": "10% (n=242)",
+          "new": "10% (n=139)"
+        },
+        {
+          "promise": "elite",
+          "bucket": "decile 7",
+          "players now": 33,
+          "old": "15% (n=245)",
+          "new": "15% (n=140)"
+        },
+        {
+          "promise": "elite",
+          "bucket": "decile 8",
+          "players now": 33,
+          "old": "15% (n=244)",
+          "new": "15% (n=139)"
+        },
+        {
+          "promise": "elite",
+          "bucket": "decile 9",
+          "players now": 33,
+          "old": "20% (n=243)",
+          "new": "20% (n=139)"
+        },
+        {
+          "promise": "elite",
+          "bucket": "decile 10",
+          "players now": 33,
+          "old": "35% (n=249)",
+          "new": "30% (n=142)"
+        },
+        {
+          "promise": "step up",
+          "bucket": "decile 1",
+          "players now": 179,
+          "old": "under 5% (n=1,543)",
+          "new": "under 5% (n=865)"
+        },
+        {
+          "promise": "step up",
+          "bucket": "decile 2",
+          "players now": 179,
+          "old": "under 5% (n=1,561)",
+          "new": "under 5% (n=869)"
+        },
+        {
+          "promise": "step up",
+          "bucket": "decile 3",
+          "players now": 179,
+          "old": "under 5% (n=1,558)",
+          "new": "under 5% (n=868)"
+        },
+        {
+          "promise": "step up",
+          "bucket": "decile 4",
+          "players now": 179,
+          "old": "under 5% (n=1,570)",
+          "new": "under 5% (n=876)"
+        },
+        {
+          "promise": "step up",
+          "bucket": "decile 5",
+          "players now": 180,
+          "old": "under 5% (n=1,573)",
+          "new": "under 5% (n=875)"
+        },
+        {
+          "promise": "step up",
+          "bucket": "decile 6",
+          "players now": 179,
+          "old": "5% (n=1,573)",
+          "new": "5% (n=877)"
+        },
+        {
+          "promise": "step up",
+          "bucket": "decile 7",
+          "players now": 179,
+          "old": "5% (n=1,575)",
+          "new": "5% (n=876)"
+        },
+        {
+          "promise": "step up",
+          "bucket": "decile 8",
+          "players now": 179,
+          "old": "10% (n=1,576)",
+          "new": "10% (n=877)"
+        },
+        {
+          "promise": "step up",
+          "bucket": "decile 9",
+          "players now": 179,
+          "old": "10% (n=1,575)",
+          "new": "10% (n=875)"
+        },
+        {
+          "promise": "step up",
+          "bucket": "decile 10",
+          "players now": 180,
+          "old": "20% (n=1,583)",
+          "new": "25% (n=878)"
+        },
+        {
+          "promise": "big move",
+          "bucket": "decile 1",
+          "players now": 144,
+          "old": "under 5% (n=1,323)",
+          "new": "under 5% (n=734)"
+        },
+        {
+          "promise": "big move",
+          "bucket": "decile 2",
+          "players now": 145,
+          "old": "under 5% (n=1,327)",
+          "new": "under 5% (n=736)"
+        },
+        {
+          "promise": "big move",
+          "bucket": "decile 3",
+          "players now": 145,
+          "old": "under 5% (n=1,327)",
+          "new": "under 5% (n=736)"
+        },
+        {
+          "promise": "big move",
+          "bucket": "decile 4",
+          "players now": 145,
+          "old": "5% (n=1,326)",
+          "new": "5% (n=736)"
+        },
+        {
+          "promise": "big move",
+          "bucket": "decile 5",
+          "players now": 145,
+          "old": "5% (n=1,328)",
+          "new": "5% (n=737)"
+        },
+        {
+          "promise": "big move",
+          "bucket": "decile 6",
+          "players now": 145,
+          "old": "5% (n=1,326)",
+          "new": "5% (n=736)"
+        },
+        {
+          "promise": "big move",
+          "bucket": "decile 7",
+          "players now": 145,
+          "old": "5% (n=1,326)",
+          "new": "10% (n=736)"
+        },
+        {
+          "promise": "big move",
+          "bucket": "decile 8",
+          "players now": 145,
+          "old": "10% (n=1,328)",
+          "new": "10% (n=737)"
+        },
+        {
+          "promise": "big move",
+          "bucket": "decile 9",
+          "players now": 145,
+          "old": "15% (n=1,327)",
+          "new": "15% (n=736)"
+        },
+        {
+          "promise": "big move",
+          "bucket": "decile 10",
+          "players now": 145,
+          "old": "25% (n=1,331)",
+          "new": "25% (n=739)"
+        },
+        {
+          "promise": "fall back",
+          "bucket": "flags 0",
+          "players now": 146,
+          "old": "15% (n=1,298)",
+          "new": "15% (n=691)"
+        },
+        {
+          "promise": "fall back",
+          "bucket": "flags 1",
+          "players now": 106,
+          "old": "20% (n=720)",
+          "new": "20% (n=418)"
+        },
+        {
+          "promise": "fall back",
+          "bucket": "flags 2 or more",
+          "players now": 77,
+          "old": "25% (n=384)",
+          "new": "25% (n=260)"
+        }
+      ]
     }
   ]
 }
