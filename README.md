@@ -5,7 +5,7 @@ Barcelona or Bayern regulars) before the market prices it in, and bargains:
 players already very good but cheap, at any age. It covers **37 leagues**
 (the big five, their second tiers, the rest of Europe's main leagues, Brazil,
 Argentina, Colombia, Uruguay, Liga MX, MLS, Japan, South Korea and Saudi
-Arabia) and runs on AWS for a few cents a month.
+Arabia) and runs on AWS for well under 1 USD a month.
 
 The result is **two tables**, published once a week with one static page:
 <http://scout-site-098499087060.s3-website.eu-central-1.amazonaws.com/>
