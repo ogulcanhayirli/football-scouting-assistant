@@ -121,18 +121,19 @@ The bucket names are variables, not secrets, so the logs can show the page
 address. The first step of the run fails with the name of any secret or
 variable that is missing.
 
-### 4. The stored models in S3 (needs the owner's yes, rule 8)
+### 4. The stored models in S3 (done 23 October 2026)
 
 The run scores with the models in `processed/models/stored/` and never
-trains. They were trained on 21 October 2026 and reproduce the registered
-tables byte for byte, but they are not in the bucket yet. One upload of 13
-files (9 MB), nothing else changed:
+trains. They were trained on 21 October 2026, reproduce the registered
+tables byte for byte, and were uploaded on 23 October with the owner's yes:
+13 files, 9 MB, nothing else. After a manual retrain, upload them again the
+same way, with the owner's yes (rule 8):
 
 ```bash
 uv run scout --config configs/backfill.ultra.yaml sync up --only processed
 ```
 
-Until they are there, step 5 of the run fails with a message naming the
+If they are ever missing, step 5 of the run fails with a message naming the
 missing file.
 
 ### 5. A budget alarm at 5 USD

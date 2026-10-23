@@ -41,7 +41,7 @@ chances shown as the rates that past forecasts actually achieved.
 | The two tables and their dictionary (`scout lists`) | Done: chances are the realized rates of rebuilt past forecasts, last five scored seasons |
 | Registered forecast (`forecasts/2026-10-21/`) | Frozen 21 October 2026, revised twice that day (both recorded); final in 2028 |
 | Stored models (`scout score`) | Done: trained once by the manual commands, reproduce the registered tables byte for byte |
-| Weekly run (`.github/workflows/weekly.yml`) | Built; waits for the `scout-weekly` user, the GitHub secrets and the stored models in S3 (docs/DEPLOY.md). A clean run of the same steps took 4 minutes 14 seconds on a 4 core machine |
+| Weekly run (`.github/workflows/weekly.yml`) | Built, and the stored models are in S3 (23 October); waits for the `scout-weekly` user and the GitHub secrets and variables (docs/DEPLOY.md). A clean run of the same steps took 4 minutes 14 seconds on a 4 core machine |
 | Static page (`scout site`) and its bucket (`ScoutSite`) | Live since 21 October 2026 |
 | Free tier update of the current season | Not started: prompt 4, from 6 November; the weekly run skips it until its config exists |
 | Glue and Athena, Feature Store, SageMaker training stacks | Retired by decision 9, code in `infra/archive/`; still deployed until the owner removes them |

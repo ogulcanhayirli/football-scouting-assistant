@@ -140,7 +140,7 @@ bucket named by `$SCOUT_S3_BUCKET` (eu-central-1).
 | Labels | `data/processed/features/player_season_labels/...` | value now, 24 and 36 months (the 24 month growth feeds the bargains backtest) |
 | Team Elo | `data/processed/elo/*.parquet` | per match pre match ratings, club and league seasons |
 | Model outputs | `data/processed/models/*.parquet` | backtest predictions (`backtest_<model>.parquet`), `scouting.parquet`, `big_move_current.parquet`, labels |
-| Stored models | `data/processed/models/stored/` | the boosters behind the newest season's scores (`fair_value_fold_2024`, `fair_value_fold_2025`, `big_move_24m`, `elite`, `step_up`, `riser`; LightGBM text plus a `.json` of columns and training rows) and `ability_v2.json` (the ability fit); written by `backtest`, `moves`, `scouting`, read by `score`. Trained 21 October 2026; **not yet in S3** (owner's yes) |
+| Stored models | `data/processed/models/stored/` | the boosters behind the newest season's scores (`fair_value_fold_2024`, `fair_value_fold_2025`, `big_move_24m`, `elite`, `step_up`, `riser`; LightGBM text plus a `.json` of columns and training rows) and `ability_v2.json` (the ability fit); written by `backtest`, `moves`, `scouting`, read by `score`. Trained 21 October 2026; in S3 since 23 October (owner's yes; only these 13 files went up, and a dry run of `sync up --only processed` then found nothing to copy) |
 | The page | `data/site/` | `index.html` (both tables embedded, 1.4 MB, 0.2 MB gzip) and `data/` (the two tables as CSV and Parquet, `dictionary.csv`); published to `scout-site-<account>` |
 | User facing tables | `data/processed/lists/` | `candidates`, `bargains` (Parquet, CSV), `dictionary.csv` (see Outputs) |
 | Quota state, log | `data/state/` | |
@@ -159,8 +159,8 @@ last two, so their cup columns stay missing. 24 competitions add context
 columns to league rows: UEFA and CONMEBOL club cups, national team
 tournaments and qualifiers, and 5 youth competitions (`kind: youth`, own
 columns; the UEFA Youth League has no player minutes and adds nothing). The
-league list in `infra/scout_infra/data_stack.py` must match the config (a
-test checks it). Per league and season coverage is in
+league list in the archived `infra/archive/scout_infra/data_stack.py`
+matched the config when it was archived; that test is no longer run. Per league and season coverage is in
 `reports/*coverage_report.md`.
 
 Expansion gaps: no team match stats (team strength columns missing), no
@@ -430,7 +430,7 @@ Owner decisions of 2026-10-16. Each one line; details in the code and docs once 
 6. Data before 7 November: yes; feeder leagues first (Austria, Switzerland, Croatia, Serbia, Czech Republic, Norway, Sweden, Poland, Mexico, MLS, Colombia, Uruguay, Japan, South Korea, Saudi Arabia, then the second tiers of the big five), then the sidelined endpoint per player, match events, youth competitions, coaches, and a final pull of the current season on 6 November.
 7. New free sources: FBref advanced stats for the big five and the European cups from 2017/18; Elo computed from our own fixtures; ClubElo not used because its API went offline in September 2026. API Football stays for breadth.
 8. Ability score version 2 is built from per 90 stats with minutes shrinkage, without the match rating, and replaces version 1 only if it is more stable year to year and predicts the targets at least as well. Rule set on 19 October: more stable, and elite and step up AUC within 0.005 of version 1 or better; else the most stable version that passes. **Outcome (19 October): adopted.** Stability 0.858 against 0.503, elite AUC 0.881 against 0.880, step up 0.927 against 0.925; `--strength v2` is the default (MODELS.md, `reports/ability.md`).
-9. Serving stack: no Lambda, API Gateway, DynamoDB or Bedrock agent; a weekly GitHub Actions run publishes Parquet, CSV and one static HTML page to S3 static hosting. **Built 21 October (prompt 15):** see AWS above and docs/DEPLOY.md; the page is live, the weekly run waits for the owner's setup (IAM user, secrets, the stored models in S3).
+9. Serving stack: no Lambda, API Gateway, DynamoDB or Bedrock agent; a weekly GitHub Actions run publishes Parquet, CSV and one static HTML page to S3 static hosting. **Built 21 October (prompt 15):** see AWS above and docs/DEPLOY.md; the page is live and the stored models are in S3 (23 October); the weekly run waits for the owner's setup (IAM user, secrets and variables).
 
 ## Open questions
 
@@ -456,9 +456,8 @@ Settle them with the owner rather than guessing.
   date rule.
 * Weekly run setup, the owner's part (docs/DEPLOY.md): create the IAM user
   `scout-weekly` with the policy there, the three GitHub secrets and two
-  variables, and say yes to uploading the 13 stored model files
-  (`processed/models/stored/`, 9 MB; a dry run of `sync up --only processed`
-  found nothing else to copy). The 5 USD budget alarm could not be checked or
+  variables. The 13 stored model files (`processed/models/stored/`, 9 MB)
+  were uploaded on 23 October with the owner's yes. The 5 USD budget alarm could not be checked or
   created: the session user has no Budgets rights, and `scout-cfn-exec`
   allows no budgets either; the commands are in docs/DEPLOY.md.
 * The free tier update (prompt 4) plugs into the weekly run as
