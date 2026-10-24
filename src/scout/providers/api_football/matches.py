@@ -86,6 +86,45 @@ CORRUPT_FIXTURES = {
     1035823: "player stats wrong throughout",
 }
 
+# A team's detailed stats for a match sent as zeros throughout: every
+# player who played has 0 passes and 0 duels (Ukrainian Premier League
+# 2026/27, 98% of team matches; some K League 1 2026). Only goals, assists,
+# cards, penalties and minutes are real there.
+PLACEHOLDER_MIN_PLAYERS = 10
+PLACEHOLDER_STATS = [
+    "shots_total",
+    "shots_on",
+    "passes_total",
+    "passes_key",
+    "passes_accurate",
+    "tackles_total",
+    "blocks",
+    "interceptions",
+    "duels_total",
+    "duels_won",
+    "dribbles_attempts",
+    "dribbles_success",
+    "dribbled_past",
+    "fouls_drawn",
+    "fouls_committed",
+    "saves",
+    "goals_conceded",
+    "offsides",
+    "rating",
+]
+
+
+def placeholder_blocks(frame: pd.DataFrame) -> pd.Series:
+    """True for rows of a team match whose detailed stats are placeholders."""
+    played = frame["minutes"].fillna(0) > 0
+    zero = (frame["passes_total"].fillna(0) == 0) & (frame["duels_total"].fillna(0) == 0)
+    keys = [frame["fixture_id"], frame["team_id"]]
+    players = played.groupby(keys).transform("sum")
+    all_zero = (zero | ~played).groupby(keys).transform("all")
+    some_value = (frame["passes_total"].notna() & played).groupby(keys).transform("any")
+    return (players >= PLACEHOLDER_MIN_PLAYERS) & all_zero & some_value
+
+
 MATCH_ID_COLUMNS = [
     "source",
     "fixture_id",
@@ -129,8 +168,22 @@ def parse_fixture_players(
         (teams.get("away") or {}).get("id"): ("away", "home"),
     }
     rows: list[dict] = []
-    for team_block in payload.get("response") or []:
+    blocks = payload.get("response") or []
+    claimed = {(b.get("team") or {}).get("id") for b in blocks} & set(sides)
+    unclaimed = [tid for tid in sides if tid not in claimed]
+    for team_block in blocks:
         team = team_block.get("team") or {}
+        if team.get("id") not in sides and len(unclaimed) == 1 and len(blocks) == 2:
+            # Source error: a block under an unknown team id (Chapecoense as 22722
+            # with no name, Brasileirão 2026); it can only be the other side.
+            side = "home" if unclaimed[0] == home else "away"
+            log.warning(
+                "fixture %s: players listed under unknown team %s; taken as %s",
+                info.get("id"),
+                team.get("id"),
+                (teams.get(side) or {}).get("name"),
+            )
+            team = teams.get(side) or {}
         own, other = sides.get(team.get("id"), (None, None))
         opponent = (teams.get(other) or {}) if other else {}
         for item in team_block.get("players") or []:
@@ -211,8 +264,21 @@ def _fix_source_errors(frame: pd.DataFrame) -> pd.DataFrame:
     * every stat of a match in ``CORRUPT_FIXTURES`` becomes missing; the rows,
       players and result stay;
     * minutes above ``MAX_MATCH_MINUTES`` become missing (Serie B 2020, Venezia
-      against Empoli: 1,306 minutes for the starters, 90 plus a constant 1,216).
+      against Empoli: 1,306 minutes for the starters, 90 plus a constant 1,216);
+    * a team match whose detailed stats are zeros throughout (``placeholder_blocks``,
+      Ukrainian Premier League 2026/27): those stats and the rating become
+      missing; minutes, goals, assists, cards and penalties stay.
     """
+    placeholder = placeholder_blocks(frame)
+    if placeholder.any():
+        blocks = frame.loc[placeholder, ["fixture_id", "team_id"]].drop_duplicates()
+        log.warning(
+            "%d team matches with placeholder zeros for the detailed stats (fixture %s, ...); "
+            "stored as missing",
+            len(blocks),
+            blocks["fixture_id"].iloc[0],
+        )
+    frame.loc[placeholder, PLACEHOLDER_STATS] = pd.NA
     corrupt = frame["fixture_id"].isin(list(CORRUPT_FIXTURES))
     for fixture_id in frame.loc[corrupt, "fixture_id"].unique():
         log.warning(

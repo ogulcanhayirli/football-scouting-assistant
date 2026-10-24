@@ -731,7 +731,7 @@ def run_history(settings, seasons=HISTORY) -> Path:
             past, features, rows, profiles, None, leagues, season, outcomes=outcomes, window=window
         )
         meta = meta_for(scouting, season, leagues, cand, barg, f"history-{season}", "history")
-        folder = write_folder(folder, cand, barg, lists.dictionary(), meta)
+        folder = write_folder(folder, cand, barg, lists.dictionary(present=False), meta)
         meta, cand, barg = read_folder(folder)  # score what was written, as for a real one
         rows_end = scouting[scouting["season"].astype(int) == season + HORIZON_SEASONS]
         as_of = pd.Timestamp(rows_end["feature_date"].max())

@@ -253,6 +253,16 @@ The run's step 3 is a placeholder with a fixed contract:
   on those partitions. That is beyond the rule 8 exception for this job and
   is the owner's decision.
 
+`features --current` also rebuilds the season so far block of both tables
+(prompt 16) from `processed/current/`, which the run pulls with the rest of
+`processed/`. The run never calls `scout current` (it spends about 2,000
+requests: squads and transfer lists of 830 clubs, the finished matches), so
+the club today and the season so far stay as of the last pull until a
+session runs `scout current` and syncs `raw/` and `processed/` up. On the
+free tier (100 a day from 7 November) a full pull takes about three weeks;
+a week of new matches alone (37 fixture lists and about 50 new batches of
+20) fits in one day.
+
 A new season in the season stats makes `features --current` build that
 season. Its feature date (30 June 2027) lies more than a year after the last
 Transfermarkt valuation (12 June 2026), so its rows would have no market

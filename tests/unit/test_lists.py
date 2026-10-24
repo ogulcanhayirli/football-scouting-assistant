@@ -2,8 +2,8 @@ import numpy as np
 import pandas as pd
 
 from scout.lists import (
-    DICTIONARY,
     bargains_table,
+    base_columns,
     candidates_table,
     chance_tables,
     dictionary,
@@ -83,7 +83,7 @@ def _inputs(seed=5):
 def test_candidates_cover_ranks_101_to_2000_with_chances_only_where_measured():
     inputs = _inputs()
     out = candidates_table(inputs, chance_tables(inputs), {"epl": "Premier League"})
-    assert list(out.columns) == list(DICTIONARY["candidates"])
+    assert list(out.columns) == base_columns("candidates")
     assert out["player_id"].is_unique
     ranked = out["value_rank"].between(101, 2000)
     assert ranked.sum() == 1900
@@ -155,7 +155,7 @@ def test_bargains_table_and_dictionary_agree():
         }
     )
     out = bargains_table({"prime": frame.iloc[[0]], "experienced": frame.iloc[[1]]}, {})
-    assert list(out.columns) == list(DICTIONARY["bargains"])
+    assert list(out.columns) == base_columns("bargains")
     assert out["list"].tolist() == ["prime", "experienced"]
     assert out["position"].tolist() == ["Defender", "Left-Back"]
     words = dictionary()

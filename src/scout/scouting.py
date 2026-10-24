@@ -59,6 +59,7 @@ import lightgbm as lgb
 import numpy as np
 import pandas as pd
 
+from scout.contracts import PRESENT_ONLY_PREFIX
 from scout.features.build import value_asof
 from scout.fsutil import atomic_write_text
 from scout.models.backtest import check_no_leak, expanding_folds, fold_season
@@ -741,7 +742,7 @@ def model_columns(data: pd.DataFrame) -> list[str]:
     skip = NOT_FEATURES | set(KEYS) | {"y", "label_date", "best_rank_2y", *SCOUTING_TARGETS}
     skip |= {"regular"}
     skip |= {"fall_back", *RISER_COLUMNS}
-    skip |= {c for c in data.columns if c.startswith("pct_")}
+    skip |= {c for c in data.columns if c.startswith(("pct_", PRESENT_ONLY_PREFIX))}
     return [c for c in data.columns if c not in skip and data[c].dtype != object]
 
 

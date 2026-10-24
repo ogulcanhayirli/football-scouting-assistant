@@ -7,7 +7,8 @@
   searched by a little plain JavaScript (``site_template.html``), with a
   "how to read this" box: the chances are calibrated odds from past seasons,
   not predictions beyond the market, the valuation date, the forecast date
-  and the five season window;
+  and the five season window; each player's club today and his season so
+  far (prompt 16), as of the day of the last pull;
 * ``data/``: the same two tables as CSV and Parquet, and the dictionary.
 
 Only the two tables and the dictionary are published, never raw match stats
@@ -41,8 +42,11 @@ CANDIDATE_COLUMNS = [
     "player",
     "age",
     "position",
-    "club",
+    "club_at_forecast",
     "league",
+    "current_club",
+    "current_league",
+    "moved_since_forecast",
     "value_rank",
     "value_eur",
     "fair_value_eur",
@@ -62,6 +66,14 @@ CANDIDATE_COLUMNS = [
     "explanation",
     "rising",
     "ability_pct",
+    "so_far_matches",
+    "so_far_minutes",
+    "so_far_minutes_share",
+    "so_far_ability_pct",
+    "so_far_goals_per90",
+    "so_far_assists_per90",
+    "so_far_flag_count",
+    "so_far_flags",
 ]
 BARGAIN_COLUMNS = [
     "list",
@@ -69,8 +81,11 @@ BARGAIN_COLUMNS = [
     "player",
     "age",
     "position",
-    "club",
+    "club_at_forecast",
     "league",
+    "current_club",
+    "current_league",
+    "moved_since_forecast",
     "value_eur",
     "fair_value_eur",
     "value_to_fair",
@@ -85,6 +100,14 @@ BARGAIN_COLUMNS = [
     "stale_value",
     "value_date",
     "rising",
+    "so_far_matches",
+    "so_far_minutes",
+    "so_far_minutes_share",
+    "so_far_ability_pct",
+    "so_far_goals_per90",
+    "so_far_assists_per90",
+    "so_far_flag_count",
+    "so_far_flags",
 ]
 
 
@@ -141,6 +164,10 @@ def fall_back_buckets(cand: pd.DataFrame) -> list[dict]:
     return out
 
 
+def _day(value) -> str | None:
+    return pd.Timestamp(value).strftime("%Y-%m-%d") if pd.notna(value) else None
+
+
 def page_data(
     cand: pd.DataFrame,
     barg: pd.DataFrame,
@@ -177,6 +204,7 @@ def page_data(
         "forecasts": forecasts,
         "flags": {name: flag.rule for name, flag in FLAGS.items()},
         "tags": TAGS,
+        "so_far_date": _day(cand["so_far_date"].max()) if "so_far_date" in cand else None,
         "leagues": int(cand["league"].nunique()),
         "tracked": tracked,
         "candidates": _records(cand, [*CANDIDATE_COLUMNS, "flag_keys"]),

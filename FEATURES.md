@@ -260,6 +260,25 @@ exclude them (`PRESENT_ONLY_COLUMNS` in `src/scout/contracts/schemas.py`).
 The point in time counterpart of the highest value is the feature
 `market_value_max_to_date`.
 
+## The present (display only, prompt 16)
+
+`scout current` and `scout features --current` write
+`data/processed/current/`, which describes today and is never a model input:
+
+| Table | Rows (24 October 2026) | What |
+|---|---|---|
+| `squads/as_of=<day>.parquet` | 25,631 | every squad player of 830 clubs: team, player, age, shirt number, position (Goalkeeper, Defender, Midfielder, Attacker); contract `SQUADS` |
+| `transfers/as_of=<day>.parquet` | 324,392 | every move the 830 clubs' transfer lists give, the `TRANSFERS` columns and contract |
+| `current_club.parquet` | 29,042 | one club per player today (`current_club_id`, `current_club`, `current_league`, `shirt_number`, `squad_position`, `club_source`, `squad_date`); contract `CURRENT_CLUB` |
+| `club_leagues.parquet` | 658 | the clubs of our leagues' current seasons and their league |
+| `player_match_stats/league=<key>/season=<year>.parquet` | 4,807 matches | the season in progress, the finished seasons' columns and contract |
+| `injuries/league=<key>/season=<year>.parquet` | | the season in progress, the `INJURIES` contract |
+| `season_so_far.parquet` | 16,146 | the `so_far_*` block for every player with league minutes this season |
+
+The feature contract rejects a feature table carrying any current club
+column (`PRESENT_ONLY_COLUMNS`) or any `so_far_` column
+(`PRESENT_ONLY_PREFIX`), and the models' column lists leave them out.
+
 ## Known gaps
 
 * Süper Lig values around mid 2025 are thin: 80.9% of 2024/25 players have

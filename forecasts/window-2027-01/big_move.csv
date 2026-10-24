@@ -1,0 +1,51 @@
+rank,player_id,player,age,position,club_at_forecast,club_at_freeze,club_id_at_freeze,league,value_eur,score
+1,432310,S. El Mala,19.8,Midfielder,1. FC Köln,1. FC Köln,192,Bundesliga,45000000.0,0.7689
+2,178768,N. Atubolu,24.1,Goalkeeper,SC Freiburg,Eintracht Frankfurt,169,Bundesliga,25000000.0,0.6348
+3,386305,Jacobo Ramón Naveros,21.5,Defender,Como,Como,895,Serie A,30000000.0,0.6159
+4,437692,L. Kiaba Mounganga,18.0,Goalkeeper,Genk,Genk,742,Belgian Pro League,4000000.0,0.6123
+5,453906,H. Ahanor,18.3,Defender,Atalanta,Crystal Palace,52,Serie A,30000000.0,0.6027
+6,338735,A. Khalaili,21.8,Attacker,Union St. Gilloise,Crystal Palace,52,Belgian Pro League,23000000.0,0.5695
+7,422156,M. Palma,18.3,Defender,Sampdoria,Udinese,494,Serie B,5000000.0,0.567
+8,19495,N. Collins,25.2,Defender,Brentford,Brentford,55,Premier League,30000000.0,0.5654
+9,400948,Assane Diao,20.8,Attacker,Como,Como,895,Serie A,30000000.0,0.5589
+10,453903,Nathan De Cat,17.9,Midfielder,Anderlecht,1899 Hoffenheim,167,Belgian Pro League,27000000.0,0.5478
+11,347211,R. Risser,21.6,Goalkeeper,Lens,Lens,116,Ligue 1,30000000.0,0.5459
+12,196156,Thiago,25.0,Attacker,Brentford,Brentford,55,Premier League,65000000.0,0.5381
+13,178077,K. Schade,24.6,Midfielder,Brentford,Brentford,55,Premier League,35000000.0,0.5297
+14,342022,M. Kayode,22.0,Defender,Brentford,Brentford,55,Premier League,40000000.0,0.5118
+15,443162,Jesús Rodríguez,20.6,Midfielder,Como,Como,895,Serie A,30000000.0,0.5071
+16,281,C. Kelleher,27.6,Goalkeeper,Brentford,Brentford,55,Premier League,28000000.0,0.4991
+17,440147,Abdoul Karim Coulibaly,19.1,Defender,Werder Bremen,Strasbourg,95,Bundesliga,28000000.0,0.4825
+18,369500,I. Ganiou,21.3,Defender,Lens,Lens,116,Ligue 1,20000000.0,0.481
+19,556,M. Svilar,26.8,Goalkeeper,AS Roma,AS Roma,497,Serie A,35000000.0,0.4624
+20,73868,R. Pepi,23.5,Attacker,PSV Eindhoven,PSV Eindhoven,197,Eredivisie,30000000.0,0.4524
+21,22236,Rafael Leão,27.1,Attacker,AC Milan,Galatasaray,645,Serie A,50000000.0,0.4384
+22,455316,Tiago Gabriel,21.5,Defender,Lecce,Lecce,867,Serie A,15000000.0,0.4348
+23,271350,T. Muharemović,23.3,Defender,Sassuolo,Leeds,63,Serie A,25000000.0,0.4264
+24,431413,E. Motta,21.5,Goalkeeper,Lazio,Lazio,487,Serie A,8000000.0,0.424
+25,340279,Vitor Roque,20.8,Attacker,Palmeiras,Palmeiras,121,Brasileirão Série A,35000000.0,0.4223
+26,17661,J. Branthwaite,24.0,Defender,Everton,Everton,45,Premier League,40000000.0,0.4101
+27,347644,A. Atta,23.5,Midfielder,Udinese,Fiorentina,502,Serie A,25000000.0,0.4086
+28,194536,R. Roefs,23.4,Goalkeeper,Sunderland,Sunderland,746,Premier League,28000000.0,0.399
+29,339887,C. Uzun,20.6,Midfielder,Eintracht Frankfurt,Eintracht Frankfurt,169,Bundesliga,45000000.0,0.3903
+30,354027,J. Ordoñez,22.2,Defender,Club Brugge KV,Club Brugge KV,569,Belgian Pro League,33000000.0,0.3854
+31,431413,E. Motta,21.5,Goalkeeper,Reggiana,Lazio,487,Serie B,8000000.0,0.3773
+32,327993,D. Seimen,20.6,Goalkeeper,SC Paderborn 07,VfB Stuttgart,172,2. Bundesliga,7000000.0,0.3739
+33,452697,D. Methalie,20.4,Midfielder,Toulouse,Sunderland,746,Ligue 1,18000000.0,0.3709
+34,895,J. Garner,25.3,Defender,Everton,Everton,45,Premier League,45000000.0,0.3629
+35,350037,N. Paz,21.8,Midfielder,Como,Como,895,Serie A,,0.3618
+36,264857,L. Bernasconi,22.6,Defender,Atalanta,Atalanta,499,Serie A,20000000.0,0.3503
+37,877,M. Kean,26.3,Attacker,Fiorentina,Como,895,Serie A,32000000.0,0.3497
+38,106725,K. Lewis-Potter,25.3,Midfielder,Brentford,Brentford,55,Premier League,25000000.0,0.3442
+39,47269,Álex Remiro,31.3,Goalkeeper,Real Sociedad,Real Sociedad,548,La Liga,9000000.0,0.3381
+40,341453,Oso,23.0,Defender,Sevilla,Strasbourg,95,La Liga,10000000.0,0.3363
+41,656,O. Solet,26.4,Defender,Udinese,Udinese,494,Serie A,23000000.0,0.336
+42,15908,M. Damsgaard,26.0,Midfielder,Brentford,Brentford,55,Premier League,30000000.0,0.3352
+43,137210,A. Stiller,25.2,Midfielder,VfB Stuttgart,VfB Stuttgart,172,Bundesliga,45000000.0,0.3335
+44,20696,P. Gueye,27.4,Midfielder,Villarreal,Villarreal,533,La Liga,40000000.0,0.3319
+45,184420,Carlos Romero,24.7,Defender,Espanyol,Villarreal,533,La Liga,25000000.0,0.3282
+46,329578,M. Backhaus,22.2,Goalkeeper,Werder Bremen,SC Freiburg,160,Bundesliga,15000000.0,0.3265
+47,392254,Francis-Ikechukwu Onyeka,19.2,Midfielder,VfL Bochum,SV Elversberg,1660,2. Bundesliga,6000000.0,0.3235
+48,294684,Y. Baas,23.3,Defender,Ajax,Ajax,194,Eredivisie,20000000.0,0.3192
+49,152967,C. Bassey,26.5,Defender,Fulham,Fulham,36,Premier League,28000000.0,0.3179
+50,408853,M. Rots,20.3,Defender,Twente,1899 Hoffenheim,167,Eredivisie,12000000.0,0.3169

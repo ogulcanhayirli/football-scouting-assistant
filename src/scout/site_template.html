@@ -161,6 +161,7 @@ tr.why td { padding: 0 10px 10px; color: var(--muted); font-size: 13px; }
 }
 .badge.rising { background: var(--good-soft); color: var(--good); }
 .badge.loan, .badge.stale { background: var(--warn-soft); color: var(--warn); }
+.badge.moved { background: var(--accent-soft); color: var(--accent); }
 .flags { margin: 0; padding: 0; list-style: none; font-size: 12.5px; }
 .flags li { color: var(--risk); }
 .flags li + li { margin-top: 2px; }
@@ -274,7 +275,7 @@ footer p { margin: 6px 0; max-width: 100ch; }
     return table.rows.map(function (r, i) {
       var o = { _i: i };
       table.columns.forEach(function (c, j) { o[c] = r[j]; });
-      o._q = fold(o.player + " " + o.club);
+      o._q = fold(o.player + " " + o.club_at_forecast + " " + (o.current_club || ""));
       return o;
     });
   }
@@ -321,11 +322,24 @@ footer p { margin: 6px 0; max-width: 100ch; }
     if (o.rising) badges += '<span class="badge rising" title="The riser model\'s top 50 this season">Rising</span>';
     if (o.on_loan) badges += '<span class="badge loan" title="' + esc(D.tags.on_loan) + '">On loan</span>';
     if (o.stale_value) badges += '<span class="badge stale" title="' + esc(D.tags.stale_value) + '">Stale value</span>';
-    var meta = [o.position, o.age != null ? Math.floor(o.age) + " years" : null, o.club, o.league]
+    if (o.moved_since_forecast) badges += '<span class="badge moved" title="Club at forecast: ' + esc(o.club_at_forecast) + '">Moved</span>';
+    var club = o.moved_since_forecast ? o.current_club + " (now; was " + o.club_at_forecast + ")" : o.club_at_forecast;
+    var league = o.moved_since_forecast ? o.current_league : o.league;
+    var meta = [o.position, o.age != null ? Math.floor(o.age) + " years" : null, club, league]
       .filter(Boolean).map(esc).join(" · ");
     return (extra || "") + '<span class="name">' + esc(o.player) + "</span>" + badges +
       '<div class="meta">' + meta + "</div>";
   }
+
+  function soFar(o) {
+    if (!o.so_far_minutes) return '<span class="blank">no minutes yet</span>';
+    var parts = [int(o.so_far_minutes) + " min, " + Math.round(o.so_far_minutes_share * 100) + "% of team"];
+    if (o.so_far_ability_pct != null) parts.push("ability " + int(o.so_far_ability_pct) + " pct");
+    if (o.so_far_goals_per90 != null) parts.push(o.so_far_goals_per90.toFixed(2) + " goals, " + o.so_far_assists_per90.toFixed(2) + " assists per 90");
+    parts.push(o.so_far_flag_count ? words(o.so_far_flag_count) + " flag" + (o.so_far_flag_count > 1 ? "s" : "") + " today" : "no flags today");
+    return '<span class="num">' + esc(parts[0]) + '</span><span class="small" title="' + esc(o.so_far_flags || "") + '">' + parts.slice(1).map(esc).join("; ") + "</span>";
+  }
+  var SO_FAR = { key: "so_far", label: "Season so far", cell: soFar, sort: function (o) { return o.so_far_ability_pct != null ? o.so_far_ability_pct : (o.so_far_minutes ? -1 : null); }, desc: true };
 
   // Columns: label, cell renderer, sort value, mobile label
 
@@ -341,6 +355,7 @@ footer p { margin: 6px 0; max-width: 100ch; }
       { key: "fall_back", label: "Fall back risk", cell: function (o) { return chance(o.fall_back_risk_pct, o.fall_back_risk_players, null, "outside the elite pool"); }, sort: function (o) { return nulls(o.fall_back_risk_pct); }, desc: true },
       { key: "flags", label: "Flags", cls: "wide", cell: flagList, sort: function (o) { return o.flag_count; }, desc: true },
       { key: "ability", label: "Ability", cell: function (o) { return o.ability_pct == null ? '<span class="blank">none</span>' : int(o.ability_pct) + '<span class="small">percentile</span>'; }, sort: function (o) { return nulls(o.ability_pct); }, desc: true },
+      SO_FAR,
       { key: "age", label: "Age", hidden: true, sort: function (o) { return nulls(o.age); } },
       { key: "order", label: "Table order", hidden: true, sort: function (o) { return o._i; } }
     ],
@@ -354,6 +369,7 @@ footer p { margin: 6px 0; max-width: 100ch; }
       { key: "minutes", label: "Minutes", cell: function (o) { return Math.round(o.minutes_share * 100) + '%<span class="small">of team minutes</span>'; }, sort: function (o) { return o.minutes_share; }, desc: true },
       { key: "contract", label: "Contract until", cell: function (o) { return o.contract_expiry ? day(o.contract_expiry) : '<span class="blank">not known</span>'; }, sort: function (o) { return o.contract_expiry || null; } },
       { key: "flags", label: "Flags", cls: "wide", cell: flagList, sort: function (o) { return o.flag_count; }, desc: true },
+      SO_FAR,
       { key: "age", label: "Age", hidden: true, sort: function (o) { return nulls(o.age); } }
     ]
   };
@@ -389,6 +405,7 @@ footer p { margin: 6px 0; max-width: 100ch; }
       box.innerHTML = '<label><input type="checkbox" id="hide-loan"> Hide players on loan</label>' +
         '<label><input type="checkbox" id="hide-stale"> Hide stale values</label>';
     }
+    box.innerHTML += '<label><input type="checkbox" id="only-moved"> Moved since forecast</label>';
     box.querySelectorAll("input").forEach(function (i) { i.addEventListener("change", refresh); });
   }
 
@@ -440,7 +457,7 @@ footer p { margin: 6px 0; max-width: 100ch; }
     var pos = $("position").value, lg = $("league").value, flag = $("flag").value;
     var lo = parseFloat($("age-min").value), hi = parseFloat($("age-max").value);
     var el = function (id) { var e = $(id); return e && e.checked; };
-    var rising = el("only-rising"), pool = el("only-pool"), loan = el("hide-loan"), stale = el("hide-stale");
+    var rising = el("only-rising"), pool = el("only-pool"), loan = el("hide-loan"), stale = el("hide-stale"), moved = el("only-moved");
     return DATA[state.tab].filter(function (o) {
       if (state.tab === "bargains" && o.list !== state.list) return false;
       if (q && o._q.indexOf(q) < 0) return false;
@@ -455,6 +472,7 @@ footer p { margin: 6px 0; max-width: 100ch; }
       if (pool && o.elite_chance_pct == null) return false;
       if (loan && o.on_loan) return false;
       if (stale && o.stale_value) return false;
+      if (moved && !o.moved_since_forecast) return false;
       return true;
     });
   }
@@ -521,6 +539,7 @@ footer p { margin: 6px 0; max-width: 100ch; }
       "<b>Valuation date.</b> Market values are Transfermarkt valuations up to " + day(D.valuation_end) + (D.latest_value_date ? " (the latest used is dated " + day(D.latest_value_date) + ")" : "") + ". The source has published nothing newer, so values stay frozen there until a new source is added.",
       "<b>Forecast date.</b> " + when + " These tables were built on " + day(D.built) + "." + reg,
       "<b>Blank chances.</b> Elite chance and fall back risk exist only for the elite pool (ranked #" + pool.from + " to #" + int(pool.to) + " by value and " + pool.max_age + " or under). Big move is blank at a top 20 club. Rising players valued below #2,000 are added without chances.",
+      "<b>Club today and season so far" + (D.so_far_date ? ", as of " + day(D.so_far_date) : "") + ".</b> The club is the one whose squad lists him on that day; Moved means it is not the club the forecast describes. The season so far column reads the league matches of the season in progress up to that day: minutes, share of team minutes, the one season ability percentile (stored fit, among regulars with 450 minutes or more), goals and assists per 90 (not for goalkeepers and centre backs, nor under 270 minutes) and the flags as they stand today. It is context for the forecast, which stays as registered.",
       "<b>Flags</b> are low minutes, injured and value falling, each shown with the player's own number. Fall back risk in the elite pool by flags: " + fb + ".",
       "<b>Bargains</b> are regular players (half of team minutes or more, ability at the 70th percentile of their position or better) whose market value is low against the fair value model, which was trained on earlier seasons only. Prime is 29 and under, experienced 30 to 33."
     ];

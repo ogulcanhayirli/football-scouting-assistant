@@ -1,0 +1,28 @@
+{
+  "folder": "window-2027-01",
+  "rule": "joins a top 20 club by Elo or value rank between 1 January and 3 February 2027",
+  "window": [
+    "2027-01-01",
+    "2027-02-03"
+  ],
+  "frozen": "2026-10-24",
+  "season": 2025,
+  "counted_kinds": [
+    "free",
+    "loan",
+    "transfer",
+    "unknown"
+  ],
+  "top_clubs": 24,
+  "lists": {
+    "big_move": 50,
+    "step_up": 50
+  },
+  "pools": {
+    "big_move": 12832,
+    "step_up": 1413
+  },
+  "current_club_known": true,
+  "refreeze_planned": "2026-12-15",
+  "earlier": []
+}

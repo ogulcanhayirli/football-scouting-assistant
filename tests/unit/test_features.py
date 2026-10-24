@@ -509,3 +509,15 @@ def test_one_season_rebuild_matches_the_full_build():
     )
     assert one["career_seasons"].tolist() == [2, 1]  # 2014 and 2022 for player 10
     assert one["prev_minutes"].notna().all()
+
+
+@pytest.mark.contract
+@pytest.mark.parametrize("column", ["current_club", "moved_since_forecast", "so_far_minutes"])
+def test_no_feature_table_carries_the_current_club_or_the_season_so_far(column):
+    """Prompt 16: today's club and the season so far are display only."""
+    features, _ = build_features(_inputs())
+    leaked = features.assign(**{column: 1.0})
+    with pytest.raises(pandera.errors.SchemaErrors, match="no_present_only_columns"):
+        validate(PLAYER_SEASON_FEATURES, leaked)
+    assert column not in feature_columns(leaked, TARGETS["fair_value"])
+    assert column not in model_columns(leaked)

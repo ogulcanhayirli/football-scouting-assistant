@@ -39,7 +39,10 @@ fix this file.
 4. **Raw API responses are cached byte for byte and never downloaded twice**
    (D2). `src/scout/storage.py` writes the body last through an atomic rename,
    with a `.meta.json` sidecar; a request whose body file exists is never made
-   again, and refusals are never cached (D3). Processed tables are rebuilt
+   again, and refusals are never cached (D3). Answers that change from day
+   to day (squads, a fresh transfer list, the fixture list and injuries of
+   a season in progress) are cached per snapshot day: `as_of=<day>` in the
+   cache key, never sent (prompt 16). Processed tables are rebuilt
    from the cache with zero requests. The Transfermarkt snapshot files are
    likewise downloaded once and kept.
 5. **No secrets in code.** `API_FOOTBALL_KEY` comes from the environment or
@@ -94,7 +97,8 @@ $C elo                                       # team Elo from cached fixtures, re
 $C scouting [--strength v2|transfer|elo|transfer_elo]  # league strength, ability, elite, step up, riser
 $C ability                                  # ability versions: stability, backtest (reports/ability.md)
 $C lists                                    # the two tables and reports/candidates.md; run after backtest, moves, scouting, forecast history
-$C features --current                       # the weekly run: newest season only, earlier ones as stored
+$C current [--as-of DAY] [--max-requests N]  # today's squads, transfers, season in progress (about 2,000 requests)
+$C features --current                       # the weekly run: newest season only, earlier ones as stored, plus the season so far
 $C score                                    # the weekly run: newest season with the stored models, no training
 $C site                                     # data/site/index.html and the downloads (the static page)
 $C publish [--role scout-site-publisher]    # processed/lists/ and the site bucket ($SCOUT_SITE_BUCKET); weekly run
@@ -102,6 +106,8 @@ $C forecast freeze [--date YYYY-MM-DD]       # copy today's lists into forecasts
 $C forecast score forecasts/2026-10-21 --as-of 2027-06-30  # promised buckets against what happened
 $C forecast history                         # rebuild and score 2015 to 2023 (reports/forecast_history.md); before lists
 $C forecast revise forecasts/2026-10-21 --reason "..."  # rewrite a registered folder from today's lists, date kept, reason recorded
+$C forecast window-freeze [--refreeze]      # forecasts/window-2027-01 (big move and step up top 50)
+$C forecast window-score                    # reports/window_window-2027-01.md, after the window
 $C sync up | down [--dry-run] [--only raw|processed|reports|transfermarkt]
 uv run python scripts/run_extras.py          # sidelined, coaches, events (done 17 October)
 uv run python scripts/rebuild_match_seasons.py --from-s3 serie_b:2016  # re-parse partitions offline after an adapter repair
@@ -133,7 +139,8 @@ bucket named by `$SCOUT_S3_BUCKET` (eu-central-1).
 | Sidelined periods | `data/processed/sidelined/sidelined.parquet` | 88,046 injury and suspension periods for 20,791 players (all 86,250 players asked for), mostly 2010 to September 2025 (the API adds almost nothing after); a snapshot of 2026, so only periods started by the feature date are used; tracked well only in some league seasons (FEATURES.md) |
 | Coach spells | `data/processed/coaches/coach_spells.parquet` | 22,383 spells, 6,549 coaches, dates mostly to the month (a few carry a day); a missing end means still in charge; from July 2025 sitting coaches are listed again under new ids |
 | Match events | `data/processed/fixture_events/...` | 1,609,653 goals, cards, substitutions and VAR events for all 107,409 fixtures with player stats |
-| Transfers | `data/processed/transfers/transfers.parquet` | 285,797 moves |
+| Transfers | `data/processed/transfers/transfers.parquet` | 285,797 moves (clubs of the original 17, fetched 12 October) |
+| The present (prompt 16) | `data/processed/current/` | display only, never a model input (FEATURES.md): `squads/` and `transfers/` per snapshot day (24 October: 25,631 squad players and 324,392 moves of 830 clubs), `current_club.parquet` (29,042 players), `club_leagues.parquet`, the season in progress (`player_match_stats/`, 4,807 matches of 2026/27 or 2026; `injuries/`) and `season_so_far.parquet` (16,146 players); raw under `raw/api_football/players/squads/as_of=<day>/`, `transfers/as_of=<day>/`, `fixtures/as_of=<day>/`, `injuries/as_of=<day>/` |
 | Player links | `data/processed/features/player_links.parquet` | 41,224 linked players |
 | Player profiles | `data/processed/features/player_profiles.parquet` | contract expiry, agent, highest value per link; display only, never a model input |
 | Features | `data/processed/features/player_season_features/league=<key>/season=<year>/data.parquet` | 233,272 rows (130,631 in the original 17 leagues), 135 columns |
@@ -266,6 +273,16 @@ Decision 5: two user facing tables, written by `scout lists`
   his team's shots, top 1% of wingers aged under 21."); a neutral sentence
   when nothing is in the top or bottom 10%. Flags and explanation read one
   peer table, and a flag column is only told on the side its flag says.
+* **The present** (prompt 16, `src/scout/present.py`), newest tables only:
+  `club` is now `club_at_forecast`; after `league` come `current_club`,
+  `current_league` (squads of the last `scout current`) and
+  `moved_since_forecast` (club id today differs from the forecast's); at
+  the end the season so far block, `so_far_date` to `so_far_flags`
+  (minutes, share, one season ability percentile with the stored fit,
+  goals and assists per 90, the flags as they stand on the pull day). On
+  24 October: 619 of 1,830 candidates and 517 of 1,602 bargains moved;
+  94.2% and 92.2% have minutes this season. The past forecasts of
+  `forecast history` never carry these columns.
 * `dictionary.csv`: one plain sentence per column of both tables (`DICTIONARY`
   in `src/scout/lists.py`; a test checks every column has one).
 
@@ -278,7 +295,10 @@ JavaScript (no library), tabs for candidates and bargains (prime,
 experienced), sortable columns, filters for position, age, league and flags,
 a search box, a card layout on phones, and a "how to read this" box (calibrated
 odds from past seasons, not predictions beyond the market; the valuation
-date; the forecast date; the five season window). Live at
+date; the forecast date; the five season window; club today and season so
+far, as of the pull day). A moved player carries a Moved badge and shows
+his club today; a "Season so far" column and a "Moved since forecast"
+filter sit in both tabs. Live at
 <http://scout-site-098499087060.s3-website.eu-central-1.amazonaws.com/>
 since 21 October 2026. A bargain's rising tag is the riser top 50 of
 `scouting.parquet`, the same set the candidates mark. `scout publish` sends
@@ -333,6 +353,24 @@ detail stays in `reports/scouting.md`, `reports/moves.md`,
   bucket show the same under both there (36.5% and 29.6% averaged, 33.2%
   and 22.8% happened). Mean absolute gap: elite 2.0% to 1.7%, big move
   1.1% to 1.0%, step up and fall back unchanged. MODELS.md.
+* **Window forecast** (prompt 16, `src/scout/window.py`):
+  `forecasts/window-2027-01/`, frozen 24 October 2026, holds the big move
+  model's top 50 (pool 12,832) and the step up model's top 50 among players
+  ranked #101 to #2,000 (pool 1,413), both pools without players already at
+  one of the 24 top clubs (`top_clubs.csv`: top 20 by Elo after their latest
+  league match, top 20 by squad value in 2025), the pools as CSV, and
+  `window.json` and a README with the rule: "joins a top 20 club by Elo or
+  value rank between 1 January and 3 February 2027" (a transfer, loan or
+  free move; not a loan return; not to the club at the freeze).
+  `scout forecast window-score` reads the transfers table and every
+  snapshot under `processed/current/transfers/` and writes
+  `reports/window_window-2027-01.md`, each list against its pool's rate;
+  interim until a snapshot after 3 February 2027 exists. **The list is
+  refreshed and frozen again on 15 December 2026** (`scout forecast
+  window-freeze --refreeze`, after a `scout current` pull; the October
+  freeze stays in git and in `window.json`). Scoring needs a fresh
+  transfer pull after the window: 830 transfer lists, about nine days on
+  the free tier.
 * `scout forecast score FOLDER --as-of DATE` (`src/scout/forecast.py`)
   reads a folder and the local tables up to that date and writes
   `reports/forecast_<folder>_at_<date>.md`: elite chance bucket against the
@@ -402,6 +440,10 @@ src/scout/  config, secrets, ratelimit, storage, sync, athena, featurestore,
   flags.py                  the one warning flag set (both lists) and the bargains' context tags
   explain.py                peer table and one line explanations (both lists, same rows as the flags)
   forecast.py               registered forecasts: freeze, score, history
+  window.py                 the January window forecast: freeze, score
+  season_so_far.py          the season so far block (features --current)
+  present.py                club today and season so far in both tables
+  backfill/current.py       scout current: squads, transfers, the season in progress
   candidates.py             decile chance tables, fall back pool and flag count rates
   bargains.py               bargains eligibility, ranking, backtest
   lists.py                  the two user facing tables, their dictionary, reports/candidates.md
@@ -522,3 +564,25 @@ Settle them with the owner rather than guessing.
 * The default branch is `main` (since prompt 15); CI runs on pull requests
   and pushes to `main`. `claude/loving-ptolemy-ghpx5n` is no longer on the
   remote.
+* The club today and the season so far (prompt 16) are as of the last
+  `scout current` pull (24 October 2026; synced up the same day with the
+  owner's approval: 4,062 raw files, 61 processed files under `current/`
+  and `lists/`, `reports/candidates.md` and the window report; a dry run
+  after found nothing left). The public page was not republished from the
+  session (the site bucket was outside that approval); the Monday weekly
+  run publishes it. The weekly run does not pull (it
+  would need about 2,000 requests and the raw cache); the 6 November pull
+  should run `scout current` again, then `features --current`, `lists`,
+  `site` and `sync up`. After 7 November a full pull takes about three
+  weeks on the free tier.
+* The `scouting.parquet` in S3 breaks ties between equal market values in a
+  different order than the build that made the registered lists: rebuilt on
+  24 October, 51 candidates' value ranks swap by one with a neighbour of the
+  same value (Matanović and Beraldo, both €22m, #513 and #514). The order of
+  rows, deciles and every chance are unchanged; a stable tie break is not
+  yet in `value_ranks`.
+* The new transfer lists (830 clubs, all 37 leagues and the cups) are kept
+  as snapshots under `processed/current/transfers/` and are not merged into
+  `transfers/transfers.parquet`, which the features and the big move labels
+  read; merging them would change the stored features of the expansion
+  leagues and is a retraining decision.

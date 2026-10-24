@@ -119,6 +119,36 @@ def cmd_coverage(settings: Settings, args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_current(settings: Settings, args: argparse.Namespace) -> int:
+    from datetime import UTC, datetime
+
+    from scout.backfill.current import run_current
+    from scout.providers.api_football.current import ApiFootballCurrentProvider
+
+    as_of = args.as_of or datetime.now(UTC).date().isoformat()
+    with build_client(settings) as client:
+        result = run_current(
+            settings,
+            ApiFootballStatsProvider(client),
+            ApiFootballCurrentProvider(client, as_of),
+            max_requests=args.max_requests,
+            steps=tuple(args.step or ("clubs", "squads", "transfers", "matches", "injuries")),
+        )
+    logging.getLogger(__name__).info(
+        "Current %s: %d clubs, %d squads, %d transfer lists, %d finished matches, "
+        "%d requests, tables %s, stopped=%s",
+        result.as_of,
+        result.clubs,
+        result.squads_done,
+        result.transfers_done,
+        result.matches,
+        result.requests_made,
+        result.tables,
+        result.stopped_reason,
+    )
+    return 0 if result.complete else 2
+
+
 def cmd_transfermarkt(settings: Settings, args: argparse.Namespace) -> int:
     from scout.providers.transfermarkt import (
         TransfermarktValuationProvider,
@@ -297,6 +327,18 @@ def cmd_forecast(settings: Settings, args: argparse.Namespace) -> int:
                 commit,
             )
         )
+    elif args.action == "window-freeze":
+        import pandas as pd
+
+        from scout.window import FOLDER, freeze_window
+
+        date = args.date or pd.Timestamp.now(tz="UTC").strftime("%Y-%m-%d")
+        folder = Path(args.folder) if args.folder else Path(args.root) / FOLDER
+        print(freeze_window(settings, folder, date, refreeze=args.refreeze))
+    elif args.action == "window-score":
+        from scout.window import FOLDER, run_window_score
+
+        print(run_window_score(settings, Path(args.folder or Path(args.root) / FOLDER)))
     elif args.action == "score":
         if not args.folder:
             raise SystemExit("forecast score needs a forecast folder")
@@ -525,6 +567,20 @@ def main(argv: list[str] | None = None) -> int:
     coverage = sub.add_parser("coverage", help="Rebuild the coverage report from the cache")
     coverage.set_defaults(func=cmd_coverage)
 
+    cur = sub.add_parser(
+        "current",
+        help="Today's squads, transfers and the season in progress (display only; spends requests)",
+    )
+    cur.add_argument("--as-of", help="Snapshot day, YYYY-MM-DD (default: today, UTC)")
+    cur.add_argument("--max-requests", type=int, help="Stop after this many requests")
+    cur.add_argument(
+        "--step",
+        action="append",
+        choices=["clubs", "squads", "transfers", "matches", "injuries"],
+        help="repeatable; default all (clubs always run)",
+    )
+    cur.set_defaults(func=cmd_current)
+
     tm = sub.add_parser("transfermarkt", help="Download the transfermarkt-datasets snapshot")
     tm.add_argument(
         "--refresh",
@@ -612,10 +668,23 @@ def main(argv: list[str] | None = None) -> int:
         "forecast",
         help="Registered forecasts: freeze today's lists into forecasts/<date>, score a "
         "folder at a later feature date, rebuild and score 2015 to 2023 (history; run before "
-        "lists), or revise a folder from today's lists with a recorded reason",
+        "lists), revise a folder from today's lists with a recorded reason, or freeze and "
+        "score the January window forecast",
     )
-    fc.add_argument("action", choices=["freeze", "score", "history", "revise"])
-    fc.add_argument("folder", nargs="?", help="score, revise: the forecast folder")
+    fc.add_argument(
+        "action",
+        choices=["freeze", "score", "history", "revise", "window-freeze", "window-score"],
+    )
+    fc.add_argument(
+        "folder",
+        nargs="?",
+        help="score, revise: the forecast folder; window-*: default forecasts/window-2027-01",
+    )
+    fc.add_argument(
+        "--refreeze",
+        action="store_true",
+        help="window-freeze: rewrite a frozen window folder (the 15 December refresh)",
+    )
     fc.add_argument(
         "--reason", help="revise: why the folder is rewritten (kept in forecast.json and README)"
     )

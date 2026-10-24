@@ -11,6 +11,7 @@ from scout.providers.api_football.matches import (
     MAX_CLUB_SWITCHES,
     MAX_MATCH_MINUTES,
     TEAM_NUMERIC,
+    placeholder_blocks,
 )
 
 MAX_SEASON_MINUTES = 5000  # 38 league matches of 90 minutes is 3,420; leaves room for stoppage
@@ -145,6 +146,11 @@ PLAYER_MATCH_STATS = DataFrameSchema(
             name="one_player_per_id",
             error="an id switches clubs back and forth: two players share it",
         ),
+        Check(
+            lambda df: not placeholder_blocks(df).any(),
+            name="no_placeholder_zeros",
+            error="a team match has zeros for every detailed stat: placeholders, not data",
+        ),
     ],
     unique=["fixture_id", "source_player_id"],
     strict=False,
@@ -183,11 +189,29 @@ _per90 = {"nullable": True, "checks": Check.ge(0)}
 # They live only in the player profile table, for display in the current
 # season's lists; a feature table carrying one would break the point in time
 # rule, so the feature contract rejects them.
-PRESENT_ONLY_COLUMNS = ("contract_expiry", "agent", "highest_market_value_eur")
+# The current club (squads of today, prompt 16) and the season so far block
+# describe the present the same way.
+PRESENT_ONLY_COLUMNS = (
+    "contract_expiry",
+    "agent",
+    "highest_market_value_eur",
+    "current_club_id",
+    "current_club",
+    "current_league",
+    "current_league_key",
+    "shirt_number",
+    "squad_position",
+    "squad_date",
+    "club_source",
+    "moved_since_forecast",
+)
+PRESENT_ONLY_PREFIX = "so_far_"  # every column of the season so far block
 
 
 def _no_present_only_columns(df: pd.DataFrame) -> bool:
-    return not set(PRESENT_ONLY_COLUMNS) & set(df.columns)
+    return not set(PRESENT_ONLY_COLUMNS) & set(df.columns) and not any(
+        str(c).startswith(PRESENT_ONLY_PREFIX) for c in df.columns
+    )
 
 
 PLAYER_SEASON_FEATURES = DataFrameSchema(
@@ -223,7 +247,7 @@ PLAYER_SEASON_FEATURES = DataFrameSchema(
         Check(
             _no_present_only_columns,
             name="no_present_only_columns",
-            error=f"feature tables must not carry {PRESENT_ONLY_COLUMNS}",
+            error=f"feature tables must not carry {PRESENT_ONLY_COLUMNS} or {PRESENT_ONLY_PREFIX}*",
         ),
     ],
     unique=["league_key", "season", "source_player_id"],
@@ -349,6 +373,41 @@ TRANSFERS = DataFrameSchema(
 )
 
 
+SQUADS = DataFrameSchema(
+    {
+        "source": Column(str),
+        "as_of": Column("datetime64[ns]"),
+        "team_id": Column("Int64", Check.gt(0)),
+        "source_player_id": Column("Int64", Check.gt(0)),
+        "player_name": Column(str, nullable=True),
+        "age": Column("Int64", Check.in_range(14, 46), nullable=True),
+        "shirt_number": Column("Int64", Check.in_range(1, 99), nullable=True),
+        "squad_position": Column(
+            str, Check.isin(["Goalkeeper", "Defender", "Midfielder", "Attacker"]), nullable=True
+        ),
+    },
+    unique=["team_id", "source_player_id"],
+    strict=False,
+    coerce=False,
+    name="squads",
+)
+
+CURRENT_CLUB = DataFrameSchema(
+    {
+        "source_player_id": Column("Int64", Check.gt(0), unique=True),
+        "current_club_id": Column("Int64", Check.gt(0)),
+        "current_club": Column(str, nullable=True),
+        "current_league": Column(str, nullable=True),
+        "shirt_number": Column("Int64", Check.in_range(1, 99), nullable=True),
+        "club_source": Column(str, Check.isin(["squad", "transfer"])),
+        "squad_date": Column("datetime64[ns]"),
+    },
+    strict=False,
+    coerce=False,
+    name="current_club",
+)
+
+
 EARLIEST_DATE = pd.Timestamp("1950-01-01")
 _dated = {"nullable": True, "checks": Check.ge(EARLIEST_DATE)}
 
@@ -413,6 +472,7 @@ def validate(schema: DataFrameSchema, frame: pd.DataFrame) -> pd.DataFrame:
 
 __all__ = [
     "COACH_SPELLS",
+    "CURRENT_CLUB",
     "FIXTURE_EVENTS",
     "INJURIES",
     "MATCH_LINEUPS",
@@ -423,7 +483,9 @@ __all__ = [
     "PLAYER_SEASON_LABELS",
     "PLAYER_SEASON_STATS",
     "PRESENT_ONLY_COLUMNS",
+    "PRESENT_ONLY_PREFIX",
     "SIDELINED",
+    "SQUADS",
     "TEAM_MATCH_STATS",
     "TRANSFERS",
     "VALUATIONS",

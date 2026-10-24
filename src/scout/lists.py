@@ -87,7 +87,8 @@ DICTIONARY = {
         "player": "The player's name as API Football writes it.",
         "age": "His age in years at the feature date, the day the row describes him.",
         "position": "His Transfermarkt position, such as Centre-Forward or Left-Back.",
-        "club": "The club he played most league minutes for that season.",
+        "club_at_forecast": "The club he played most league minutes for that season, the "
+        "club the forecast describes.",
         "league": "The league of that club.",
         "value_rank": "Where his market value ranks among all players we track (1 is the dearest); "
         "blank when he has no market value.",
@@ -142,7 +143,8 @@ DICTIONARY = {
         "player": "The player's name as API Football writes it.",
         "age": "His age in years at the feature date.",
         "position": "His Transfermarkt position.",
-        "club": "The club he played most league minutes for that season.",
+        "club_at_forecast": "The club he played most league minutes for that season, the "
+        "club the forecast describes.",
         "league": "The league of that club.",
         "ability_pct": "His ability percentile within his position (70 or better to be listed).",
         "minutes_share": "The share of his club's league minutes he played (half or more to be "
@@ -166,6 +168,58 @@ DICTIONARY = {
         "value_date": "The date of his market value.",
     },
 }
+
+
+# The present (prompt 16): today's club and the season in progress, for the
+# newest season's tables only (``scout.present``); never in the past
+# forecasts that ``scout forecast history`` rebuilds.
+PRESENT = {
+    "current_club": "The club that lists him in its squad today (API Football squads, "
+    "fetched on the day in so_far_date's pull); blank when no club we follow lists him.",
+    "current_league": "The league of that club when it is one of ours; blank otherwise.",
+    "moved_since_forecast": "True when his club today is not the club at forecast: a "
+    "transfer, a loan or a loan's end since the feature date (30 June 2026, or 1 January "
+    "2026 in the calendar year leagues); blank when his club today is not known.",
+}
+SO_FAR = {
+    "so_far_date": "The season so far block describes the season in progress up to this "
+    "day (2026/27, or the 2026 calendar year), from the league matches cached then.",
+    "so_far_league": "The league of the season so far numbers (where he played most "
+    "minutes this season).",
+    "so_far_matches": "League matches he played in so far; blank with no minutes.",
+    "so_far_minutes": "League minutes in the season in progress; 0 when he has none in our "
+    "leagues (he may play elsewhere).",
+    "so_far_minutes_share": "His share of his club's league minutes so far.",
+    "so_far_ability_pct": "The one season version 2 ability score so far, with the stored "
+    "fit (nothing refitted), as a percentile among this season's regulars of his position "
+    "(450 minutes or more); blank under 450 minutes.",
+    "so_far_goals_per90": "Goals per 90 minutes so far; blank for goalkeepers and centre "
+    "backs, and under 270 minutes.",
+    "so_far_assists_per90": "Assists per 90 minutes so far; blank for goalkeepers and centre "
+    "backs, and under 270 minutes.",
+    "so_far_flag_count": "The warning flags as they stand on so_far_date: low minutes on "
+    "this season's share, injured on matches missed in the 12 months before it, value "
+    "falling as at the forecast (no newer valuation exists).",
+    "so_far_flags": "Those flags, each with his own number, or none.",
+}
+
+
+def _with_present(columns: dict[str, str]) -> dict[str, str]:
+    out = {}
+    for column, meaning in columns.items():
+        out[column] = meaning
+        if column == "league":
+            out.update(PRESENT)
+    return out | SO_FAR
+
+
+DICTIONARY = {table: _with_present(columns) for table, columns in DICTIONARY.items()}
+PRESENT_COLUMNS = [*PRESENT, *SO_FAR]
+
+
+def base_columns(table: str) -> list[str]:
+    """The columns a season's table carries before the present is added."""
+    return [c for c in DICTIONARY[table] if c not in PRESENT_COLUMNS]
 
 
 def tenths(age: pd.Series) -> pd.Series:
@@ -341,7 +395,7 @@ def candidates_table(
             "position": rows["sub_position"]
             .astype("string")
             .fillna(rows["position"].astype("string")),
-            "club": rows["team_name"],
+            "club_at_forecast": rows["team_name"],
             "league": rows["league_key"].map(leagues).fillna(rows["league_key"]),
             "value_rank": rows["value_rank"].astype("Int64"),
             **{c: rows[c] for c in COMPUTED if c in rows},
@@ -350,7 +404,7 @@ def candidates_table(
             "ability_pct": rows["ability_pct"].round(0),
         }
     )
-    return out[list(DICTIONARY["candidates"])].reset_index(drop=True)
+    return out[base_columns("candidates")].reset_index(drop=True)
 
 
 def bargains_table(lists: dict[str, pd.DataFrame], leagues: dict[str, str]) -> pd.DataFrame:
@@ -368,7 +422,7 @@ def bargains_table(lists: dict[str, pd.DataFrame], leagues: dict[str, str]) -> p
                     "position": frame["sub_position"]
                     .astype("string")
                     .fillna(frame["position"].astype("string")),
-                    "club": frame["team_name"],
+                    "club_at_forecast": frame["team_name"],
                     "league": frame["league_key"].map(leagues).fillna(frame["league_key"]),
                     "ability_pct": frame["ability_pct"].round(0),
                     "minutes_share": frame["minutes_share"].astype(float).round(2),
@@ -386,15 +440,17 @@ def bargains_table(lists: dict[str, pd.DataFrame], leagues: dict[str, str]) -> p
                 }
             )
         )
-    return pd.concat(frames, ignore_index=True)[list(DICTIONARY["bargains"])]
+    return pd.concat(frames, ignore_index=True)[base_columns("bargains")]
 
 
-def dictionary() -> pd.DataFrame:
+def dictionary(present: bool = True) -> pd.DataFrame:
+    """One row per column; without ``present``, the columns of a past season's table."""
     return pd.DataFrame(
         [
             {"table": table, "column": column, "meaning": meaning}
             for table, columns in DICTIONARY.items()
             for column, meaning in columns.items()
+            if present or column not in PRESENT_COLUMNS
         ]
     )
 
@@ -496,7 +552,8 @@ CANDIDATE_SHOW = [
     "player",
     "age",
     "position",
-    "club",
+    "club_at_forecast",
+    "current_club",
     "league",
     "value_rank",
     "elite_chance",
@@ -515,7 +572,8 @@ BARGAIN_SHOW = [
     "player",
     "age",
     "position",
-    "club",
+    "club_at_forecast",
+    "current_club",
     "league",
     "ability_pct",
     "value_m",
@@ -547,7 +605,7 @@ def readable_candidates(table: pd.DataFrame) -> pd.DataFrame:
         for p, n in zip(out["fall_back_risk_pct"], out["fall_back_risk_players"], strict=True)
     ]
     out["rising"] = out["rising"].map({True: "rising", False: ""})
-    return out[CANDIDATE_SHOW]
+    return out[[c for c in CANDIDATE_SHOW if c in out]]
 
 
 def readable_bargains(table: pd.DataFrame) -> pd.DataFrame:
@@ -556,7 +614,7 @@ def readable_bargains(table: pd.DataFrame) -> pd.DataFrame:
     out["contract_expiry"] = out["contract_expiry"].fillna("")
     for tag in ("on_loan", "stale_value"):
         out[tag] = out[tag].map({True: "yes", False: ""})
-    return out[BARGAIN_SHOW]
+    return out[[c for c in BARGAIN_SHOW if c in out]]
 
 
 CHANCES = {
@@ -834,6 +892,9 @@ def run_lists(settings) -> Path:
     results = bargains.backtest(rows)
     results.to_parquet(settings.paths.processed_dir / "models" / "bargains_backtest.parquet")
 
+    from scout.present import add_present
+
+    cand, barg = add_present(settings, cand, barg, inputs["scouting"])
     out_dir = settings.paths.processed_dir / "lists"
     write_tables({"candidates": cand, "bargains": barg, "dictionary": dictionary()}, out_dir)
     log.info("lists: %d candidates, %d bargains in %s", len(cand), len(barg), out_dir)

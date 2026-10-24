@@ -819,6 +819,71 @@ first where the window moves the top elite bucket.
 and rows, the reason and every bucket's old and new value in
 `forecast.json` and its README; revision 1 is commit 38a8a4b.
 
+## Freshness: club today, season so far, the January window (prompt 16, 24 October 2026)
+
+Nothing here is a model or a model input; it is context next to the
+registered forecast, which stays as it is.
+
+**The pull** (`scout current --as-of 2026-10-24`, 2,031 requests): the team
+lists of every league's current season and the five club cups (42), the 830
+clubs those lists give plus the league clubs of season 2025 and the cup clubs
+we hold, each club's squad (830) and transfer list (830), and the season in
+progress of all 37 leagues: the fixture list (37), the 4,807 finished
+matches in 255 batches of `/fixtures?ids=`, and the injuries (37). Squads,
+transfers, fixture lists and injuries are cached per snapshot day (`as_of`
+in the cache key, never sent), so a later day asks again and the same day
+never does. Two source errors were repaired in the match adapter, each
+logged and tested, with the contract still rejecting the unrepaired value:
+Chapecoense's players listed under an unknown team id (22722, no name; two
+Brasileirão 2026 matches) are given the other side, and team matches whose
+detailed stats are zeros throughout (Ukrainian Premier League 2026/27, 106
+of 108 team matches; 26 in K League 1 and 2 in the Czech league) keep their
+minutes, goals, assists, cards and penalties with every other stat and the
+rating missing. Uruguay sends no player stats for 2026.
+
+**Current club** (`current_club.parquet`, 29,042 players): the club whose
+squad lists him today; listed by several clubs (82 players), the club of his
+latest move, else the club in one of our leagues; in no squad we hold, the
+club his latest move after 30 June 2026 went to (3,494 players, marked
+`club_source = transfer`). Of the 1,830 candidates, **619 are at another
+club than the club at forecast** (1,190 at the same club, 21 unknown); 436
+of the 619 have a move dated after 30 June in the new transfer lists, the
+rest mostly loans that ended just before it (Sacha Boey: loan from Bayern to
+Galatasaray ended on 29 June 2026; he is back in Bayern's squad, 13
+Bundesliga minutes so far). Victor Nelsson: on loan at Hellas Verona at the
+forecast, back at Galatasaray on 29 June, a free agent move to FC
+Nordsjælland on 31 August (450 Danish Superliga minutes, ability 70th
+percentile so far). 517 of the 1,602 bargains moved; 925 of the 2,734
+players in either table.
+
+**Season so far** (`season_so_far.parquet`, `scout features --current`):
+16,146 players with league minutes in the season in progress (2026/27, or
+the 2026 calendar year; J1 2026/27). 94.2% of the candidates and 92.2% of
+the bargains have minutes (92.5% of the 2,734 players); 47.5% and 60.3%
+have a one season ability percentile so far (450 minutes or more). The
+ability is the version 2 one season score with the stored fit, nothing
+refitted; the Elo team term is the club's rating in the league's newest Elo
+season up to this one. Ukraine has no ability so far: under half its team
+matches carry detailed stats. The league means of the percentile follow
+league strength as they should (Premier League 78, Ukraine blank, K League
+1 29). Goals and assists per 90 are blank for goalkeepers and centre backs
+and under 270 minutes. The flags today: low minutes on this season's share,
+injured on matches missed in the 12 months before the pull, value falling as
+at the forecast (no valuation after 12 June 2026). The season 2025 feature
+partitions came out byte for byte the same.
+
+**Window forecast** (`forecasts/window-2027-01/`, frozen 24 October 2026):
+the big move model's top 50 (pool 12,832) and the step up model's top 50
+among players ranked #101 to #2,000 (pool 1,413), each pool without the
+players already at one of the 24 top clubs (top 20 by Elo after their
+latest league match, top 20 by squad value in 2025). Rule: joins a top 20
+club by Elo or value rank between 1 January and 3 February 2027 (a
+transfer, loan or free move; a loan return is not a new move).
+`scout forecast window-score` scores each list against its pool's rate from
+the transfers table and every transfer snapshot; before 3 February 2027 it
+says it is interim (0 of 50 and 0 of 50 so far, as it should be). The lists
+are refreshed and frozen again on 15 December 2026 (`--refreeze`).
+
 ## Next
 
 1. The clean check above: tune on earlier seasons, score on later ones.

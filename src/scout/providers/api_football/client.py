@@ -24,6 +24,10 @@ from scout.storage import CacheKey, RawMeta, RawStore
 log = logging.getLogger(__name__)
 
 SOURCE = "api_football"
+# Cache key parameter that is never sent: a snapshot endpoint (squads, a fresh
+# transfer list) is stored once per snapshot day, so a later snapshot is a new
+# request while a repeated one on the same day is served from the cache.
+SNAPSHOT_PARAM = "as_of"
 _KEPT_HEADERS = {
     "x-ratelimit-requests-limit",
     "x-ratelimit-requests-remaining",
@@ -125,16 +129,30 @@ class ApiFootballClient:
     def __exit__(self, *exc: object) -> None:
         self.close()
 
-    def is_cached(self, endpoint: str, params: dict[str, Any]) -> bool:
-        return self.store.exists(CacheKey.of(SOURCE, endpoint, params))
+    @staticmethod
+    def _key(endpoint: str, params: dict[str, Any], snapshot: str | None) -> CacheKey:
+        if SNAPSHOT_PARAM in params:
+            raise ValueError(f"{SNAPSHOT_PARAM!r} is reserved for the snapshot day")
+        keyed = {**params, SNAPSHOT_PARAM: snapshot} if snapshot else params
+        return CacheKey.of(SOURCE, endpoint, keyed)
 
-    def get(self, endpoint: str, params: dict[str, Any]) -> FetchResult:
-        """Return the response for ``endpoint`` and ``params``, from cache when possible."""
-        key = CacheKey.of(SOURCE, endpoint, params)
+    def is_cached(self, endpoint: str, params: dict[str, Any], snapshot: str | None = None) -> bool:
+        return self.store.exists(self._key(endpoint, params, snapshot))
+
+    def get(
+        self, endpoint: str, params: dict[str, Any], snapshot: str | None = None
+    ) -> FetchResult:
+        """Return the response for ``endpoint`` and ``params``, from cache when possible.
+
+        ``snapshot`` (a day, ``YYYY-MM-DD``) goes into the cache key only, for
+        answers that change over time; the request itself is the same.
+        """
+        key = self._key(endpoint, params, snapshot)
         if self.store.exists(key):
             return FetchResult(json.loads(self.store.get(key)), from_cache=True, key=key)
 
-        response = self._request_with_retries(endpoint, dict(key.params))
+        sent = {k: v for k, v in key.params if k != SNAPSHOT_PARAM}
+        response = self._request_with_retries(endpoint, sent)
         payload = response.json()
         error = classify_errors(payload.get("errors"))
         if error is not None:
@@ -143,7 +161,7 @@ class ApiFootballClient:
 
         meta = RawMeta(
             url=str(response.request.url),
-            params=dict(key.params),
+            params=sent,
             fetched_at=datetime.now(UTC).isoformat(timespec="seconds"),
             status_code=response.status_code,
             headers={k: v for k, v in response.headers.items() if k.lower() in _KEPT_HEADERS},

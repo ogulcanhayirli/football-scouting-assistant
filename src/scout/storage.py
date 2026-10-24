@@ -95,6 +95,8 @@ class LocalRawStore:
             if path.name.endswith(".meta.json"):
                 continue
             rel = path.relative_to(base).with_suffix("")
+            if not all("=" in part for part in rel.parts):
+                continue  # a sub endpoint (players/squads under players)
             params = []
             for part in rel.parts:
                 k, _, v = part.partition("=")

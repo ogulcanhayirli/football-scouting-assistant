@@ -1,0 +1,51 @@
+rank,player_id,player,age,position,club_at_forecast,club_at_freeze,club_id_at_freeze,league,value_eur,score,value_rank
+1,340279,Vitor Roque,20.8,Attacker,Palmeiras,Palmeiras,121,Brasileirão Série A,35000000.0,0.6695,232
+2,443162,Jesús Rodríguez,20.6,Midfielder,Como,Como,895,Serie A,30000000.0,0.6478,305
+3,369500,I. Ganiou,21.3,Defender,Lens,Lens,116,Ligue 1,20000000.0,0.5959,607
+4,396624,Sergi Domínguez,21.2,Defender,Dinamo Zagreb,Dinamo Zagreb,620,Croatian HNL,9000000.0,0.5933,1348
+5,330412,Youssef Chermiti,22.1,Attacker,Rangers,Rangers,257,Scottish Premiership,15000000.0,0.5881,871
+6,284356,S. Charles,22.7,Midfielder,Southampton,Fulham,36,Championship,15000000.0,0.5649,885
+7,408853,M. Rots,20.3,Defender,Twente,1899 Hoffenheim,167,Eredivisie,12000000.0,0.5202,1096
+8,356035,Mathias De Amorim,21.6,Midfielder,Famalicao,Famalicao,242,Primeira Liga,10000000.0,0.5158,1251
+9,443579,R. Fofana,20.4,Attacker,Lens,Le Havre,111,Ligue 1,8000000.0,0.5136,1403
+10,342171,N. Aséko Nkili,20.6,Midfielder,Hannover 96,Eintracht Frankfurt,169,2. Bundesliga,6000000.0,0.5025,1930
+11,327993,D. Seimen,20.6,Goalkeeper,SC Paderborn 07,VfB Stuttgart,172,2. Bundesliga,7000000.0,0.4857,1748
+12,494106,R. Nijstad,18.5,Defender,Twente,Twente,415,Eredivisie,10000000.0,0.4816,1198
+13,417830,A. Ait Boudlal,20.2,Defender,Rennes,Rennes,94,Ligue 1,12000000.0,0.4757,1023
+14,338902,Andrés Castrín,23.1,Defender,Sevilla,Sevilla,536,La Liga,6000000.0,0.4693,1841
+15,400510,Diogo Sousa,20.4,Midfielder,Guimaraes,Strasbourg,95,Primeira Liga,8000000.0,0.4672,1427
+16,405160,Wallace,20.9,Midfielder,Flamengo,RB Bragantino,794,Brasileirão Série A,6000000.0,0.4626,1792
+17,455130,Álvaro Montoro,18.7,Midfielder,Botafogo,Botafogo,120,Brasileirão Série A,10000000.0,0.455,1158
+18,386305,Jacobo Ramón Naveros,21.5,Defender,Como,Como,895,Serie A,30000000.0,0.4541,331
+19,437482,A. Koné,21.1,Midfielder,NEOM,NEOM,10513,Saudi Pro League,7000000.0,0.419,1732
+20,412872,D. Janse,20.4,Defender,Groningen,Jong Ajax,425,Eredivisie,6500000.0,0.4042,1769
+21,438281,M. Nagida,21.0,Defender,Rennes,Rennes,94,Ligue 1,7000000.0,0.3997,1603
+22,201714,A. Morris,24.6,Midfielder,Middlesbrough,Middlesbrough,70,Championship,10000000.0,0.3997,1289
+23,400948,Assane Diao,20.8,Attacker,Como,Como,895,Serie A,30000000.0,0.3967,288
+24,474591,C. Inao OulaÃ¯,20.2,Midfielder,Trabzonspor,Fiorentina,502,Süper Lig,23000000.0,0.3801,489
+25,334035,S. Amo-Ameyaw,20.0,Defender,Strasbourg,Strasbourg,95,Ligue 1,8000000.0,0.3775,1422
+26,440147,Abdoul Karim Coulibaly,19.1,Defender,Werder Bremen,Strasbourg,95,Bundesliga,28000000.0,0.3766,366
+27,391822,Fer López,22.1,Attacker,Celta Vigo,Wolves,39,La Liga,16000000.0,0.3697,763
+28,452697,D. Methalie,20.4,Midfielder,Toulouse,Sunderland,746,Ligue 1,18000000.0,0.3677,699
+29,453906,H. Ahanor,18.3,Defender,Atalanta,Crystal Palace,52,Serie A,30000000.0,0.3659,296
+30,369544,Gessime Yassine,20.6,Midfielder,Dunkerque,Strasbourg,95,Ligue 2,12000000.0,0.3652,1004
+31,354506,K. Sano,22.8,Midfielder,NEC Nijmegen,PSV Eindhoven,197,Eredivisie,12000000.0,0.3643,1102
+32,350799,Jeremy Arévalo,21.3,Attacker,Racing Santander,Estrela,15130,Segunda División,7000000.0,0.3592,1608
+33,414395,Ricardo Mathias,19.4,Attacker,Internacional,Al Shabab,2940,Brasileirão Série A,9000000.0,0.355,1304
+34,322560,L. Stassin,21.6,Attacker,Saint Etienne,Sevilla,536,Ligue 2,15000000.0,0.3352,893
+35,514464,A. Vossah,18.3,Midfielder,Toulouse,Toulouse,96,Ligue 1,15000000.0,0.335,825
+36,360032,B. Önal,22.0,Midfielder,NEC Nijmegen,Lille,79,Eredivisie,7000000.0,0.3302,1693
+37,354533,J. Addai,20.8,Attacker,Como,Como,895,Serie A,20000000.0,0.3259,555
+38,441271,Jannik Schuster,20.1,Defender,Red Bull Salzburg,Brentford,55,Austrian Bundesliga,18000000.0,0.3209,692
+39,336570,E. Tıknaz,21.9,Midfielder,SC Braga,SC Braga,217,Primeira Liga,8000000.0,0.3192,1387
+40,374359,D. Bartesaghi,20.5,Defender,AC Milan,AC Milan,489,Serie A,22000000.0,0.3172,534
+41,457101,M. Zabiri,21.3,Attacker,Famalicao,Racing Santander,4665,Primeira Liga,9000000.0,0.3127,1302
+42,381537,A. Vogt,21.4,Attacker,FC ST. Gallen,1. FC Heidenheim,180,Swiss Super League,8000000.0,0.3071,1500
+43,323625,K. Danois,22.0,Midfielder,Auxerre,Auxerre,108,Ligue 1,20000000.0,0.3044,640
+44,293168,Max Alleyne,20.9,Defender,Watford,Burnley,44,Championship,8000000.0,0.3016,1435
+45,352372,Matheus Gonçalves,20.9,Midfielder,Al-Ahli Jeddah,Al-Ahli Jeddah,2929,Saudi Pro League,9000000.0,0.3016,1322
+46,389315,Joshua King,19.5,Midfielder,Fulham,Fulham,36,Premier League,25000000.0,0.301,406
+47,402640,R. Esse,21.1,Midfielder,Coventry,Millwall,58,Championship,10000000.0,0.3001,1149
+48,415155,J. Rodríguez,21.1,Defender,Cagliari,Cagliari,490,Serie A,10000000.0,0.2996,1179
+49,405073,Jon Martín,20.2,Defender,Real Sociedad,Real Sociedad,548,La Liga,25000000.0,0.2814,439
+50,329578,M. Backhaus,22.2,Goalkeeper,Werder Bremen,SC Freiburg,160,Bundesliga,15000000.0,0.279,920

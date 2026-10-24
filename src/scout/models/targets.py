@@ -20,7 +20,7 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
-from scout.contracts import PRESENT_ONLY_COLUMNS
+from scout.contracts import PRESENT_ONLY_COLUMNS, PRESENT_ONLY_PREFIX
 
 KEYS = ["league_key", "season", "source_player_id"]
 
@@ -77,7 +77,11 @@ TARGETS = {"fair_value": Target("fair_value", "value_now", 0, None, False)}
 
 
 def feature_columns(features: pd.DataFrame, target: Target) -> list[str]:
-    columns = [c for c in features.columns if c not in NOT_FEATURES]
+    columns = [
+        c
+        for c in features.columns
+        if c not in NOT_FEATURES and not str(c).startswith(PRESENT_ONLY_PREFIX)
+    ]
     if not target.uses_value_features:
         columns = [c for c in columns if c not in VALUE_COLUMNS]
     return columns

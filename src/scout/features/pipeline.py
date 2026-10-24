@@ -267,7 +267,9 @@ def run_current_features(
     """``scout features --current``: rebuild one season (the newest in the
     season stats when None) and rewrite only its partitions; every earlier
     season stays as stored. Reads the stored feature table for the history
-    columns and the player links, so it needs a full build once."""
+    columns and the player links, so it needs a full build once. Then the
+    season so far block from the cached season in progress
+    (``scout.season_so_far``), so the weekly run refreshes it untrained."""
     out = settings.paths.processed_dir / "features"
     stored = read_feature_table(out / "player_season_features")
     if stored.empty:
@@ -292,6 +294,9 @@ def run_current_features(
     n = _write_partitioned(features, out / "player_season_features")
     _write_partitioned(label_table, out / "player_season_labels")
     log.info("Wrote %d rows of season %d in %d leagues to %s", len(features), season, n, out)
+    from scout.season_so_far import run_season_so_far
+
+    run_season_so_far(settings, pd.concat([stored[stored["season"] != season], features]))
     return features, label_table
 
 
