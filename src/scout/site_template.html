@@ -174,6 +174,26 @@ details.dict summary { cursor: pointer; font-weight: 600; }
 details.dict dl { margin: 10px 0 0; }
 details.dict dt { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12.5px; margin-top: 8px; }
 details.dict dd { margin: 2px 0 0; color: var(--muted); max-width: 92ch; }
+.link {
+  font: inherit; font-size: 12px; background: none; border: 0; padding: 0; margin-top: 3px;
+  color: var(--accent); cursor: pointer; text-decoration: underline; text-underline-offset: 2px;
+}
+tr.sim td { padding: 0 10px 12px; }
+.simbox { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; font-size: 13px; }
+.simbox h3, #sim-out h3 { font-size: 13px; margin: 0 0 6px; }
+.simlist { margin: 0 0 6px; padding-left: 22px; }
+.simlist li { margin: 4px 0; }
+.simlist .meta { display: inline; }
+.controls .mode { grid-column: 1 / -1; margin: 0; }
+.suggest { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 0; }
+.suggest button {
+  font: inherit; font-size: 13px; text-align: left; border: 1px solid var(--line); background: var(--panel);
+  color: var(--ink); border-radius: 8px; padding: 6px 10px; cursor: pointer;
+}
+#sim-out { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; box-shadow: var(--shadow); }
+#sim-out:empty { display: none; }
+#sim-out .query { color: var(--muted); margin: 0 0 10px; }
+.note { color: var(--muted); font-size: 13px; max-width: 100ch; }
 footer { margin-top: 28px; color: var(--muted); font-size: 13px; border-top: 1px solid var(--line); padding-top: 14px; }
 footer p { margin: 6px 0; max-width: 100ch; }
 @media (max-width: 760px) {
@@ -216,7 +236,10 @@ footer p { margin: 6px 0; max-width: 100ch; }
   <div class="tabs" role="tablist">
     <button class="tab" role="tab" id="tab-candidates" data-tab="candidates">Candidates <span class="n"></span></button>
     <button class="tab" role="tab" id="tab-bargains" data-tab="bargains">Bargains <span class="n"></span></button>
+    <button class="tab" role="tab" id="tab-similar" data-tab="similar">Similar players</button>
   </div>
+
+  <div id="tables">
 
   <div class="controls" id="controls">
     <label class="search">Search player or club
@@ -253,6 +276,36 @@ footer p { margin: 6px 0; max-width: 100ch; }
     <summary>What each column means</summary>
     <dl id="dict-list"></dl>
   </details>
+  </div>
+
+  <section id="similar" hidden>
+    <div class="controls">
+      <div class="seg mode" id="sim-mode">
+        <button type="button" data-mode="now" aria-pressed="true">Plays like him now</button>
+        <button type="button" data-mode="age" aria-pressed="false">Looks like he did at an age</button>
+      </div>
+      <label class="search">Player
+        <input type="search" id="sim-q" placeholder="for example Lamine Yamal, Rodri" autocomplete="off">
+      </label>
+      <label class="age-only" hidden>At age
+        <input type="number" id="sim-at" inputmode="numeric" min="15" max="40" placeholder="for example 21">
+      </label>
+      <label class="now-only">Age
+        <span class="ages">
+          <input type="number" id="sim-age-min" inputmode="numeric" min="14" max="46" placeholder="from">
+          <input type="number" id="sim-age-max" inputmode="numeric" min="14" max="46" placeholder="to">
+        </span>
+      </label>
+      <label class="now-only">League <select id="sim-league"></select></label>
+      <label class="now-only">Ability from
+        <input type="number" id="sim-ability" inputmode="numeric" min="0" max="100" placeholder="percentile">
+      </label>
+    </div>
+    <div class="suggest" id="sim-suggest"></div>
+    <p class="status" id="sim-status" aria-live="polite"></p>
+    <div id="sim-out"></div>
+    <p class="note" id="sim-note"></p>
+  </section>
 
   <footer id="footer"></footer>
 </div>
@@ -328,7 +381,8 @@ footer p { margin: 6px 0; max-width: 100ch; }
     var meta = [o.position, o.age != null ? Math.floor(o.age) + " years" : null, club, league]
       .filter(Boolean).map(esc).join(" · ");
     return (extra || "") + '<span class="name">' + esc(o.player) + "</span>" + badges +
-      '<div class="meta">' + meta + "</div>";
+      '<div class="meta">' + meta + "</div>" +
+      '<button type="button" class="link sim-open" aria-expanded="false" data-id="' + o.player_id + '">Similar players</button>';
   }
 
   function soFar(o) {
@@ -379,6 +433,7 @@ footer p { margin: 6px 0; max-width: 100ch; }
 
   var state = {
     tab: location.hash === "#bargains" ? "bargains" : "candidates",
+    similar: location.hash === "#similar",
     list: "prime",
     shown: PAGE,
     sort: { candidates: { key: "order", dir: 1 }, bargains: { key: "rank", dir: 1 } }
@@ -422,9 +477,7 @@ footer p { margin: 6px 0; max-width: 100ch; }
       return '<option value="' + c.key + '">' + esc(c.label === "#" ? "List rank" : c.label) + "</option>";
     }).join("");
     checks();
-    document.querySelectorAll(".tab").forEach(function (t) {
-      t.setAttribute("aria-selected", String(t.dataset.tab === state.tab));
-    });
+    tabs();
     $("lists").hidden = state.tab !== "bargains";
     head();
     dictionary();
@@ -511,6 +564,194 @@ footer p { margin: 6px 0; max-width: 100ch; }
 
   function refresh() { state.shown = PAGE; draw(); }
 
+  function tabs() {
+    var on = state.similar ? "similar" : state.tab;
+    document.querySelectorAll(".tab").forEach(function (t) {
+      t.setAttribute("aria-selected", String(t.dataset.tab === on));
+    });
+    $("tables").hidden = state.similar;
+    $("similar").hidden = !state.similar;
+  }
+
+  // Similar players (prompt 18): data/similar.json, loaded on first use
+
+  var SIM = null, simWait = null;
+  var sim = { mode: "now", id: null };
+
+  function int8(text) {
+    var bin = atob(text), out = new Int8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) {
+      var c = bin.charCodeAt(i);
+      out[i] = c > 127 ? c - 256 : c;
+    }
+    return out;
+  }
+  function simRows(t, d) {
+    var vec = int8(t.vectors);
+    return t.rows.map(function (r, i) {
+      var o = { _v: vec, _at: i * d.dim };
+      t.columns.forEach(function (c, j) { o[c] = r[j]; });
+      o.clubName = o.club != null ? d.clubs[o.club] : "";
+      o.nowName = o.club_now != null ? d.clubs[o.club_now] : null;
+      o.leagueName = o.league != null ? d.leagues[o.league] : "";
+      o._q = fold(o.name);
+      return o;
+    });
+  }
+  function loadSimilar() {
+    if (simWait) return simWait;
+    simWait = fetch("data/similar.json").then(function (r) {
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      return r.json();
+    }).then(function (d) {
+      if (!d.available) { SIM = { available: false }; return SIM; }
+      var today = simRows(d.today, d), past = simRows(d.history, d);
+      var byId = {}, seasons = {};
+      today.forEach(function (o) { byId[o.id] = o; });
+      past.concat(today).forEach(function (o) { (seasons[o.id] = seasons[o.id] || []).push(o); });
+      var people = Object.keys(seasons).map(function (id) {
+        var list = seasons[id];
+        return list[list.length - 1];
+      });
+      SIM = { available: true, d: d, today: today, byId: byId, seasons: seasons, people: people };
+      options($("sim-league"), d.leagues, "All leagues");
+      return SIM;
+    });
+    simWait.catch(function () { simWait = null; });
+    return simWait;
+  }
+  function similarity(a, b) {
+    var s = 0, n = SIM.d.dim;
+    for (var k = 0; k < n; k++) s += a._v[a._at + k] * b._v[b._at + k];
+    return s / (SIM.d.scale * SIM.d.scale);
+  }
+  function nearest(q, pool, k) {
+    return pool.map(function (o) { return [similarity(q, o), o]; })
+      .sort(function (a, b) { return b[0] - a[0]; })
+      .slice(0, k).map(function (p) { return { sim: p[0], o: p[1] }; });
+  }
+  function similarNow(id, f) {
+    var q = SIM.byId[id];
+    if (!q) return null;
+    var pool = SIM.today.filter(function (o) {
+      if (o.id === id || o.group !== q.group) return false;
+      var a = Math.floor(o.age);
+      if (f.lo != null && a < f.lo) return false;
+      if (f.hi != null && a > f.hi) return false;
+      if (f.league && o.leagueName !== f.league) return false;
+      if (f.ability != null && o.ability < f.ability) return false;
+      return true;
+    });
+    return { query: q, found: nearest(q, pool, 10) };
+  }
+  function lookedLike(id, age) {
+    var list = SIM.seasons[id];
+    if (!list) return null;
+    var q = list.slice().sort(function (a, b) {
+      return Math.abs(Math.floor(a.age) - age) - Math.abs(Math.floor(b.age) - age) || a.season - b.season;
+    })[0];
+    var pool = SIM.today.filter(function (o) {
+      var a = Math.floor(o.age);
+      return o.id !== id && o.group === q.group && a >= age - 1 && a <= age + 1;
+    });
+    return { query: q, found: nearest(q, pool, 10) };
+  }
+  function seasonLabel(s) { return s + "/" + String(s + 1).slice(-2); }
+  function clubOf(o) { return o.nowName ? o.nowName + " (now; was " + o.clubName + ")" : o.clubName; }
+  function simList(found) {
+    if (!found.length) return '<p class="none">No player of his position group matches these filters.</p>';
+    return '<ol class="simlist">' + found.map(function (p) {
+      var o = p.o;
+      var meta = [o.position, Math.floor(o.age) + " years", clubOf(o), o.leagueName].filter(Boolean).map(esc).join(" · ");
+      return '<li><span class="name">' + esc(o.name) + '</span> <span class="meta">' + meta +
+        '</span><span class="small">ability ' + o.ability + " percentile · similarity " + p.sim.toFixed(2) + "</span></li>";
+    }).join("") + "</ol>";
+  }
+  function queryLine(q) {
+    return esc(q.name) + ", " + seasonLabel(q.season) + " at " + esc(q.clubName) + " (" + esc(q.leagueName) + "), age " +
+      Math.floor(q.age) + ", " + esc(q.position || "") + ", ability " + q.ability + " percentile";
+  }
+  function simFailed() {
+    return '<p class="none">The similar players file (data/similar.json) did not load. It loads next to this page, so open the page from the website rather than as a local file.</p>';
+  }
+  function panel(id) {
+    if (!SIM.available) return '<p class="none">Similar players are not built yet.</p>';
+    var r = similarNow(id, {});
+    if (!r) return '<p class="none">No style vector for him this season: it needs 450 league minutes with match statistics.</p>';
+    return "<h3>Plays like him now: the ten nearest of his position group today</h3>" + simList(r.found) +
+      '<button type="button" class="link sim-more" data-id="' + id + '">Search with filters, or as he was at an age</button>';
+  }
+  function togglePanel(button) {
+    var body = button.closest("tbody"), open = body.querySelector("tr.sim");
+    if (open) { open.remove(); button.setAttribute("aria-expanded", "false"); return; }
+    var cols = body.querySelector("tr.main").children.length;
+    body.insertAdjacentHTML("beforeend", '<tr class="sim"><td colspan="' + cols + '"><div class="simbox">Loading similar players.</div></td></tr>');
+    button.setAttribute("aria-expanded", "true");
+    var box = body.querySelector("tr.sim .simbox");
+    loadSimilar().then(function () { box.innerHTML = panel(Number(button.dataset.id)); }, function () { box.innerHTML = simFailed(); });
+  }
+  function number(id) { var v = parseFloat($(id).value); return isNaN(v) ? null : v; }
+  function suggest() {
+    var q = fold($("sim-q").value.trim());
+    if (!q || !SIM || !SIM.available) { $("sim-suggest").innerHTML = ""; return; }
+    var pool = sim.mode === "now" ? SIM.today : SIM.people;
+    var hits = pool.filter(function (o) { return o._q.indexOf(q) >= 0; });
+    var words = q.replace(/\./g, " ").split(/\s+/).filter(Boolean);
+    if (!hits.length && words.length > 1) {  // "Kenan Yildiz" for "K. Yıldız"
+      hits = pool.filter(function (o) { return o._q.indexOf(words[words.length - 1]) >= 0 && o._q.charAt(0) === words[0].charAt(0); });
+    }
+    hits = hits.sort(function (a, b) {
+      return (b._q === q) - (a._q === q) || (a.value_rank || 1e9) - (b.value_rank || 1e9);
+    }).slice(0, 8);
+    $("sim-suggest").innerHTML = hits.map(function (o) {
+      return '<button type="button" data-id="' + o.id + '"><span class="name">' + esc(o.name) + '</span> <span class="meta">' +
+        [clubOf(o), o.leagueName, Math.floor(o.age) + " years in " + seasonLabel(o.season)].map(esc).join(" · ") + "</span></button>";
+    }).join("");
+  }
+  function pick(id) {
+    sim.id = id;
+    var o = SIM.byId[id] || (SIM.seasons[id] || []).slice(-1)[0];
+    if (o) $("sim-q").value = o.name;
+    $("sim-suggest").innerHTML = "";
+    simDraw();
+  }
+  function simDraw() {
+    document.querySelectorAll("#sim-mode button").forEach(function (b) { b.setAttribute("aria-pressed", String(b.dataset.mode === sim.mode)); });
+    document.querySelectorAll("#similar .now-only").forEach(function (e) { e.hidden = sim.mode !== "now"; });
+    document.querySelectorAll("#similar .age-only").forEach(function (e) { e.hidden = sim.mode !== "age"; });
+    if (!SIM) return;
+    if (!SIM.available) { $("sim-status").textContent = "Similar players are not built yet."; return; }
+    var t = SIM.d.tested, out = $("sim-out"), r = null;
+    $("sim-note").innerHTML = "<b>Similar means plays the same way, not as good.</b> Each player season is described by his per 90 numbers and his share of the team's shots, dribbles, passes and duels while he is on the pitch, against the players of his position group that season, with his level taken out: the neighbours of a top player are not simply other top players. " +
+      (t.learned != null ? "Tested on " + t.test_seasons[0] + " to " + t.test_seasons[t.test_seasons.length - 1] + ": the " + (SIM.d.method === "learned" ? "learned embedding" : "style vector") + " finds the same player's other season among his five nearest " + Math.round(t[SIM.d.method] * 100) + "% of the time, against " + Math.round(t.baseline * 100) + "% for the plain style vector and under 1% at random. " : "") +
+      "Ages are at the end of each season. Looks like at an age covers today's players and every season since 2015 of players once ranked in the top " + SIM.d.history_top + " by value.";
+    if (sim.id == null) { out.innerHTML = ""; $("sim-status").textContent = "Type a name and pick a player."; return; }
+    if (sim.mode === "now") {
+      r = similarNow(sim.id, { lo: number("sim-age-min"), hi: number("sim-age-max"), league: $("sim-league").value, ability: number("sim-ability") });
+      if (!r) { out.innerHTML = ""; $("sim-status").textContent = "He has no style vector this season (450 league minutes with match statistics are needed); try Looks like he did at an age."; return; }
+      $("sim-status").textContent = "";
+      out.innerHTML = '<p class="query">' + queryLine(r.query) + "</p><h3>Today's players of his position group who play most like him</h3>" + simList(r.found);
+      return;
+    }
+    var age = number("sim-at");
+    if (age == null) { out.innerHTML = ""; $("sim-status").textContent = "Enter the age to compare at."; return; }
+    r = lookedLike(sim.id, age);
+    if (!r) { out.innerHTML = ""; $("sim-status").textContent = "No season with a style vector for him."; return; }
+    var exact = Math.floor(r.query.age) === age;
+    $("sim-status").textContent = exact ? "" : "He has no season at " + age + "; the nearest is at " + Math.floor(r.query.age) + ".";
+    out.innerHTML = '<p class="query">' + queryLine(r.query) + "</p><h3>Today's players aged " + (age - 1) + " to " + (age + 1) + " who look most like he did</h3>" + simList(r.found);
+  }
+  function openSimilar(id) {
+    state.similar = true;
+    history.replaceState(null, "", "#similar");
+    tabs();
+    simDraw();
+    $("sim-status").textContent = SIM ? $("sim-status").textContent : "Loading similar players.";
+    loadSimilar().then(function () {
+      if (id != null) { sim.mode = "now"; pick(id); } else { simDraw(); }
+    }, function () { $("sim-status").textContent = ""; $("sim-out").innerHTML = simFailed(); });
+  }
+
   function dictionary() {
     var words = D.dictionary.rows.filter(function (r) { return r[0] === state.tab; });
     $("dict-list").innerHTML = words.map(function (r) {
@@ -566,6 +807,8 @@ footer p { margin: 6px 0; max-width: 100ch; }
 
   document.querySelectorAll(".tab").forEach(function (t) {
     t.addEventListener("click", function () {
+      if (t.dataset.tab === "similar") { openSimilar(); return; }
+      state.similar = false;
       state.tab = t.dataset.tab;
       history.replaceState(null, "", state.tab === "bargains" ? "#bargains" : "#candidates");
       ["q", "age-min", "age-max"].forEach(function (id) { $(id).value = ""; });
@@ -595,6 +838,25 @@ footer p { margin: 6px 0; max-width: 100ch; }
     head(); refresh();
   });
   $("more").addEventListener("click", function () { state.shown += PAGE; draw(); });
+  $("table").addEventListener("click", function (e) {
+    var open = e.target.closest(".sim-open"), more = e.target.closest(".sim-more");
+    if (open) togglePanel(open);
+    if (more) { openSimilar(Number(more.dataset.id)); window.scrollTo(0, 0); }
+  });
+  document.querySelectorAll("#sim-mode button").forEach(function (b) {
+    b.addEventListener("click", function () { sim.mode = b.dataset.mode; suggest(); simDraw(); });
+  });
+  $("sim-q").addEventListener("input", function () { suggest(); });
+  $("sim-q").addEventListener("keydown", function (e) {
+    var first = $("sim-suggest").querySelector("button");
+    if (e.key === "Enter" && first) { e.preventDefault(); pick(Number(first.dataset.id)); }
+  });
+  $("sim-suggest").addEventListener("click", function (e) {
+    var b = e.target.closest("button");
+    if (b) pick(Number(b.dataset.id));
+  });
+  ["sim-at", "sim-age-min", "sim-age-max", "sim-ability"].forEach(function (id) { $(id).addEventListener("input", simDraw); });
+  $("sim-league").addEventListener("change", simDraw);
 
   header();
   howto();
@@ -603,6 +865,7 @@ footer p { margin: 6px 0; max-width: 100ch; }
   document.querySelector('#lists button[data-list="experienced"]').setAttribute("aria-pressed", "false");
   setupTab();
   draw();
+  if (state.similar) openSimilar();
 })();
 </script>
 </body>

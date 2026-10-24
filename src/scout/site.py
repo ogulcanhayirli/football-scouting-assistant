@@ -9,16 +9,24 @@
   not predictions beyond the market, the valuation date, the forecast date
   and the five season window; each player's club today and his season so
   far (prompt 16), as of the day of the last pull;
-* ``data/``: the same two tables as CSV and Parquet, and the dictionary.
+* ``data/``: the same two tables as CSV and Parquet, and the dictionary;
+* ``data/similar.json`` (prompt 18): the similar players panel and search,
+  loaded by the page only when they are opened: today's players and every
+  earlier season of players once ranked in the top ``HISTORY_TOP`` by value,
+  each with name, age, club, league, ability and his embedding as 8 bit
+  integers (``scout embed``). Without embeddings it says so and the page
+  shows a note.
 
-Only the two tables and the dictionary are published, never raw match stats
-or API responses. The rising tag of a bargain is the riser model's top 50 of
-``scouting.parquet`` (``scout.lists.rising_ids``), the same set the
-candidates table marks; nothing else is read from the model outputs.
+Only the two tables, the dictionary and the similar players file are
+published, never raw match stats or API responses. The rising tag of a
+bargain is the riser model's top 50 of ``scouting.parquet``
+(``scout.lists.rising_ids``), the same set the candidates table marks;
+nothing else is read from the model outputs.
 """
 
 from __future__ import annotations
 
+import base64
 import json
 import logging
 import shutil
@@ -36,10 +44,14 @@ log = logging.getLogger(__name__)
 
 TEMPLATE = Path(__file__).with_name("site_template.html")
 PUBLISHED = ("candidates", "bargains")  # each as .csv and .parquet, plus dictionary.csv
+SIMILAR = "similar.json"  # in data/, next to the downloads
+HISTORY_TOP = 500  # "looks like X at Y": every season of players once ranked this high
+SCALE = 127  # unit vectors as 8 bit integers
 
 # The columns each tab carries; the rest of the tables stay in the downloads.
 CANDIDATE_COLUMNS = [
     "player",
+    "player_id",
     "age",
     "position",
     "club_at_forecast",
@@ -79,6 +91,7 @@ BARGAIN_COLUMNS = [
     "list",
     "list_rank",
     "player",
+    "player_id",
     "age",
     "position",
     "club_at_forecast",
@@ -213,6 +226,99 @@ def page_data(
     }
 
 
+def _codes(values: pd.Series, table: list[str]) -> list:
+    """Each value as its position in ``table`` (null when missing)."""
+    where = {v: i for i, v in enumerate(table)}
+    return [where.get(v) if isinstance(v, str) else None for v in values]
+
+
+def _int8(frame: pd.DataFrame, columns: list[str]) -> str:
+    from scout.embeddings import unit
+
+    u = unit(frame[columns].to_numpy(dtype=float))
+    q = np.clip(np.round(u * SCALE), -SCALE, SCALE).astype(np.int8)
+    return base64.b64encode(q.tobytes()).decode("ascii")
+
+
+def similar_data(
+    vectors: pd.DataFrame | None,
+    current: pd.DataFrame | None,
+    leagues: dict[str, str],
+    tested: dict | None = None,
+) -> dict:
+    """The similar players file: today's players (main rows of the newest
+    season) and the earlier seasons of players once ranked in the top
+    ``HISTORY_TOP`` by value, rows as lists, vectors as one base64 string
+    of 8 bit integers per table (row after row)."""
+    if vectors is None or vectors.empty:
+        return {"available": False}
+    emb = [c for c in vectors.columns if c.startswith("emb_")]
+    columns = emb or [c for c in vectors.columns if c.startswith("style_")]
+    main = vectors[vectors["main"].astype(bool)].copy()
+    newest = int(main["season"].max())
+    main["league"] = main["league_key"].map(leagues).fillna(main["league_key"])
+    if current is not None:
+        cur = current.set_index("source_player_id")
+        pid = main["source_player_id"].astype(int)
+        main["club_now"] = pid.map(cur["current_club"])
+        now_id = pid.map(cur["current_club_id"]).astype("Int64")
+        moved = now_id.notna() & (now_id != main["team_id"].astype("Int64"))
+        main["club_now"] = main["club_now"].where(moved.fillna(False).astype(bool))
+    else:
+        main["club_now"] = None
+    today = main[main["season"] == newest].sort_values("player_name", kind="stable")
+    once_top = main.loc[main["value_rank"] <= HISTORY_TOP, "source_player_id"].unique()
+    history = main[(main["season"] < newest) & main["source_player_id"].isin(once_top)]
+    history = history.sort_values(["source_player_id", "season"], kind="stable")
+    groups = sorted(main["group"].dropna().unique())
+    league_list = sorted(main["league"].dropna().unique())
+    clubs = sorted(
+        set(today["team_name"].dropna())
+        | set(today["club_now"].dropna())
+        | set(history["team_name"].dropna())
+    )
+
+    def table(rows: pd.DataFrame, with_now: bool) -> dict:
+        out = {
+            "columns": ["id", "name", "season", "age", "group", "position", "club", "league"]
+            + (["club_now"] if with_now else [])
+            + ["ability", "value_rank"],
+            "rows": [],
+            "vectors": _int8(rows, columns),
+        }
+        parts = [
+            rows["source_player_id"].astype(int).tolist(),
+            rows["player_name"].tolist(),
+            rows["season"].astype(int).tolist(),
+            (np.floor(rows["age"].astype(float) * 10) / 10).tolist(),  # cut, so whole years stay
+            _codes(rows["group"], groups),
+            rows["sub_position"].where(rows["sub_position"].notna(), None).tolist(),
+            _codes(rows["team_name"], clubs),
+            _codes(rows["league"], league_list),
+        ]
+        if with_now:
+            parts.append(_codes(rows["club_now"], clubs))
+        parts.append(rows["ability_pct"].astype(float).round(0).astype(int).tolist())
+        parts.append([int(v) if pd.notna(v) else None for v in rows["value_rank"]])
+        out["rows"] = [list(r) for r in zip(*parts, strict=True)]
+        return out
+
+    return {
+        "available": True,
+        "season": newest,
+        "dim": len(columns),
+        "scale": SCALE,
+        "method": "learned" if emb else "baseline",
+        "tested": tested or {},
+        "history_top": HISTORY_TOP,
+        "groups": groups,
+        "leagues": league_list,
+        "clubs": clubs,
+        "today": table(today, with_now=True),
+        "history": table(history, with_now=False),
+    }
+
+
 def render(data: dict, template: Path = TEMPLATE) -> str:
     """The page: the template with the data as a JSON script block. ``</`` is
     escaped so no text in the tables can end the block."""
@@ -266,7 +372,29 @@ def build_site(settings, out_dir: Path | None = None, forecasts_root: Path = Pat
             written.append(target)
     shutil.copyfile(lists_dir / "dictionary.csv", downloads / "dictionary.csv")
     written.append(downloads / "dictionary.csv")
+    vectors, current, tested = _similar_inputs(processed)
+    similar = similar_data(vectors, current, league_names(settings), tested)
+    target = downloads / SIMILAR
+    atomic_write_text(target, json.dumps(similar, ensure_ascii=False, separators=(",", ":")))
+    written.append(target)
+    if not similar["available"]:
+        log.warning("site: no embeddings; run `scout embed` (the similar panel shows a note)")
     log.info(
         "site: %s (%.0f KB) and %d downloads", page, page.stat().st_size / 1e3, len(written) - 1
     )
     return written
+
+
+def _similar_inputs(processed: Path) -> tuple:
+    """Vectors, today's clubs and the stored model's test numbers, each None
+    when missing."""
+    from scout.embeddings import OUT, STORED
+    from scout.models.store import store_dir
+
+    path = Path(processed) / OUT / "vectors.parquet"
+    vectors = pd.read_parquet(path) if path.is_file() else None
+    club_path = Path(processed) / "current" / "current_club.parquet"
+    current = pd.read_parquet(club_path) if club_path.is_file() else None
+    stored = store_dir(processed) / STORED
+    tested = json.loads(stored.read_text()).get("tested") if stored.is_file() else None
+    return vectors, current, tested

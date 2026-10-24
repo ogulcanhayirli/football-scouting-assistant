@@ -165,6 +165,19 @@ def test_publish_sends_the_lists_and_the_page_and_nothing_else(tmp_path):
     assert s3.args[("site-bucket", "index.html")]["ContentEncoding"] == "gzip"
     assert s3.args[("site-bucket", "index.html")]["ContentType"].startswith("text/html")
     assert "ContentEncoding" not in s3.args[("site-bucket", "data/bargains.parquet")]
+    similar = s3.args[("site-bucket", "data/similar.json")]  # prompt 18, loaded on demand
+    assert similar["ContentEncoding"] == "gzip"
+    assert similar["ContentType"].startswith("application/json")
+
+
+def test_the_page_loads_the_similar_file_and_links_each_player():
+    html = render(_data())
+    assert 'fetch("data/similar.json")' in html
+    assert 'data-tab="similar"' in html
+    assert "sim-open" in html
+    data = _data()
+    assert "player_id" in data["candidates"]["columns"]  # the panel's key
+    assert "player_id" in data["bargains"]["columns"]
 
 
 def test_publish_refuses_any_other_file(tmp_path):

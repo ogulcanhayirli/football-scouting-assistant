@@ -5,7 +5,8 @@ Two destinations, nothing else (CLAUDE.md, the one exception to rule 8):
 * ``processed/lists/`` in the private data bucket: the two tables and the
   dictionary of ``scout lists``, skipped when the bytes are already there
   (``scout.sync``);
-* the public site bucket: ``index.html`` and ``data/`` from ``scout site``.
+* the public site bucket: ``index.html`` and ``data/`` from ``scout site``
+  (the two tables, the dictionary and the similar players file).
   Only the files in ``SITE_FILES`` are ever sent, so no other table can be
   published by mistake. The page and the CSV files are stored gzip encoded
   (S3 serves them with ``Content-Encoding: gzip``, which browsers unpack),
@@ -38,8 +39,9 @@ SITE_FILES = {
     "data/dictionary.csv": "text/csv; charset=utf-8",
     "data/candidates.parquet": "application/vnd.apache.parquet",
     "data/bargains.parquet": "application/vnd.apache.parquet",
+    "data/similar.json": "application/json; charset=utf-8",
 }
-GZIPPED = {".html", ".csv"}
+GZIPPED = {".html", ".csv", ".json"}
 CACHE = "public, max-age=300"  # a weekly page: five minutes of browser cache is plenty
 
 

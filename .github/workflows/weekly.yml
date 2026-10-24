@@ -86,6 +86,9 @@ jobs:
       - name: Score with the stored models
         run: uv run scout --config "$CONFIG" score
 
+      - name: Similar players with the stored embedding
+        run: uv run scout --config "$CONFIG" embed
+
       - name: Rebuild the two tables and the explanations
         run: uv run scout --config "$CONFIG" lists
 

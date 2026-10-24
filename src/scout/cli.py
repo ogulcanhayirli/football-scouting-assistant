@@ -280,6 +280,40 @@ def cmd_scouting(settings: Settings, args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_embed(settings: Settings, args: argparse.Namespace) -> int:
+    from scout.embeddings import embed_stored, train_embeddings
+
+    if args.train:
+        print(train_embeddings(settings))
+    else:
+        for path in embed_stored(settings).values():
+            print(path)
+    return 0
+
+
+def cmd_similar(settings: Settings, args: argparse.Namespace) -> int:
+    from scout.embeddings import read_index, similar_text
+    from scout.lists import league_names
+
+    index = read_index(settings.paths.processed_dir)
+    try:
+        text = similar_text(
+            index,
+            args.player,
+            league_names(settings),
+            at_age=args.at_age,
+            k=args.k,
+            age=(args.age_min, args.age_max),
+            leagues=args.league,
+            ability=(args.ability_min, args.ability_max),
+        )
+    except KeyError as exc:
+        print(exc.args[0], file=sys.stderr)
+        return 1
+    print(text)
+    return 0
+
+
 def cmd_lists(settings: Settings, args: argparse.Namespace) -> int:
     from scout.lists import run_lists
 
@@ -656,6 +690,39 @@ def main(argv: list[str] | None = None) -> int:
         "need the Elo tables (run `elo` first)",
     )
     scouting.set_defaults(func=cmd_scouting)
+
+    embed = sub.add_parser(
+        "embed",
+        help="Style vectors and similar players: embed every row with the stored model and "
+        "write data/processed/embeddings/ (the weekly run; after score), or --train",
+    )
+    embed.add_argument(
+        "--train",
+        action="store_true",
+        help="test the learned embedding against the baseline on 2023 to 2025, refit it on "
+        "every season, store it and write reports/embeddings.md",
+    )
+    embed.set_defaults(func=cmd_embed)
+
+    similar = sub.add_parser(
+        "similar",
+        help="Players who play like a player now, or like he did at an age (run embed first)",
+    )
+    similar.add_argument("player", help="name (accents ignored) or API Football id")
+    similar.add_argument(
+        "--at-age",
+        type=int,
+        help="his season at this age against today's players a year either side",
+    )
+    similar.add_argument("-k", type=int, default=10, help="how many (default 10)")
+    similar.add_argument("--age-min", type=int, help="now: youngest age")
+    similar.add_argument("--age-max", type=int, help="now: oldest age")
+    similar.add_argument(
+        "--league", action="append", help="now: league key, repeatable (for example la_liga)"
+    )
+    similar.add_argument("--ability-min", type=float, help="now: lowest ability percentile")
+    similar.add_argument("--ability-max", type=float, help="now: highest ability percentile")
+    similar.set_defaults(func=cmd_similar)
 
     lists = sub.add_parser(
         "lists",

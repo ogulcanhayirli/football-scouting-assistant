@@ -22,6 +22,13 @@ The result is **two tables**, published once a week with one static page:
   33, 353 players), with the same flags and explanation and two context tags
   (on loan, stale value).
 
+The page also answers **who plays like him** (decision 10): every player
+has a "Similar players" panel with the ten nearest of his position group
+today, and a Similar players tab searches "plays like him now" (with
+filters on age, league and ability) and "looks like he did at an age"
+(Rodri at 21 against today's players aged 20 to 22). Similar means the
+same way of playing with the level taken out, not the same level.
+
 The emphasis is on honest evaluation: strict point in time features, season
 by season backtests, a simple baseline reported next to every model, and
 chances shown as the rates that past forecasts actually achieved.
@@ -43,6 +50,7 @@ chances shown as the rates that past forecasts actually achieved.
 | Stored models (`scout score`) | Done: trained once by the manual commands, reproduce the registered tables byte for byte |
 | Weekly run (`.github/workflows/weekly.yml`) | Built, and the stored models are in S3 (23 October); waits for the `scout-weekly` user and the GitHub secrets and variables (docs/DEPLOY.md). A clean run of the same steps took 4 minutes 14 seconds on a 4 core machine |
 | Static page (`scout site`) and its bucket (`ScoutSite`) | Live since 21 October 2026 |
+| Similar players (`scout embed`, `scout similar`, decision 10) | Done 24 October 2026: a learned embedding finds the same player's other season among his five nearest 19.9% of the time against 13.2% for plain style vectors (0.35% at random); on the page after the owner's sync and the next weekly run |
 | Free tier update of the current season | Not started: prompt 4, from 6 November; the weekly run skips it until its config exists |
 | Glue and Athena, Feature Store, SageMaker training stacks | Retired by decision 9, code in `infra/archive/`; still deployed until the owner removes them |
 
@@ -60,15 +68,16 @@ chances shown as the rates that past forecasts actually achieved.
             │ read processed/ and raw/transfermarkt/            ▲ write processed/lists/
             ▼                                                   │
  GitHub Actions, weekly:  features --current ─► score (stored models, no training)
-                          ─► lists ─► site ─► publish ──────────┤
+                          ─► embed ─► lists ─► site ─► publish ─┤
                                                                 ▼ write
                          S3 site bucket (public read, static website hosting)
-                         index.html with both tables embedded, data/*.csv, data/*.parquet
+                         index.html with both tables embedded, data/*.csv, data/*.parquet,
+                         data/similar.json (the similar players panel, loaded on demand)
 ```
 
 Deliberately small: one scheduled job and one static page, no servers. The
-site bucket is the only public resource; it holds the two tables and the
-dictionary and nothing else (`scout publish` refuses any other file). The
+site bucket is the only public resource; it holds the two tables, the
+dictionary and the similar players file and nothing else (`scout publish` refuses any other file). The
 only infrastructure code is the `ScoutSite` CDK stack in `infra/`, which
 creates that bucket; the earlier analysis stacks are archived in
 `infra/archive/` with a note on why. Setup, secrets, the IAM policy and the
@@ -100,6 +109,7 @@ src/scout/
   bargains.py, explain.py   bargains lists; one line explanations
   lists.py                  the two tables, their dictionary, reports/candidates.md
   forecast.py               registered forecasts: freeze, score, history, revise
+  embeddings.py             style vectors, the learned embedding, similar players
   site.py, site_template.html   the static page
   publish.py, sync.py       the weekly upload; copying data to and from S3
   cli.py                    `scout <command>`
@@ -130,6 +140,7 @@ $C sync down --only processed && $C sync down --only transfermarkt
 # The weekly run, as GitHub Actions runs it (docs/DEPLOY.md)
 $C features --current     # the newest season only, earlier ones as stored
 $C score                  # the newest season with the stored models, no training
+$C embed                  # every player season embedded with the stored model; today's ten nearest
 $C lists                  # candidates and bargains, reports/candidates.md
 $C site                   # data/site/index.html and the downloads
 $C publish                # processed/lists/ and the site bucket ($SCOUT_SITE_BUCKET)
@@ -139,12 +150,17 @@ $C features               # full rebuild
 $C backtest               # fair value, against its baseline
 $C moves                  # big move
 $C scouting               # ability score, elite, step up, riser
+$C embed --train          # similar players: tested against plain style vectors, refit, stored
 $C forecast history       # past forecasts rebuilt and scored; their realized rates are the shown chances
 $C lists && $C site
 
 # Downloads (each spends API requests; the raw cache is never fetched twice)
 $C backfill               # season totals; --level match | team | lineup | injuries | transfers
 $C transfermarkt          # the snapshot, once; --refresh for a newer release
+
+# Similar players (after embed)
+$C similar "Lamine Yamal"                 # plays like him now; --age-max, --league, --ability-min
+$C similar Rodri --at-age 21              # today's players aged 20 to 22 who look like he did
 
 # Registered forecasts
 $C forecast freeze        # copy today's lists into forecasts/<date>; never overwrites
@@ -358,3 +374,19 @@ stay manual commands. The weekly path was checked end to end: from the
 tables in S3 it reproduces the registered tables of 21 October 2026 byte for
 byte. *Would change if* new data arrived every week; until a live value
 source exists it does not (Limits).
+
+**D22. Similar players: style with the level taken out, a learned
+embedding only if it wins (decision 10).** Each regular player season
+since 2015 is a vector of per 90 numbers and on pitch shares of the team's
+shots, dribbles, passes and duels, standardised within position group and
+season, with both ability percentiles regressed out of its mean and spread,
+so a top player's neighbours are not simply other top players (their
+ability correlates 0.03 with his, against 0.57 before). A small contrastive
+model (the same player in consecutive seasons as the positive pair) beat
+plain cosine similarity on held out seasons, in every position group, and
+was adopted; a check on real replacements (a club sells and signs the same
+position within 60 days) shows clubs pick a similar style only a little
+more often than chance. Search is a numpy product in memory, no vector
+database. *Would change if* the tests stopped favouring the learned model
+after a retrain (the stored model then holds the baseline), or richer
+event data (FBref) made a better style description possible.

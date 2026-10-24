@@ -12,19 +12,25 @@ bucket. The data bucket stays private.
    3. free tier update                     skipped until configs/update.free.yaml exists
    4. scout features --current             the newest season only, earlier ones as stored
    5. scout score                          stored models (processed/models/stored/), no training
-   6. scout lists, scout site              the two tables, explanations, index.html
-   7. scout publish                        processed/lists/ in the data bucket, the site bucket
+   6. scout embed                          stored embedding: vectors, today's ten nearest each
+   7. scout lists, scout site              the two tables, explanations, index.html, similar.json
+   8. scout publish                        processed/lists/ in the data bucket, the site bucket
                                                     │
  S3 football-scout-data-<owner> (private)            ▼
    processed/ ── read ──►  runner  ── write ──► processed/lists/
    raw/transfermarkt/ ──►           └─ write ──► S3 scout-site-<account> (public read, website)
-                                                     index.html, data/*.csv, data/*.parquet
+                                                     index.html, data/*.csv, data/*.parquet,
+                                                     data/similar.json
 ```
 
 The page is <http://scout-site-098499087060.s3-website.eu-central-1.amazonaws.com/>
 (plain HTTP: S3 website endpoints have no HTTPS, and CloudFront is left out
-on purpose). It holds the candidates and bargains tables and the dictionary,
-nothing else: `scout publish` refuses any other file (`src/scout/publish.py`).
+on purpose). It holds the candidates and bargains tables, the dictionary and,
+since prompt 18, `data/similar.json` for the similar players panel (today's
+players and the earlier seasons of players once in the top 500 by value,
+with name, age, club, league, ability and the embedding as 8 bit integers;
+2.9 MB, 1.4 MB gzip encoded, loaded only when the panel opens), nothing
+else: `scout publish` refuses any other file (`src/scout/publish.py`).
 
 ## One time setup
 
@@ -126,8 +132,12 @@ variable that is missing.
 The run scores with the models in `processed/models/stored/` and never
 trains. They were trained on 21 October 2026, reproduce the registered
 tables byte for byte, and were uploaded on 23 October with the owner's yes:
-13 files, 9 MB, nothing else. After a manual retrain, upload them again the
-same way, with the owner's yes (rule 8):
+13 files, 9 MB, nothing else. The similar players embedding
+(`embedding.json`, prompt 18, trained 24 October 2026) and
+`processed/embeddings/` are not in S3 yet: the owner syncs them; until then
+step 6 of the run stops with a message naming the missing file. After a
+manual retrain, upload them again the same way, with the owner's yes
+(rule 8):
 
 ```bash
 uv run scout --config configs/backfill.ultra.yaml sync up --only processed
@@ -184,10 +194,11 @@ repository and an empty `data/` folder (4 cores, 15 GB):
 | pull the Transfermarkt snapshot (65 MB) | 4 |
 | `features --current` | 92 |
 | `score` | 56 |
+| `embed` (measured 24 October, 1.3 GB of memory) | 17 |
 | `lists` | 22 |
 | `site` | 2 |
 | `publish` (dry run) | 2 |
-| **total** | **254** |
+| **total** | **254** (271 with `embed`) |
 
 The tables it built were byte for byte those of the registered forecast.
 A GitHub runner has 2 cores, so expect about 6 to 8 minutes there, plus a
@@ -206,9 +217,9 @@ Expected AWS cost of the weekly run and the page, eu-central-1 prices:
 |---|---|---|
 | Site bucket storage | under 1 MB | 0.00 USD |
 | Weekly pull of `processed/` | about 3,300 GET requests and 0.4 GB per run, about 14,000 GETs and 1.8 GB a month | 0.01 USD (transfer out is inside AWS's free 100 GB a month) |
-| Page views | 0.2 MB each (stored gzip encoded); 10,000 views are 2 GB | under 0.01 USD for the GETs, transfer inside the free 100 GB |
-| Uploads | 12 PUT requests a run | 0.00 USD |
-| Stored models | 9 MB in the data bucket | 0.00 USD |
+| Page views | 0.3 MB each (stored gzip encoded); 10,000 views are 3 GB; the similar players file adds 1.4 MB when a viewer opens it | under 0.01 USD for the GETs, transfer inside the free 100 GB |
+| Uploads | 13 PUT requests a run | 0.00 USD |
+| Stored models | 9 MB in the data bucket, plus the 0.1 MB embedding | 0.00 USD |
 
 So the run and the page add a few cents at most. The rest of the bill is
 unchanged: the data bucket's 8.7 GB (about 0.21 USD a month, plus any old
@@ -228,6 +239,7 @@ $C features            # full rebuild, about 10 minutes
 $C backtest            # fair value; stores fair_value_fold_<season>
 $C moves               # big move; stores big_move_24m
 $C scouting            # ability fit, elite, step up, riser; stores them
+$C embed --train       # similar players: tests, refit, stores embedding.json (about 3 minutes)
 $C forecast history    # when a new season can be scored
 $C lists && $C site
 $C sync up --only processed   # the owner's yes first (rule 8)

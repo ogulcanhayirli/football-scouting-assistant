@@ -884,6 +884,111 @@ the transfers table and every transfer snapshot; before 3 February 2027 it
 says it is interim (0 of 50 and 0 of 50 so far, as it should be). The lists
 are refreshed and frozen again on 15 December 2026 (`--refreeze`).
 
+## Similar players (decision 10, prompt 18, 24 October 2026)
+
+`scout embed --train` (`src/scout/embeddings.py`, report
+`reports/embeddings.md`). Nothing here feeds the lists' models; it answers
+"who plays like him".
+
+**Style vector** (the baseline): one per regular player season from 2015
+with match stats, 93,474 rows (91,326 after one row per player and season,
+the league with most minutes). 18 measures: the 14 version 2 per 90 inputs
+and four on pitch shares, the player's share of his team's shots, dribble
+attempts, passes and duels divided by his share of team minutes (so playing
+time is not read as style). Each is shrunk towards the position group and
+season mean by minutes, with a prior per measure and group fitted by
+empirical Bayes as version 2 does (passes per 90 needs at most 117
+minutes, goals of a centre back 1,877), on one season only: pooling two
+seasons would share data between the two seasons the identity test
+compares. Then standardised within position group and season and clipped
+at 4.
+
+**The level taken out.** Within each position group and season every
+measure is regressed on a cubic in both ability percentiles (two season and
+one season) and only the residual is kept; the residual is then divided by
+its spread at that ability (the squared residual on the same cubic), so
+neither the mean nor the spread of a measure says how good the player is.
+The mean alone left a correlation of 0.090 (neighbours of the bottom and
+top tenth at 45.7 and 55.2); the spread step brought it to 0.031. The check, every player of 2023 to 2025 against his ten nearest of
+the same position group and season (341,970 pairs):
+
+| Vectors | Correlation of ability percentiles | Neighbours' mean, bottom tenth | top tenth |
+|---|---|---|---|
+| level kept | 0.571 | 21.6 | 78.7 |
+| level removed (the baseline) | 0.031 | 48.8 | 52.0 |
+| learned embedding | 0.037 | 48.1 | 52.0 |
+
+**Learned embedding.** One hidden layer of 128 (ReLU) to a unit vector,
+numpy on the CPU, InfoNCE in both directions: the same player in two
+consecutive seasons is the positive pair, the other players of the same
+position group and season in the batch (up to 256) the negatives. Adam,
+30 epochs, about 15 seconds. Settings chosen on validation only (trained to
+2021, searched between 2021 and 2022): every one of the nine (32, 48 or 64
+dimensions, temperature 0.05, 0.1 or 0.2) scored 20.9% to 21.7% against
+14.3% for the baseline; 48 and 0.1 was best. The tested model is trained on
+seasons up to 2022 (35,700 pairs) and the stored one refit on 2015 to 2025
+(59,670 pairs), in `processed/models/stored/embedding.json` with the
+shrinkage priors; `scout embed` (the weekly run) embeds every row with it.
+
+**Identity retrieval, 2023 to 2025** (the test that decides): for each
+player with regular seasons in two consecutive test seasons, one season is
+hidden and searched with the other among every player of that position group
+and season, both ways; a hit is his other season among the five nearest.
+
+| Position group | Searches | Random | Baseline (cosine) | Learned |
+|---|---|---|---|---|
+| attacking mid | 2,486 | 0.58% | 21.6% | 29.7% |
+| central mid | 3,770 | 0.39% | 17.5% | 24.8% |
+| centre back | 6,580 | 0.22% | 7.1% | 11.1% |
+| centre forward | 4,022 | 0.35% | 13.3% | 22.6% |
+| defensive mid | 3,110 | 0.48% | 19.5% | 27.7% |
+| full back | 5,416 | 0.27% | 12.1% | 19.5% |
+| goalkeeper | 2,322 | 0.56% | 5.0% | 5.7% |
+| winger | 5,310 | 0.27% | 14.7% | 22.5% |
+| **overall** | 33,016 | 0.35% | 13.2% | 19.9% |
+
+**Adopted:** the learned model beats the baseline overall and in every
+position group. Goalkeepers barely: their measures (saves, passes, duels)
+describe little style, as with the ability score.
+
+**Replacement check** (weak labels): a club sells a player (a paid
+transfer) and signs another of the same position group within 60 days
+before or after (any arrival but a loan return), each described by his
+latest season before his move (at most 400 days old); transfers of the
+clubs of the original 17 leagues. Is the signing among the ten nearest of
+the departed player, in the signing's season and position group?
+
+| Seasons of the signing | Model | Pairs | Top 10 | Random | Median similarity percentile |
+|---|---|---|---|---|---|
+| 2023 to 2025 | baseline | 3,621 | 1.02% | 0.65% | 55.0 |
+| 2023 to 2025 | learned | 3,621 | 1.52% | 0.65% | 55.5 |
+| 2015 to 2025 | baseline | 7,275 | 1.29% | 0.85% | 56.1 |
+| 2015 to 2025 | learned | 7,275 | 1.73% | 0.85% | 57.2 |
+
+Clubs replace a player with one of a similar style only a little more often
+than chance (2.3 times random with the learned model on the test seasons;
+the median signing sits at the 55th percentile of similarity, 50 at random).
+Signings follow level, price and need more than the departed player's
+profile, so this check is weak support, not a target.
+
+**Search.** No vector database: the 93,474 vectors of 48 numbers (233,272
+would fit as easily) are held in memory, and a numpy search over all of them
+answers in 0.5 ms, a filtered "similar now" query in 7 ms. Queries
+(`scout similar`, and the page's Similar players tab and player panel):
+"similar now" (today's players, the newest season, of the same position
+group, filters on age, league and ability percentile) and "looks like X at
+Y" (X's season at age Y, the age at the feature date, against today's
+players aged Y minus 1 to Y plus 1). Examples, top five:
+
+* Rodri at 21 (Villarreal 2016/17): Cauan Barros, J. Hamza, F. Bernal,
+  G. Yah, V. Ríos.
+* Lamine Yamal now: M. Olise, T. Stavitski, L. Messi, T. Ali, I. Ferrah.
+* Kenan Yıldız now: K. Yuruki, E. Ceïde, M. Hinestroza, A. Saint-Maximin,
+  C. Barrios.
+* Jude Bellingham at 18 (Dortmund 2020/21): Pedro Fernández, A. Tia,
+  S. Mladenović, B. Mazurek, I. Alemayehu.
+* Mike Maignan now: I. Radu, Fábio, M. Di Gregorio, Joel Robles, M. Bleve.
+
 ## Next
 
 1. The clean check above: tune on earlier seasons, score on later ones.

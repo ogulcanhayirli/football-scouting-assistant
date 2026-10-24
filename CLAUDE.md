@@ -100,6 +100,10 @@ $C lists                                    # the two tables and reports/candida
 $C current [--as-of DAY] [--max-requests N]  # today's squads, transfers, season in progress (about 2,000 requests)
 $C features --current                       # the weekly run: newest season only, earlier ones as stored, plus the season so far
 $C score                                    # the weekly run: newest season with the stored models, no training
+$C embed                                    # the weekly run: every row embedded with the stored model, today's ten nearest
+$C embed --train                            # similar players: tests, refit, stored embedding, reports/embeddings.md (3 minutes)
+$C similar "Lamine Yamal" [--age-min A --age-max B --league KEY --ability-min P]  # plays like him now
+$C similar Rodri --at-age 21                # his season at 21 against today's players aged 20 to 22
 $C site                                     # data/site/index.html and the downloads (the static page)
 $C publish [--role scout-site-publisher]    # processed/lists/ and the site bucket ($SCOUT_SITE_BUCKET); weekly run
 $C forecast freeze [--date YYYY-MM-DD]       # copy today's lists into forecasts/<date>; never overwrites
@@ -147,8 +151,9 @@ bucket named by `$SCOUT_S3_BUCKET` (eu-central-1).
 | Labels | `data/processed/features/player_season_labels/...` | value now, 24 and 36 months (the 24 month growth feeds the bargains backtest) |
 | Team Elo | `data/processed/elo/*.parquet` | per match pre match ratings, club and league seasons |
 | Model outputs | `data/processed/models/*.parquet` | backtest predictions (`backtest_<model>.parquet`), `scouting.parquet`, `big_move_current.parquet`, labels |
-| Stored models | `data/processed/models/stored/` | the boosters behind the newest season's scores (`fair_value_fold_2024`, `fair_value_fold_2025`, `big_move_24m`, `elite`, `step_up`, `riser`; LightGBM text plus a `.json` of columns and training rows) and `ability_v2.json` (the ability fit); written by `backtest`, `moves`, `scouting`, read by `score`. Trained 21 October 2026; in S3 since 23 October (owner's yes; only these 13 files went up, and a dry run of `sync up --only processed` then found nothing to copy) |
-| The page | `data/site/` | `index.html` (both tables embedded, 1.4 MB, 0.2 MB gzip) and `data/` (the two tables as CSV and Parquet, `dictionary.csv`); published to `scout-site-<account>` |
+| Embeddings (prompt 18) | `data/processed/embeddings/` | `vectors.parquet` (93,474 regular player seasons from 2015 with match stats: keys, name, age, club, group, ability, `main`, 18 `style_*` and 48 `emb_*` columns), `neighbours.parquet` (today's 11,908 players, ten nearest each), `dictionary.csv`; written by `embed`, not in S3 yet (the owner syncs) |
+| Stored models | `data/processed/models/stored/` | the boosters behind the newest season's scores (`fair_value_fold_2024`, `fair_value_fold_2025`, `big_move_24m`, `elite`, `step_up`, `riser`; LightGBM text plus a `.json` of columns and training rows) and `ability_v2.json` (the ability fit); written by `backtest`, `moves`, `scouting`, read by `score`. Trained 21 October 2026; in S3 since 23 October (owner's yes; only these 13 files went up, and a dry run of `sync up --only processed` then found nothing to copy). Plus `embedding.json` (prompt 18, 24 October: shrinkage priors and the encoder, written by `embed --train`, read by `embed`), not in S3 yet |
+| The page | `data/site/` | `index.html` (both tables embedded, 1.8 MB, 0.3 MB gzip on 24 October) and `data/` (the two tables as CSV and Parquet, `dictionary.csv`, `similar.json`); published to `scout-site-<account>` |
 | User facing tables | `data/processed/lists/` | `candidates`, `bargains` (Parquet, CSV), `dictionary.csv` (see Outputs) |
 | Quota state, log | `data/state/` | |
 
@@ -192,6 +197,7 @@ through the native API, and model only regular players (450+ minutes).
 | Step up | `scouting` | value rank at least 3 times better, ending in the top 500, within 2 seasons | `rank_rate` | as above |
 | Fall back | `scouting`, `lists` | elite pool player whose value rank is at least twice as bad after 2 seasons | the pool's base rate | rate with and without each flag, rate by flag count 0, 1, 2 or more (`reports/candidates.md`) |
 | Bargains | `lists` | ratio of value to the fair value prediction, ranked within position group; top 50 per season | other eligible players of the same season, ability band and age band | share whose value rose in 24 months, share who joined a club with higher Elo within 2 seasons |
+| Similar players (decision 10) | `embed --train` | the same player's other season among the five nearest (identity retrieval, 2023 to 2025) | cosine on the style vectors | hit rate overall and by position group against random; replacement check (a sale and a same position signing within 60 days: signing among the departed player's ten nearest) |
 | Riser (decision 3) | `scouting` | one season ability: both next seasons 20 above the best of this and last season and at the 70th percentile or better; half of team minutes now | `rank_rate` | as above, plus top 50 precision per season against the base rate |
 
 `scouting` also estimates league strength from players who changed leagues
@@ -242,6 +248,15 @@ October 2026, from MODELS.md and `reports/`:
   year to year (0.498 against 0.489); transfer league effect plus Elo team
   term is the most stable (0.537). Details in `reports/elo.md`.
 
+* Similar players (decision 10, prompt 18): the learned embedding finds the
+  same player's other season among his five nearest 19.9% of the time
+  against 13.2% for cosine on the style vectors and 0.35% at random (2023
+  to 2025, trained to 2022), better in every position group (goalkeepers
+  barely: 5.7% against 5.0%); adopted. Level removed: a query's and his ten
+  neighbours' ability percentiles correlate 0.031 (0.037 learned) against
+  0.571 with the level kept. Replacement check: the signing is among the
+  departed player's ten nearest 1.52% against 0.65% at random (1.02%
+  baseline). `reports/embeddings.md`, MODELS.md.
 * Bargains (19 October, 37 leagues, seasons 2015 to 2023, experienced 30 to
   33): the top 50 gained value far more often than matched peers (prime
   63.2% against 43.3%, experienced 11.0% against 4.5%), but moved to a club
@@ -291,18 +306,27 @@ every backtest number next to its baseline, then the dictionary.
 
 The public face is one static page (`scout site`, `src/scout/site.py` and
 `site_template.html`): both tables as JSON inside one HTML file, plain
-JavaScript (no library), tabs for candidates and bargains (prime,
-experienced), sortable columns, filters for position, age, league and flags,
+JavaScript (no library), tabs for candidates, bargains (prime,
+experienced) and similar players (prompt 18), sortable columns, filters for position, age, league and flags,
 a search box, a card layout on phones, and a "how to read this" box (calibrated
 odds from past seasons, not predictions beyond the market; the valuation
 date; the forecast date; the five season window; club today and season so
 far, as of the pull day). A moved player carries a Moved badge and shows
 his club today; a "Season so far" column and a "Moved since forecast"
-filter sit in both tabs. Live at
+filter sit in both tabs. Every row has a "Similar players" button opening
+a panel with the ten nearest of his position group today (age, club,
+league, ability); the Similar players tab searches "plays like him now"
+(filters on age, league, ability percentile) and "looks like he did at an
+age" (today's players a year either side). Both read `data/similar.json`
+(today's players and every earlier season of players once in the top 500
+by value, vectors as 8 bit integers; 2.9 MB, 1.4 MB gzip encoded), fetched
+only when first opened; opened as a local file the page says it cannot load
+it. Live at
 <http://scout-site-098499087060.s3-website.eu-central-1.amazonaws.com/>
 since 21 October 2026. A bargain's rising tag is the riser top 50 of
 `scouting.parquet`, the same set the candidates mark. `scout publish` sends
-only the page and the two tables with the dictionary (an allowlist). Model
+only the page, the two tables with the dictionary and `similar.json` (an
+allowlist). Model
 detail stays in `reports/scouting.md`, `reports/moves.md`,
 `reports/backtest_fair_value.md`, `reports/ability.md` and `reports/elo.md`.
 
@@ -394,7 +418,7 @@ detail stays in `reports/scouting.md`, `reports/moves.md`,
 
 ## Version 2 directions
 
-* Similar players, tested by finding the same player's other season among the nearest neighbours.
+* Similar players, tested by finding the same player's other season among the nearest neighbours: **done 24 October (prompt 18, decision 10).**
 * January window forecast, published mid December and scored in February.
 * A capped chat over the two tables.
 * A matchup report before any match model.
@@ -406,7 +430,9 @@ GitHub Actions run (`.github/workflows/weekly.yml`, Mondays 05:17 UTC or by
 hand) pulls `processed/` and `raw/transfermarkt/`, runs the free tier update
 when `configs/update.free.yaml` exists (skipped with a notice until prompt 4
 creates it; it then calls `scout update`, which prompt 4 must add), then
-`features --current`, `score`, `lists`, `site`, `publish`. It never trains.
+`features --current`, `score`, `embed` (prompt 18: 17 seconds, 1.3 GB),
+`lists`, `site`, `publish`. There is no daily run; the neighbours of the
+current rows are computed by this weekly one. It never trains.
 A clean run took 254 seconds on 4 cores (pull 80, features 92, score 56,
 lists 22) and 2.5 GB of memory, and rebuilt the registered tables byte for
 byte. Its credentials are GitHub secrets (`AWS_ACCESS_KEY_ID`,
@@ -425,7 +451,8 @@ The retired stacks `ScoutData` (Glue, Athena, `scout-analyst`),
 on why; their tests are not run, and they stay deployed until the owner
 destroys them (`athena`, `featurestore`, `train`, `tune` use them).
 Retraining is manual (docs/DEPLOY.md): `features`, `backtest`, `moves`,
-`scouting`, `forecast history`, `lists`, then `sync up` with the owner's yes.
+`scouting`, `embed --train`, `forecast history`, `lists`, then `sync up`
+with the owner's yes.
 
 ## Layout
 
@@ -441,6 +468,7 @@ src/scout/  config, secrets, ratelimit, storage, sync, athena, featurestore,
   explain.py                peer table and one line explanations (both lists, same rows as the flags)
   forecast.py               registered forecasts: freeze, score, history
   window.py                 the January window forecast: freeze, score
+  embeddings.py             style vectors, the learned embedding, identity and replacement tests, similar player search
   season_so_far.py          the season so far block (features --current)
   present.py                club today and season so far in both tables
   backfill/current.py       scout current: squads, transfers, the season in progress
@@ -473,6 +501,7 @@ Owner decisions of 2026-10-16. Each one line; details in the code and docs once 
 7. New free sources: FBref advanced stats for the big five and the European cups from 2017/18; Elo computed from our own fixtures; ClubElo not used because its API went offline in September 2026. API Football stays for breadth.
 8. Ability score version 2 is built from per 90 stats with minutes shrinkage, without the match rating, and replaces version 1 only if it is more stable year to year and predicts the targets at least as well. Rule set on 19 October: more stable, and elite and step up AUC within 0.005 of version 1 or better; else the most stable version that passes. **Outcome (19 October): adopted.** Stability 0.858 against 0.503, elite AUC 0.881 against 0.880, step up 0.927 against 0.925; `--strength v2` is the default (MODELS.md, `reports/ability.md`).
 9. Serving stack: no Lambda, API Gateway, DynamoDB or Bedrock agent; a weekly GitHub Actions run publishes Parquet, CSV and one static HTML page to S3 static hosting. **Built 21 October (prompt 15):** see AWS above and docs/DEPLOY.md; the page is live and the stored models are in S3 (23 October); the weekly run waits for the owner's setup (IAM user, secrets and variables).
+10. Embeddings and similar players (prompt 18, 24 October 2026). Style vectors: the version 2 per 90 inputs and the on pitch shares of the team's shots, dribbles, passes and duels, shrunk by minutes (empirical Bayes per measure and position group, one season), standardised within position group and season, with the level taken out (both ability percentiles regressed out of each measure's mean and spread within position group and season); cosine on them is the baseline. Learned: one hidden layer of 128 to 48 dimensions, InfoNCE with the same player in consecutive seasons as the positive pair and the other players of the same position group and season as negatives, settings chosen on 2021 to 2022, tested on 2023 to 2025 after training to 2022, refit on 2015 to 2025 for `stored/embedding.json`. **Outcome: adopted** (identity retrieval 19.9% against 13.2%, every position group). The replacement check is weak support only (1.52% against 0.65% at random). No vector database: a numpy search over all vectors takes 0.5 ms. MODELS.md, `reports/embeddings.md`.
 
 ## Open questions
 
@@ -586,3 +615,20 @@ Settle them with the owner rather than guessing.
   `transfers/transfers.parquet`, which the features and the big move labels
   read; merging them would change the stored features of the expansion
   leagues and is a retraining decision.
+* Similar players (prompt 18) are built locally on 24 October 2026 and not
+  in S3: `processed/embeddings/` (41 MB) and
+  `processed/models/stored/embedding.json` wait for the owner's
+  `sync up --only processed`; until then the weekly run stops at `scout
+  embed` with a message naming the missing file, and the live page has no
+  similar players (it was not republished from the session). `scout site`
+  writes `data/similar.json` saying "not available" when there are no
+  vectors, so the page itself never breaks.
+* Goalkeepers have weak style vectors (identity retrieval 5.7% learned
+  against 5.0% for the baseline; outfield groups 11% to 30%): the same thin
+  measures as the goalkeeper ability composite. A goalkeeper specific
+  description needs data the API lacks (claims, sweeping, distribution
+  length).
+* About ten player names arrive garbled from API Football (UTF-8 read as
+  Latin-1: "O. HÃ¸jlund", "V. RÃ­os") and show so on the page and in the
+  similar players search; a repair belongs in the adapter (rule 7) and was
+  left for a separate change.
