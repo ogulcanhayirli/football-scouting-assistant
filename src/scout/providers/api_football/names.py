@@ -11,9 +11,10 @@ Two source errors, both seen in cached responses and both lossless to undo:
   never touched.
 * **HTML entities** ("M. O&apos;Riley", "Jo&#227;o Marcelo") are unescaped.
 
-About 450 distinct names were affected in the processed tables of 25 October
-2026, most of them the ``&apos;`` of names like N'Diaye and O'Brien. The
-contracts reject a name that ``clean_name`` would still change.
+741 distinct names in 379 of 1,986 processed partitions were affected on 25
+October 2026, most of them the ``&apos;`` of names like N'Diaye and O'Brien
+(``scripts/repair_names.py``). The contracts reject a name that
+``clean_name`` would still change.
 """
 
 from __future__ import annotations
