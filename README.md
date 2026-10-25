@@ -50,7 +50,7 @@ chances shown as the rates that past forecasts actually achieved.
 | Stored models (`scout score`) | Done: trained once by the manual commands, reproduce the registered tables byte for byte |
 | Weekly run (`.github/workflows/weekly.yml`) | Built, and the stored models are in S3 (23 October); waits for the `scout-weekly` user and the GitHub secrets and variables (docs/DEPLOY.md). A clean run of the same steps took 4 minutes 14 seconds on a 4 core machine |
 | Static page (`scout site`) and its bucket (`ScoutSite`) | Live since 21 October 2026 |
-| Similar players (`scout embed`, `scout similar`, decision 10) | Done 24 October 2026: a learned embedding finds the same player's other season among his five nearest 19.9% of the time against 13.2% for plain style vectors (0.35% at random); on the page after the owner's sync and the next weekly run |
+| Similar players (`scout embed`, `scout similar`, decision 10) | Done 24 October 2026: a learned embedding finds the same player's other season among his five nearest 19.9% of the time against 13.2% for plain style vectors (0.35% at random); in S3 since 25 October, on the page at the next publish |
 | Free tier update of the current season | Not started: prompt 4, from 6 November; the weekly run skips it until its config exists |
 | Glue and Athena, Feature Store, SageMaker training stacks | Retired by decision 9, code in `infra/archive/`; still deployed until the owner removes them |
 

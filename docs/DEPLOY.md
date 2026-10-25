@@ -134,10 +134,10 @@ trains. They were trained on 21 October 2026, reproduce the registered
 tables byte for byte, and were uploaded on 23 October with the owner's yes:
 13 files, 9 MB, nothing else. The similar players embedding
 (`embedding.json`, prompt 18, trained 24 October 2026) and
-`processed/embeddings/` are not in S3 yet: the owner syncs them; until then
-step 6 of the run stops with a message naming the missing file. After a
-manual retrain, upload them again the same way, with the owner's yes
-(rule 8):
+`processed/embeddings/` followed on 25 October, also with the owner's yes
+(4 files). If `embedding.json` is ever missing, step 6 of the run stops with
+a message naming it. After a manual retrain, upload them again the same way,
+with the owner's yes (rule 8):
 
 ```bash
 uv run scout --config configs/backfill.ultra.yaml sync up --only processed

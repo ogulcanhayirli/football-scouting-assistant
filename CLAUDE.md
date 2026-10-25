@@ -151,8 +151,8 @@ bucket named by `$SCOUT_S3_BUCKET` (eu-central-1).
 | Labels | `data/processed/features/player_season_labels/...` | value now, 24 and 36 months (the 24 month growth feeds the bargains backtest) |
 | Team Elo | `data/processed/elo/*.parquet` | per match pre match ratings, club and league seasons |
 | Model outputs | `data/processed/models/*.parquet` | backtest predictions (`backtest_<model>.parquet`), `scouting.parquet`, `big_move_current.parquet`, labels |
-| Embeddings (prompt 18) | `data/processed/embeddings/` | `vectors.parquet` (93,474 regular player seasons from 2015 with match stats: keys, name, age, club, group, ability, `main`, 18 `style_*` and 48 `emb_*` columns), `neighbours.parquet` (today's 11,908 players, ten nearest each), `dictionary.csv`; written by `embed`, not in S3 yet (the owner syncs) |
-| Stored models | `data/processed/models/stored/` | the boosters behind the newest season's scores (`fair_value_fold_2024`, `fair_value_fold_2025`, `big_move_24m`, `elite`, `step_up`, `riser`; LightGBM text plus a `.json` of columns and training rows) and `ability_v2.json` (the ability fit); written by `backtest`, `moves`, `scouting`, read by `score`. Trained 21 October 2026; in S3 since 23 October (owner's yes; only these 13 files went up, and a dry run of `sync up --only processed` then found nothing to copy). Plus `embedding.json` (prompt 18, 24 October: shrinkage priors and the encoder, written by `embed --train`, read by `embed`), not in S3 yet |
+| Embeddings (prompt 18) | `data/processed/embeddings/` | `vectors.parquet` (93,474 regular player seasons from 2015 with match stats: keys, name, age, club, group, ability, `main`, 18 `style_*` and 48 `emb_*` columns), `neighbours.parquet` (today's 11,908 players, ten nearest each), `dictionary.csv`; written by `embed`; in S3 since 25 October (owner's yes) |
+| Stored models | `data/processed/models/stored/` | the boosters behind the newest season's scores (`fair_value_fold_2024`, `fair_value_fold_2025`, `big_move_24m`, `elite`, `step_up`, `riser`; LightGBM text plus a `.json` of columns and training rows) and `ability_v2.json` (the ability fit); written by `backtest`, `moves`, `scouting`, read by `score`. Trained 21 October 2026; in S3 since 23 October (owner's yes; only these 13 files went up, and a dry run of `sync up --only processed` then found nothing to copy). Plus `embedding.json` (prompt 18, 24 October: shrinkage priors and the encoder, written by `embed --train`, read by `embed`), in S3 since 25 October (owner's yes; with `processed/embeddings/` only these 4 files went up, and a dry run then found nothing left) |
 | The page | `data/site/` | `index.html` (both tables embedded, 1.8 MB, 0.3 MB gzip on 24 October) and `data/` (the two tables as CSV and Parquet, `dictionary.csv`, `similar.json`); published to `scout-site-<account>` |
 | User facing tables | `data/processed/lists/` | `candidates`, `bargains` (Parquet, CSV), `dictionary.csv` (see Outputs) |
 | Quota state, log | `data/state/` | |
@@ -615,14 +615,15 @@ Settle them with the owner rather than guessing.
   `transfers/transfers.parquet`, which the features and the big move labels
   read; merging them would change the stored features of the expansion
   leagues and is a retraining decision.
-* Similar players (prompt 18) are built locally on 24 October 2026 and not
-  in S3: `processed/embeddings/` (41 MB) and
-  `processed/models/stored/embedding.json` wait for the owner's
-  `sync up --only processed`; until then the weekly run stops at `scout
-  embed` with a message naming the missing file, and the live page has no
-  similar players (it was not republished from the session). `scout site`
-  writes `data/similar.json` saying "not available" when there are no
-  vectors, so the page itself never breaks.
+* Similar players (prompt 18, built 24 October 2026) went to S3 on 25
+  October with the owner's yes (`sync up --only processed`: 4 files,
+  `processed/embeddings/` with its 41 MB of vectors and
+  `processed/models/stored/embedding.json`; 3,321 already there; a dry run
+  after found nothing left), so the weekly run can embed. The live page has
+  no similar players until the next publish (the weekly run, once its setup
+  is done; the site bucket was outside this approval). `scout site` writes
+  `data/similar.json` saying "not available" when there are no vectors, so
+  the page itself never breaks.
 * Goalkeepers have weak style vectors (identity retrieval 5.7% learned
   against 5.0% for the baseline; outfield groups 11% to 30%): the same thin
   measures as the goalkeeper ability composite. A goalkeeper specific
