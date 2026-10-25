@@ -170,6 +170,32 @@ def cmd_transfermarkt(settings: Settings, args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_statsbomb(settings: Settings, args: argparse.Namespace) -> int:
+    if args.action == "download":
+        from scout.providers.statsbomb.client import download
+
+        summary = download(
+            LocalRawStore(settings.paths.raw_dir), settings.paths.raw_dir, settings.statsbomb
+        )
+        print(
+            f"StatsBomb: {summary['matches']} matches, {summary['requests']} requests this run, "
+            f"{summary['files']} files, {summary['bytes'] / 1e9:.2f} GB cached"
+        )
+        return 0
+    from scout.greats import write_match_table
+
+    frame = write_match_table(settings)
+    print(f"StatsBomb: {len(frame)} player match rows in {frame['fixture_id'].nunique()} matches")
+    return 0
+
+
+def cmd_greats(settings: Settings, args: argparse.Namespace) -> int:
+    from scout.greats import run_greats
+
+    print(run_greats(settings))
+    return 0
+
+
 def cmd_features(settings: Settings, args: argparse.Namespace) -> int:
     if args.current or args.season is not None:
         from scout.features import run_current_features
@@ -623,6 +649,22 @@ def main(argv: list[str] | None = None) -> int:
         "replaced files are moved to archive/<date>/",
     )
     tm.set_defaults(func=cmd_transfermarkt)
+
+    sbp = sub.add_parser(
+        "statsbomb",
+        help="StatsBomb open data (prompt 18b): download the configured seasons once, or build "
+        "the per match player table from the cache",
+    )
+    sbp.add_argument("action", choices=["download", "build"])
+    sbp.set_defaults(func=cmd_statsbomb)
+
+    greats = sub.add_parser(
+        "greats",
+        help="The measured greats: validate the StatsBomb mapping against API Football, peer "
+        "group vectors, the greats' table (data/processed/greats/) and reports/greats.md; "
+        "after statsbomb build and embed",
+    )
+    greats.set_defaults(func=cmd_greats)
 
     features = sub.add_parser("features", help="Build point in time feature and label tables")
     features.add_argument(

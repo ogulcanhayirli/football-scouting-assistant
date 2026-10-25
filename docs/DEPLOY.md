@@ -20,7 +20,8 @@ bucket. The data bucket stays private.
    processed/ ── read ──►  runner  ── write ──► processed/lists/
    raw/transfermarkt/ ──►           └─ write ──► S3 scout-site-<account> (public read, website)
                                                      index.html, data/*.csv, data/*.parquet,
-                                                     data/similar.json
+                                                     data/similar.json,
+                                                     statsbomb-logo.png (with the greats)
 ```
 
 The page is <http://scout-site-098499087060.s3-website.eu-central-1.amazonaws.com/>
@@ -29,8 +30,13 @@ on purpose). It holds the candidates and bargains tables, the dictionary and,
 since prompt 18, `data/similar.json` for the similar players panel (today's
 players and the earlier seasons of players once in the top 500 by value,
 with name, age, club, league, ability and the embedding as 8 bit integers;
-2.9 MB, 1.4 MB gzip encoded, loaded only when the panel opens), nothing
-else: `scout publish` refuses any other file (`src/scout/publish.py`).
+2.9 MB, 1.4 MB gzip encoded, loaded only when the panel opens) and, since
+prompt 18b, the measured greats inside the same file (read from
+`processed/greats/`, which the run pulls with the rest of `processed/`;
+`scout greats` writes it by hand, the run never rebuilds it) with
+`statsbomb-logo.png`, the logo the StatsBomb data agreement asks every
+published analysis to carry (without the logo the greats are left out),
+nothing else: `scout publish` refuses any other file (`src/scout/publish.py`).
 
 ## One time setup
 

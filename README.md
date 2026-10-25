@@ -51,6 +51,7 @@ chances shown as the rates that past forecasts actually achieved.
 | Weekly run (`.github/workflows/weekly.yml`) | Built, and the stored models are in S3 (23 October); waits for the `scout-weekly` user and the GitHub secrets and variables (docs/DEPLOY.md). A clean run of the same steps took 4 minutes 14 seconds on a 4 core machine |
 | Static page (`scout site`) and its bucket (`ScoutSite`) | Live since 21 October 2026 |
 | Similar players (`scout embed`, `scout similar`, decision 10) | Done 24 October 2026: a learned embedding finds the same player's other season among his five nearest 19.9% of the time against 13.2% for plain style vectors (0.35% at random); in S3 since 25 October, on the page at the next publish |
+| Measured greats (`scout greats`, prompt 18b) | Done 25 October 2026: StatsBomb open data (La Liga 2004/05 to 2020/21, Premier League 2003/04, 2.83 GB) mapped to our match table and checked against API Football (every kept measure correlates 0.7 or more per match; tackles and interceptions left out); 23 greats by age against today's players, with the calibrated elite chance, in a page tab at the next publish |
 | Free tier update of the current season | Not started: prompt 4, from 6 November; the weekly run skips it until its config exists |
 | Glue and Athena, Feature Store, SageMaker training stacks | Retired by decision 9, code in `infra/archive/`; still deployed until the owner removes them |
 
@@ -72,12 +73,15 @@ chances shown as the rates that past forecasts actually achieved.
                                                                 ▼ write
                          S3 site bucket (public read, static website hosting)
                          index.html with both tables embedded, data/*.csv, data/*.parquet,
-                         data/similar.json (the similar players panel, loaded on demand)
+                         data/similar.json (the similar players panel and the measured
+                         greats, loaded on demand), statsbomb-logo.png (with the greats)
 ```
 
 Deliberately small: one scheduled job and one static page, no servers. The
 site bucket is the only public resource; it holds the two tables, the
-dictionary and the similar players file and nothing else (`scout publish` refuses any other file). The
+dictionary, the similar players file and, with the measured greats, the
+StatsBomb logo its data agreement asks for, and nothing else (`scout publish`
+refuses any other file). The
 only infrastructure code is the `ScoutSite` CDK stack in `infra/`, which
 creates that bucket; the earlier analysis stacks are archived in
 `infra/archive/` with a note on why. Setup, secrets, the IAM policy and the
@@ -97,7 +101,7 @@ USD a month in all, far under the 5 USD alarm.
 src/scout/
   config.py, secrets.py     YAML settings (pydantic); API key from the environment or SSM
   ratelimit.py, storage.py  quota guard; raw cache, written last through an atomic rename
-  providers/                API Football client and adapters; Transfermarkt snapshot
+  providers/                API Football client and adapters; Transfermarkt snapshot; StatsBomb open data
   contracts/                pandera schemas for every table
   matching.py               player matching between sources
   backfill/                 season, match, injury and transfer runners, coverage reports
@@ -110,6 +114,7 @@ src/scout/
   lists.py                  the two tables, their dictionary, reports/candidates.md
   forecast.py               registered forecasts: freeze, score, history, revise
   embeddings.py             style vectors, the learned embedding, similar players
+  greats.py, greats_check.py  the measured greats from StatsBomb open data; the check against API Football
   site.py, site_template.html   the static page
   publish.py, sync.py       the weekly upload; copying data to and from S3
   cli.py                    `scout <command>`
@@ -162,6 +167,11 @@ $C transfermarkt          # the snapshot, once; --refresh for a newer release
 $C similar "Lamine Yamal"                 # plays like him now; --age-max, --league, --ability-min
 $C similar Rodri --at-age 21              # today's players aged 20 to 22 who look like he did
 
+# The measured greats (StatsBomb open data; download once, then offline)
+$C statsbomb download     # La Liga 2004/05 to 2020/21 and the Premier League 2003/04, 2.83 GB, cached
+$C statsbomb build        # per match player table, checked by the contract
+$C greats                 # mapping check against API Football, peer group vectors, reports/greats.md
+
 # Registered forecasts
 $C forecast freeze        # copy today's lists into forecasts/<date>; never overwrites
 $C forecast score forecasts/2026-10-21 --as-of 2027-06-30
@@ -197,6 +207,13 @@ site bucket are the one exception.
   no market value.
 * **The weekly run does not retrain.** It scores with the models stored on
   21 October 2026; new seasons of data need the manual retraining above.
+* **The measured greats before 2015/16 are rough sketches.** StatsBomb's
+  open seasons hold Barcelona's matches (Arsenal's for 2003/04), so a great
+  is measured against Barcelona and its opponents only: a thinner, biased
+  peer group, with no league or team adjustment (ours starts in 2010). On
+  2015/16, where the whole league exists too, the thin peer group moves a
+  Barcelona player's vector a long way (median cosine 0.68) and finds his
+  own season in the top five 16% of the time instead of 100% (MODELS.md).
 * **The page is plain HTTP.** S3 website hosting has no HTTPS, and
   CloudFront is left out on purpose; the page holds public tables only.
 
@@ -214,6 +231,14 @@ site bucket are the one exception.
   release and downloads only files whose ETag changed, moving the old copies
   to `data/raw/transfermarkt/archive/<date>/`; as of 2026-10-16 upstream
   updates are paused and the release of 5 September 2026 is the latest.
+* **StatsBomb open data** (github.com/statsbomb/open-data) supplies the
+  event data behind the measured greats (La Liga 2004/05 to 2020/21,
+  Barcelona's matches; the Premier League 2003/04, Arsenal's). Used under
+  the StatsBomb Public Data User Agreement: research and analysis only, no
+  commercial use, the data itself never passed on (it stays in the private
+  cache and bucket), and every published analysis carries the StatsBomb
+  logo, which the page shows next to the greats and in its footer.
+  StatsBomb asks users to register at statsbomb.com/resource-centre.
 * No site is scraped. No club logos or badges are stored or shown, and the
   `logo` and `photo` URLs in API responses are dropped by the adapter.
 
@@ -390,3 +415,17 @@ more often than chance. Search is a numpy product in memory, no vector
 database. *Would change if* the tests stopped favouring the learned model
 after a retrain (the stored model then holds the baseline), or richer
 event data (FBref) made a better style description possible.
+
+**D23. The measured greats: StatsBomb open data, trusted only as far as it
+was checked (prompt 18b).** StatsBomb's free event data reaches back to
+2004/05 for Barcelona and 2003/04 for Arsenal, which our API data cannot.
+Its events are counted into our own per match table, each measure checked
+against API Football on the 15,434 player matches both sources hold
+(2015/16 to 2020/21): measures below a correlation of 0.7 are left out
+(tackles, interceptions), and the StatsBomb seasons of 2015/16 land next to
+the same player's API Football season 79% of the time. The old seasons are
+measured against Barcelona and its opponents only, a thin and biased peer
+group, and say so on the page; the panel shows the calibrated elite chance
+next to every similarity so a style match is never mistaken for a forecast.
+*Would change if* a fuller source of old seasons appeared, or a correction
+for the opponents' bias were learned on 2015/16 and passed the same check.

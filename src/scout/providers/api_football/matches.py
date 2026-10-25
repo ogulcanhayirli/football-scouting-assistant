@@ -21,6 +21,7 @@ import pandas as pd
 from scout.config import LeagueConfig
 from scout.providers.api_football.adapter import _drop_negative_counts
 from scout.providers.api_football.client import SOURCE, ApiFootballClient
+from scout.providers.api_football.names import clean_names
 
 log = logging.getLogger(__name__)
 
@@ -234,6 +235,7 @@ def match_rows_to_frame(rows: list[dict]) -> pd.DataFrame:
         frame[column] = frame[column].astype("boolean")
     frame["kickoff"] = pd.to_datetime(frame["kickoff"], utc=True, errors="coerce").dt.as_unit("ns")
     _drop_negative_counts(frame, MATCH_NUMERIC_STATS)
+    clean_names(frame, log=log)  # before the shared id checks, which compare names
     return _fix_source_errors(frame)
 
 
@@ -629,7 +631,7 @@ def parse_fixture_lineups(
 
 
 def lineup_rows_to_frame(rows: list[dict]) -> pd.DataFrame:
-    frame = pd.DataFrame(rows, columns=LINEUP_COLUMNS)
+    frame = clean_names(pd.DataFrame(rows, columns=LINEUP_COLUMNS), log=log)
     for column in [
         "fixture_id",
         "league_id",
@@ -698,7 +700,7 @@ def parse_injuries(payload: dict[str, Any], league: LeagueConfig, season: int) -
 
 
 def injury_rows_to_frame(rows: list[dict]) -> pd.DataFrame:
-    frame = pd.DataFrame(rows, columns=INJURY_COLUMNS)
+    frame = clean_names(pd.DataFrame(rows, columns=INJURY_COLUMNS), log=log)
     for column in ["season", "fixture_id", "team_id", "source_player_id"]:
         frame[column] = pd.to_numeric(frame[column], errors="coerce").astype("Int64")
     frame["fixture_date"] = pd.to_datetime(

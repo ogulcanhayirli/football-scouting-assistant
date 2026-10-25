@@ -14,6 +14,7 @@ import pandas as pd
 
 from scout.config import LeagueConfig
 from scout.providers.api_football.client import SOURCE, ApiFootballClient
+from scout.providers.api_football.names import clean_names
 from scout.providers.base import SeasonInfo
 
 log = logging.getLogger(__name__)
@@ -150,6 +151,7 @@ def rows_to_frame(rows: list[dict]) -> pd.DataFrame:
     frame["captain"] = frame["captain"].astype("boolean")
     _drop_negative_counts(frame)
     frame["birth_date"] = pd.to_datetime(frame["birth_date"], errors="coerce")
+    clean_names(frame, log=log)
     return _fix_season_source_errors(frame)
 
 

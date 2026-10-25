@@ -76,6 +76,30 @@ class TransfermarktConfig(BaseModel):
     )
 
 
+class StatsBombCompetition(BaseModel):
+    """Competition seasons of the StatsBomb open data, by their names in
+    ``competitions.json`` and our league key."""
+
+    league_key: str
+    competition: str = Field(description="Name in competitions.json, e.g. 'La Liga'.")
+    seasons: list[int] = Field(description="Start years: 2004 means 2004/2005.")
+
+
+class StatsBombConfig(BaseModel):
+    """StatsBomb open data (github.com/statsbomb/open-data): non commercial
+    use, attributed with the StatsBomb logo (prompt 18b)."""
+
+    base_url: str = "https://raw.githubusercontent.com/statsbomb/open-data/master"
+    competitions: list[StatsBombCompetition] = Field(
+        default_factory=lambda: [
+            StatsBombCompetition(
+                league_key="la_liga", competition="La Liga", seasons=list(range(2004, 2021))
+            ),
+            StatsBombCompetition(league_key="epl", competition="Premier League", seasons=[2003]),
+        ]
+    )
+
+
 class PathsConfig(BaseModel):
     raw_dir: Path = Path("data/raw")
     processed_dir: Path = Path("data/processed")
@@ -111,6 +135,7 @@ class CompetitionConfig(LeagueConfig):
 class Settings(BaseModel):
     api_football: ApiFootballConfig
     transfermarkt: TransfermarktConfig = TransfermarktConfig()
+    statsbomb: StatsBombConfig = StatsBombConfig()
     leagues: list[LeagueConfig]
     competitions: list[CompetitionConfig] = Field(default_factory=list)
     paths: PathsConfig = PathsConfig()

@@ -13,6 +13,7 @@ from scout.providers.api_football.matches import (
     TEAM_NUMERIC,
     placeholder_blocks,
 )
+from scout.providers.api_football.names import NAME_COLUMNS, garbled
 
 MAX_SEASON_MINUTES = 5000  # 38 league matches of 90 minutes is 3,420; leaves room for stoppage
 RATIO_PAIRS = [
@@ -49,6 +50,18 @@ def _one_player_per_id(df: pd.DataFrame) -> bool:
     return bool((switches <= MAX_CLUB_SWITCHES).all())
 
 
+def _names_repaired(df: pd.DataFrame) -> bool:
+    """No name the adapter's repair would still change (rule 7: UTF-8 read as
+    Latin-1, HTML entities)."""
+    return not any(garbled(df[c]).any() for c in NAME_COLUMNS if c in df)
+
+
+NAMES_REPAIRED = Check(
+    _names_repaired,
+    name="names_repaired",
+    error="a name is garbled (UTF-8 read as Latin-1, or an HTML entity): repair it in the adapter",
+)
+
 _count = {"nullable": True, "checks": Check.ge(0)}
 
 PLAYER_SEASON_STATS = DataFrameSchema(
@@ -72,7 +85,7 @@ PLAYER_SEASON_STATS = DataFrameSchema(
         "minutes": Column("Float64", Check.in_range(0, MAX_SEASON_MINUTES), nullable=True),
         "rating": Column("Float64", Check.in_range(0, 10), nullable=True),
     },
-    checks=[_not_greater(p, w) for p, w in RATIO_PAIRS],
+    checks=[NAMES_REPAIRED, *[_not_greater(p, w) for p, w in RATIO_PAIRS]],
     unique=["source_player_id", "team_id", "league_id", "season"],
     strict=False,
     coerce=False,
@@ -139,6 +152,7 @@ PLAYER_MATCH_STATS = DataFrameSchema(
         "rating": Column("Float64", Check.in_range(0, 10), nullable=True),
     },
     checks=[
+        NAMES_REPAIRED,
         *[_not_greater(p, w) for p, w in MATCH_RATIO_PAIRS],
         *[_with_attempts(p, w) for p, w in MATCH_RATIO_PAIRS if w != "team_goals"],
         Check(
@@ -332,6 +346,7 @@ MATCH_LINEUPS = DataFrameSchema(
         "grid_col": Column("Int64", Check.in_range(1, 7), nullable=True),
         "starter": Column(bool),
     },
+    checks=[NAMES_REPAIRED],
     unique=["fixture_id", "team_id", "source_player_id"],
     strict=False,
     coerce=False,
@@ -348,6 +363,7 @@ INJURIES = DataFrameSchema(
         "status": Column(str, nullable=True),
         "reason": Column(str, nullable=True),
     },
+    checks=[NAMES_REPAIRED],
     unique=["fixture_id", "source_player_id"],
     strict=False,
     coerce=False,
@@ -366,6 +382,7 @@ TRANSFERS = DataFrameSchema(
         ),
         "fee_eur": Column("Float64", Check.ge(0), nullable=True),
     },
+    checks=[NAMES_REPAIRED],
     unique=["source_player_id", "transfer_date", "team_out_id", "team_in_id"],
     strict=False,
     coerce=False,
@@ -386,6 +403,7 @@ SQUADS = DataFrameSchema(
             str, Check.isin(["Goalkeeper", "Defender", "Midfielder", "Attacker"]), nullable=True
         ),
     },
+    checks=[NAMES_REPAIRED],
     unique=["team_id", "source_player_id"],
     strict=False,
     coerce=False,
@@ -436,7 +454,7 @@ COACH_SPELLS = DataFrameSchema(
         "start_date": Column("datetime64[ns]", **_dated),
         "end_date": Column("datetime64[ns]", **_dated),
     },
-    checks=[_not_greater("start_date", "end_date")],
+    checks=[NAMES_REPAIRED, _not_greater("start_date", "end_date")],
     unique=["coach_id", "team_id", "start_date", "end_date"],
     strict=False,
     coerce=False,
@@ -458,6 +476,7 @@ FIXTURE_EVENTS = DataFrameSchema(
         "type": Column(str, nullable=True),
         "detail": Column(str, nullable=True),
     },
+    checks=[NAMES_REPAIRED],
     unique=["fixture_id", "event_index"],
     strict=False,
     coerce=False,

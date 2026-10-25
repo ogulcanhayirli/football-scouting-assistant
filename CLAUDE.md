@@ -115,6 +115,10 @@ $C forecast window-score                    # reports/window_window-2027-01.md, 
 $C sync up | down [--dry-run] [--only raw|processed|reports|transfermarkt]
 uv run python scripts/run_extras.py          # sidelined, coaches, events (done 17 October)
 uv run python scripts/rebuild_match_seasons.py --from-s3 serie_b:2016  # re-parse partitions offline after an adapter repair
+uv run python scripts/repair_names.py [--dry-run]  # the adapter's name repair on processed partitions built before it (prompt 18b)
+$C statsbomb download                        # StatsBomb open data, once: La Liga 2004/05 to 2020/21, Premier League 2003/04
+$C statsbomb build                           # data/processed/statsbomb/player_match_stats/, checked by the contract
+$C greats                                    # mapping check against API Football, peer group vectors, the greats' table, reports/greats.md (after embed and lists)
 ```
 
 Also `athena "SQL"`, `featurestore ingest | pit --as-of DATE`,
@@ -153,6 +157,9 @@ bucket named by `$SCOUT_S3_BUCKET` (eu-central-1).
 | Model outputs | `data/processed/models/*.parquet` | backtest predictions (`backtest_<model>.parquet`), `scouting.parquet`, `big_move_current.parquet`, labels |
 | Embeddings (prompt 18) | `data/processed/embeddings/` | `vectors.parquet` (93,474 regular player seasons from 2015 with match stats: keys, name, age, club, group, ability, `main`, 18 `style_*` and 48 `emb_*` columns), `neighbours.parquet` (today's 11,908 players, ten nearest each), `dictionary.csv`; written by `embed`; in S3 since 25 October (owner's yes) |
 | Stored models | `data/processed/models/stored/` | the boosters behind the newest season's scores (`fair_value_fold_2024`, `fair_value_fold_2025`, `big_move_24m`, `elite`, `step_up`, `riser`; LightGBM text plus a `.json` of columns and training rows) and `ability_v2.json` (the ability fit); written by `backtest`, `moves`, `scouting`, read by `score`. Trained 21 October 2026; in S3 since 23 October (owner's yes; only these 13 files went up, and a dry run of `sync up --only processed` then found nothing to copy). Plus `embedding.json` (prompt 18, 24 October: shrinkage priors and the encoder, written by `embed --train`, read by `embed`), in S3 since 25 October (owner's yes; with `processed/embeddings/` only these 4 files went up, and a dry run then found nothing left) |
+| StatsBomb raw cache (prompt 18b) | `data/raw/statsbomb/` | 1,829 files, 2.83 GB (2,825,097,646 bytes): `competitions.json`, `matches/`, `lineups/`, `events/` (904 matches, each with a `.meta.json`), `files/LICENSE.pdf` and `files/statsbomb-logo.png`; fetched 25 October 2026 from the repository's master branch; not yet in S3 |
+| StatsBomb tables (prompt 18b) | `data/processed/statsbomb/` | `player_match_stats/league=<key>/season=<year>.parquet` (30,714 rows, StatsBomb ids, never mixed with API Football rows) and `vectors.parquet` (every StatsBomb season with minutes, peer group standardised and embedded); not yet in S3 |
+| The measured greats (prompt 18b) | `data/processed/greats/` | `greats.parquet` (239 seasons of 23 greats, one per age, 48 `emb_*`), `greats.json` (label, attribution, excluded measures), `statsbomb-logo.png`; read by `scout site`; not yet in S3 |
 | The page | `data/site/` | `index.html` (both tables embedded, 1.8 MB, 0.3 MB gzip on 24 October) and `data/` (the two tables as CSV and Parquet, `dictionary.csv`, `similar.json`); published to `scout-site-<account>` |
 | User facing tables | `data/processed/lists/` | `candidates`, `bargains` (Parquet, CSV), `dictionary.csv` (see Outputs) |
 | Quota state, log | `data/state/` | |
@@ -257,6 +264,17 @@ October 2026, from MODELS.md and `reports/`:
   0.571 with the level kept. Replacement check: the signing is among the
   departed player's ten nearest 1.52% against 0.65% at random (1.02%
   baseline). `reports/embeddings.md`, MODELS.md.
+* The measured greats (prompt 18b, `reports/greats.md`): StatsBomb's events
+  mapped to our match table agree with API Football per player and match
+  (La Liga 2015/16 to 2020/21, 15,434 player matches) at 0.726 to 0.999 for
+  every kept measure; tackles (0.625) and interceptions (0.675) fall under
+  the 0.7 rule and are left out of the StatsBomb vectors. A StatsBomb
+  season of 2015/16 (whole league as peers) finds the same player's API
+  Football season in its top five 79.1% of the time; with Barcelona and its
+  opponents as peers (every season before 2015/16) 14.3% (28.6% with every
+  measure kept). On 2015/16 the thin peer group alone takes a Barcelona
+  regular's top five hit from 100% to 15.8% (cosine 0.68 between the two
+  vectors): the pre 2015 greats are rough sketches. MODELS.md.
 * Bargains (19 October, 37 leagues, seasons 2015 to 2023, experienced 30 to
   33): the top 50 gained value far more often than matched peers (prime
   63.2% against 43.3%, experienced 11.0% against 4.5%), but moved to a club
@@ -307,7 +325,7 @@ every backtest number next to its baseline, then the dictionary.
 The public face is one static page (`scout site`, `src/scout/site.py` and
 `site_template.html`): both tables as JSON inside one HTML file, plain
 JavaScript (no library), tabs for candidates, bargains (prime,
-experienced) and similar players (prompt 18), sortable columns, filters for position, age, league and flags,
+experienced), similar players (prompt 18) and measured greats (prompt 18b), sortable columns, filters for position, age, league and flags,
 a search box, a card layout on phones, and a "how to read this" box (calibrated
 odds from past seasons, not predictions beyond the market; the valuation
 date; the forecast date; the five season window; club today and season so
@@ -324,9 +342,19 @@ only when first opened; opened as a local file the page says it cannot load
 it. Live at
 <http://scout-site-098499087060.s3-website.eu-central-1.amazonaws.com/>
 since 21 October 2026. A bargain's rising tag is the riser top 50 of
-`scouting.parquet`, the same set the candidates mark. `scout publish` sends
-only the page, the two tables with the dictionary and `similar.json` (an
-allowlist). Model
+`scouting.parquet`, the same set the candidates mark. The Measured greats
+tab (prompt 18b) picks a great and an age and lists today's players of that
+age (in the middle of the season) and his position group nearest to him,
+each with two numbers side by side, the similarity and the calibrated elite
+chance of the candidates table (blank outside the elite pool), an "elite
+pool only" switch, the label "style similarity from box score stats is
+coarse; the same player is found in the top five about one time in five;
+treat lists as shortlists", the peer group caveat, and the StatsBomb logo
+and credit (also in the footer); its data is a `greats` block inside
+`similar.json`, and today's rows there carry `age_mid`. `scout publish`
+sends only the page, the two tables with the dictionary, `similar.json`
+and, with the greats, `statsbomb-logo.png` (an allowlist; without the logo
+`scout site` leaves the greats out). Model
 detail stays in `reports/scouting.md`, `reports/moves.md`,
 `reports/backtest_fair_value.md`, `reports/ability.md` and `reports/elo.md`.
 
@@ -419,6 +447,7 @@ detail stays in `reports/scouting.md`, `reports/moves.md`,
 ## Version 2 directions
 
 * Similar players, tested by finding the same player's other season among the nearest neighbours: **done 24 October (prompt 18, decision 10).**
+* The measured greats from StatsBomb open data, against today's players with the calibrated elite chance: **done 25 October (prompt 18b).**
 * January window forecast, published mid December and scored in February.
 * A capped chat over the two tables.
 * A matchup report before any match model.
@@ -461,6 +490,8 @@ src/scout/  config, secrets, ratelimit, storage, sync, athena, featurestore,
             training, scouting, cli
   providers/api_football/   client, season, match, transfer adapters
   providers/transfermarkt/  snapshot download and adapter
+  providers/statsbomb/      open data download (client) and the events to match stats mapping (adapter, MAPPING)
+  providers/api_football/names.py  the garbled name repair (rule 7) every API Football adapter applies
   contracts/                pandera schemas for every table
   backfill/                 season, match, injury and transfer runners
   elo.py, elo_compare.py    team Elo from cached fixtures; comparison report
@@ -469,6 +500,7 @@ src/scout/  config, secrets, ratelimit, storage, sync, athena, featurestore,
   forecast.py               registered forecasts: freeze, score, history
   window.py                 the January window forecast: freeze, score
   embeddings.py             style vectors, the learned embedding, identity and replacement tests, similar player search
+  greats.py, greats_check.py  the measured greats: season rows, peer standardisation, level, the greats' table, report; the check against API Football
   season_so_far.py          the season so far block (features --current)
   present.py                club today and season so far in both tables
   backfill/current.py       scout current: squads, transfers, the season in progress
@@ -481,7 +513,7 @@ src/scout/  config, secrets, ratelimit, storage, sync, athena, featurestore,
   models/                   targets, backtest, estimators, moves, run, store (the stored models)
 forecasts/  registered forecasts, one dated folder each (committed)
 training/   SageMaker entry point and requirements
-scripts/    feasibility.py, run_extras.py, rebuild_match_seasons.py, run_expansion.py
+scripts/    feasibility.py, run_extras.py, rebuild_match_seasons.py, run_expansion.py, repair_names.py
 tests/      unit, contracts, fixtures (synthetic)
 infra/      CDK app (ScoutSite) and its tests; archive/ holds the retired stacks
 docs/       DEPLOY.md (the weekly run, secrets, IAM policy, cost), AWS_SETUP.md
@@ -609,7 +641,9 @@ Settle them with the owner rather than guessing.
   24 October, 51 candidates' value ranks swap by one with a neighbour of the
   same value (Matanović and Beraldo, both €22m, #513 and #514). The order of
   rows, deciles and every chance are unchanged; a stable tie break is not
-  yet in `value_ranks`.
+  yet in `value_ranks`. The rebuild of 25 October (prompt 18b) showed 49
+  such swaps, and in the bargains 103 values differing in the 16th digit
+  (400000.0000000002 against 400000.0000000001).
 * The new transfer lists (830 clubs, all 37 leagues and the cups) are kept
   as snapshots under `processed/current/transfers/` and are not merged into
   `transfers/transfers.parquet`, which the features and the big move labels
@@ -629,7 +663,27 @@ Settle them with the owner rather than guessing.
   measures as the goalkeeper ability composite. A goalkeeper specific
   description needs data the API lacks (claims, sweeping, distribution
   length).
-* About ten player names arrive garbled from API Football (UTF-8 read as
-  Latin-1: "O. HÃ¸jlund", "V. RÃ­os") and show so on the page and in the
-  similar players search; a repair belongs in the adapter (rule 7) and was
-  left for a separate change.
+* Garbled names (prompt 18b, rule 7): `clean_name` in every API Football
+  adapter decodes UTF-8 read as Latin-1 or Windows-1252 and unescapes HTML
+  entities, and the contracts reject a name it would still change. Not ten
+  but 741 distinct names in 379 of 1,986 processed partitions (most the
+  `&apos;` of N'Diaye, O'Brien); `scripts/repair_names.py` repaired them on
+  25 October, then `features --current`, `score`, `embed`, `lists`,
+  `site` and `greats` ran: 9 candidates' and 3 bargains' names changed and
+  nothing else (bar the tie order and float noise above). Feature rows of
+  seasons before 2025 keep the old names until the next full `scout
+  features` (the similar players history rows show them).
+* Prompt 18b local changes await the owner's `sync up` (none was made):
+  `raw/statsbomb/` (2.83 GB), `processed/statsbomb/`, `processed/greats/`
+  (the weekly run needs it for the greats tab), the 379 repaired partitions,
+  the rebuilt 2025 feature partitions, `models/` outputs of `score`,
+  `embeddings/`, `lists/`, `reports/greats.md` and `reports/candidates.md`.
+  The registered forecast folders are unchanged.
+* The measured greats leave three calls to the owner: keep the 0.7 rule
+  (the two excluded measures help the thin seasons' identity check, 28.6%
+  against 14.3%) or keep the measures; build a correction for the
+  opponents' bias learned on 2015/16, where both peer groups exist; and
+  register with StatsBomb (statsbomb.com/resource-centre), as its user
+  agreement asks. StatsBomb's 2015/16 La Liga is complete, so it was
+  downloaded in full (380 matches) and serves the validation and the bias
+  measurement; the other seasons are Barcelona's matches only.

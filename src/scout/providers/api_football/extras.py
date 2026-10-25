@@ -24,6 +24,7 @@ from typing import Any
 import pandas as pd
 
 from scout.providers.api_football.client import SOURCE, ApiFootballClient
+from scout.providers.api_football.names import clean_names
 
 log = logging.getLogger(__name__)
 
@@ -162,7 +163,7 @@ def parse_coaches(payload: dict[str, Any]) -> list[dict]:
 def coach_rows_to_frame(rows: list[dict], today: date) -> pd.DataFrame:
     """Coach spells. A missing end means the spell is still running. The same
     spell arrives once per team the coach worked for, so repeats are dropped."""
-    frame = pd.DataFrame(rows, columns=COACH_COLUMNS)
+    frame = clean_names(pd.DataFrame(rows, columns=COACH_COLUMNS), log=log)
     for column in ["coach_id", "team_id"]:
         frame[column] = pd.to_numeric(frame[column], errors="coerce").astype("Int64")
     for column in ["birth_date", "start_date", "end_date"]:
@@ -243,7 +244,7 @@ def parse_fixture_events(fixture: dict[str, Any]) -> list[dict]:
 def event_rows_to_frame(rows: list[dict]) -> pd.DataFrame:
     """A player or assist id of 0 or less means unknown and becomes missing; a
     minute outside 0 to ``MAX_ELAPSED`` or negative added time becomes missing."""
-    frame = pd.DataFrame(rows, columns=EVENT_COLUMNS)
+    frame = clean_names(pd.DataFrame(rows, columns=EVENT_COLUMNS), log=log)
     for column in [
         "fixture_id",
         "league_id",

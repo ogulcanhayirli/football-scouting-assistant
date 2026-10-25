@@ -22,6 +22,7 @@ from typing import Any
 import pandas as pd
 
 from scout.providers.api_football.client import SOURCE, ApiFootballClient
+from scout.providers.api_football.names import clean_names
 
 log = logging.getLogger(__name__)
 
@@ -118,7 +119,7 @@ def transfer_rows_to_frame(rows: list[dict]) -> pd.DataFrame:
     * the same move (player and both clubs) listed again within 60 days is
       kept once, at its first date
     """
-    frame = pd.DataFrame(rows, columns=TRANSFER_COLUMNS)
+    frame = clean_names(pd.DataFrame(rows, columns=TRANSFER_COLUMNS), log=log)
     for column in ["source_player_id", "team_out_id", "team_in_id"]:
         frame[column] = pd.to_numeric(frame[column], errors="coerce").astype("Int64")
     for column in ["team_out_id", "team_in_id"]:

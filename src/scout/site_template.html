@@ -194,6 +194,10 @@ tr.sim td { padding: 0 10px 12px; }
 #sim-out:empty { display: none; }
 #sim-out .query { color: var(--muted); margin: 0 0 10px; }
 .note { color: var(--muted); font-size: 13px; max-width: 100ch; }
+.label { background: var(--warn-soft); color: var(--warn); border-radius: 8px; padding: 9px 12px; font-weight: 600; font-size: 13.5px; max-width: 100ch; margin: 0 0 12px; }
+.pair { display: flex; gap: 4px 14px; flex-wrap: wrap; margin-top: 2px; font-size: 13px; }
+.pair b { font-variant-numeric: tabular-nums; }
+.credit img, footer img.logo { height: 26px; vertical-align: middle; background: #fff; padding: 3px 6px; border-radius: 6px; margin-right: 8px; }
 footer { margin-top: 28px; color: var(--muted); font-size: 13px; border-top: 1px solid var(--line); padding-top: 14px; }
 footer p { margin: 6px 0; max-width: 100ch; }
 @media (max-width: 760px) {
@@ -201,6 +205,7 @@ footer p { margin: 6px 0; max-width: 100ch; }
   header h1 { font-size: 21px; }
   .controls { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .controls input, .controls select { width: 100%; }
+  .controls input[type="checkbox"] { width: auto; }
   .controls .actions { grid-column: 1 / -1; }
   .controls .search { grid-column: 1 / -1; }
   table, thead, tbody, tr, td { display: block; }
@@ -237,6 +242,7 @@ footer p { margin: 6px 0; max-width: 100ch; }
     <button class="tab" role="tab" id="tab-candidates" data-tab="candidates">Candidates <span class="n"></span></button>
     <button class="tab" role="tab" id="tab-bargains" data-tab="bargains">Bargains <span class="n"></span></button>
     <button class="tab" role="tab" id="tab-similar" data-tab="similar">Similar players</button>
+    <button class="tab" role="tab" id="tab-greats" data-tab="greats">Measured greats</button>
   </div>
 
   <div id="tables">
@@ -305,6 +311,19 @@ footer p { margin: 6px 0; max-width: 100ch; }
     <p class="status" id="sim-status" aria-live="polite"></p>
     <div id="sim-out"></div>
     <p class="note" id="sim-note"></p>
+  </section>
+
+  <section id="greats" hidden>
+    <p class="label" id="gr-label"></p>
+    <div class="controls">
+      <label>Great <select id="gr-name"></select></label>
+      <label class="search">At age <select id="gr-age"></select></label>
+      <div class="checks"><label><input type="checkbox" id="gr-pool"> Elite pool only</label></div>
+    </div>
+    <p class="status" id="gr-status" aria-live="polite"></p>
+    <div id="gr-out"></div>
+    <p class="note" id="gr-note"></p>
+    <p class="note credit" id="gr-credit"></p>
   </section>
 
   <footer id="footer"></footer>
@@ -434,6 +453,7 @@ footer p { margin: 6px 0; max-width: 100ch; }
   var state = {
     tab: location.hash === "#bargains" ? "bargains" : "candidates",
     similar: location.hash === "#similar",
+    greats: location.hash === "#greats",
     list: "prime",
     shown: PAGE,
     sort: { candidates: { key: "order", dir: 1 }, bargains: { key: "rank", dir: 1 } }
@@ -565,12 +585,13 @@ footer p { margin: 6px 0; max-width: 100ch; }
   function refresh() { state.shown = PAGE; draw(); }
 
   function tabs() {
-    var on = state.similar ? "similar" : state.tab;
+    var on = state.greats ? "greats" : state.similar ? "similar" : state.tab;
     document.querySelectorAll(".tab").forEach(function (t) {
       t.setAttribute("aria-selected", String(t.dataset.tab === on));
     });
-    $("tables").hidden = state.similar;
+    $("tables").hidden = state.similar || state.greats;
     $("similar").hidden = !state.similar;
+    $("greats").hidden = !state.greats;
   }
 
   // Similar players (prompt 18): data/similar.json, loaded on first use
@@ -614,6 +635,7 @@ footer p { margin: 6px 0; max-width: 100ch; }
         return list[list.length - 1];
       });
       SIM = { available: true, d: d, today: today, byId: byId, seasons: seasons, people: people };
+      if (d.greats && d.greats.available) SIM.greats = greatRows(d.greats, d);
       options($("sim-league"), d.leagues, "All leagues");
       return SIM;
     });
@@ -743,6 +765,7 @@ footer p { margin: 6px 0; max-width: 100ch; }
   }
   function openSimilar(id) {
     state.similar = true;
+    state.greats = false;
     history.replaceState(null, "", "#similar");
     tabs();
     simDraw();
@@ -750,6 +773,95 @@ footer p { margin: 6px 0; max-width: 100ch; }
     loadSimilar().then(function () {
       if (id != null) { sim.mode = "now"; pick(id); } else { simDraw(); }
     }, function () { $("sim-status").textContent = ""; $("sim-out").innerHTML = simFailed(); });
+  }
+
+  // Measured greats (prompt 18b): in data/similar.json, searched against today's players
+
+  var ELITE = {};
+  DATA.candidates.forEach(function (o) { ELITE[o.player_id] = o; });
+  var gr = { name: null, age: null };
+
+  function greatRows(t, d) {
+    var vec = int8(t.vectors);
+    return t.rows.map(function (r, i) {
+      var o = { _v: vec, _at: i * d.dim };
+      t.columns.forEach(function (c, j) { o[c] = r[j]; });
+      return o;
+    });
+  }
+  function greatNames() {
+    var seen = {}, out = [];
+    SIM.greats.forEach(function (o) { if (!seen[o.great]) { seen[o.great] = true; out.push(o.great); } });
+    return out.sort(function (a, b) { return a.localeCompare(b); });
+  }
+  function greatAges(name) {
+    return SIM.greats.filter(function (o) { return o.great === name; });
+  }
+  function eliteCell(id) {
+    var c = ELITE[id];
+    if (!c) return "elite chance: not rated (not in the candidates table)";
+    if (c.elite_chance_pct == null) return "elite chance: outside the elite pool";
+    return "elite chance <b>" + (c.elite_chance_pct < 5 ? "under 5%" : c.elite_chance_pct + "%") + "</b> of " + int(c.elite_chance_players) + " past players, decile " + c.elite_decile;
+  }
+  function setupGreats() {
+    var g = SIM && SIM.available ? SIM.d.greats : null;
+    if (!g || !g.available) {
+      $("gr-status").textContent = "The measured greats are not built yet.";
+      return;
+    }
+    $("gr-label").textContent = g.label;
+    var names = greatNames();
+    if (!gr.name || names.indexOf(gr.name) < 0) gr.name = names.indexOf("Lionel Messi") >= 0 ? "Lionel Messi" : names[0];
+    $("gr-name").innerHTML = names.map(function (n) {
+      return '<option value="' + esc(n) + '"' + (n === gr.name ? " selected" : "") + ">" + esc(n) + "</option>";
+    }).join("");
+    greatAgeOptions();
+    $("gr-note").innerHTML = "<b>Similar means plays the same way, not as good.</b> Each great's season is described as today's players are: his per 90 numbers and his share of the team's shots, dribbles, passes and duels against his position group that season, with his level taken out, through the same learned embedding. " +
+      "From 2015/16 the seasons are our own (API Football, every league). <b>Before 2015/16 they come from StatsBomb event data of Barcelona's league matches</b> (Arsenal's for 2003/04), so the peer group a season is measured against is <b>Barcelona and its opponents only</b>: thinner (most opponents are seen once or twice a season) and biased (their numbers are those of a team playing Barcelona). The level is taken out with an ability percentile inside that same group, and comparisons across eras are rough: our league and team adjustment starts in 2010 and is not applied to these seasons. " +
+      (g.excluded && g.excluded.length ? "Left out of the StatsBomb seasons because the two sources disagree on them (match correlation below 0.7): " + g.excluded.map(function (m) { return esc(m.replace(/_per90$/, "").replace(/_total/, "").replace(/_/g, " ")); }).join(" and ") + ". " : "") +
+      "Ages are in the middle of the season (1 January; 1 July in calendar year leagues), so Messi at 19 is 2006/07, and today's players are aged the same way. A thin season (under 450 minutes) is mostly the position average. The elite chance is the calibrated one of the Candidates tab and exists only for the elite pool (ranked #" + D.elite_pool.from + " to #" + int(D.elite_pool.to) + " by value and " + D.elite_pool.max_age + " or under).";
+    $("gr-credit").innerHTML = '<img src="' + esc(g.logo) + '" alt="StatsBomb">' + esc(g.attribution);
+    greatsDraw();
+  }
+  function greatAgeOptions() {
+    var ages = greatAges(gr.name);
+    if (!ages.some(function (o) { return o.age === gr.age; })) {
+      var nineteen = ages.filter(function (o) { return o.age === 19; })[0];
+      gr.age = (nineteen || ages.filter(function (o) { return !o.thin; })[0] || ages[0]).age;
+    }
+    $("gr-age").innerHTML = ages.map(function (o) {
+      return '<option value="' + o.age + '"' + (o.age === gr.age ? " selected" : "") + ">" + o.age + " · " + seasonLabel(o.season) + " " + esc(o.club) +
+        (o.source === "statsbomb" ? " (StatsBomb)" : "") + (o.thin ? " · thin, " + int(o.minutes) + " min" : "") + "</option>";
+    }).join("");
+  }
+  function greatsDraw() {
+    if (!SIM || !SIM.greats) return;
+    var q = greatAges(gr.name).filter(function (o) { return o.age === gr.age; })[0];
+    if (!q) { $("gr-out").innerHTML = ""; return; }
+    var only = $("gr-pool").checked;
+    var pool = SIM.today.filter(function (o) {
+      if (SIM.d.groups[o.group] !== q.group || Math.floor(o.age_mid) !== q.age) return false;
+      return !only || (ELITE[o.id] && ELITE[o.id].elite_chance_pct != null);
+    });
+    var found = nearest(q, pool, 10);
+    var line = esc(q.great) + ", " + seasonLabel(q.season) + " at " + esc(q.club) + " (" + esc(q.league) + "), " + esc(q.group.replace(/_/g, " ")) +
+      ", age " + q.age + " in the middle of the season, " + int(q.minutes) + " league minutes, ability " + q.ability + " percentile among his peers; " +
+      (q.source === "statsbomb" ? "StatsBomb data, peer group " + esc(q.peers) : "our own data, peer group " + esc(q.peers));
+    $("gr-status").textContent = q.thin ? "A thin season (" + int(q.minutes) + " minutes): his vector is mostly the position average, so these neighbours say little." : "";
+    var items = found.length ? '<ol class="simlist">' + found.map(function (p) {
+      var o = p.o;
+      var meta = [o.position, Math.floor(o.age_mid) + " years", clubOf(o), o.leagueName].filter(Boolean).map(esc).join(" · ");
+      return '<li><span class="name">' + esc(o.name) + '</span> <span class="meta">' + meta + '</span><div class="pair"><span>similarity <b>' + p.sim.toFixed(2) + "</b></span><span>" + eliteCell(o.id) + '</span></div><span class="small">ability ' + o.ability + " percentile</span></li>";
+    }).join("") + "</ol>" : '<p class="none">No player of today matches: that age and position group' + (only ? " in the elite pool" : "") + " is empty.</p>";
+    $("gr-out").innerHTML = '<p class="query">' + line + "</p><h3>Today's " + esc(q.group.replace(/_/g, " ")) + "s aged " + q.age + " nearest to him" + (only ? ", elite pool only" : "") + "</h3>" + items;
+  }
+  function openGreats() {
+    state.greats = true;
+    state.similar = false;
+    history.replaceState(null, "", "#greats");
+    tabs();
+    $("gr-status").textContent = SIM ? "" : "Loading the measured greats.";
+    loadSimilar().then(setupGreats, function () { $("gr-status").textContent = ""; $("gr-out").innerHTML = simFailed(); });
   }
 
   function dictionary() {
@@ -800,6 +912,7 @@ footer p { margin: 6px 0; max-width: 100ch; }
       "<a href=\"data/bargains.parquet\">bargains</a>.</p>" +
       "<p>Sources: player statistics from API Football (api-football.com), used under the owner's subscription; raw responses are not published. " +
       "Market values and transfers from transfermarkt-datasets by dcaribou (github.com/dcaribou/transfermarkt-datasets), derived from Transfermarkt (transfermarkt.com), used for non commercial purposes only and credited here. No club logos or photos are stored or shown.</p>" +
+      (D.greats ? '<p><img class="logo" src="statsbomb-logo.png" alt="StatsBomb">The Measured greats tab uses StatsBomb open data (github.com/statsbomb/open-data) for seasons before 2015/16, for non commercial use with attribution; only results computed from it are shown, never the data.</p>' : "") +
       "<p>A non commercial project. Every chance is a historical rate with its count, not a promise about a single player.</p>";
   }
 
@@ -808,7 +921,9 @@ footer p { margin: 6px 0; max-width: 100ch; }
   document.querySelectorAll(".tab").forEach(function (t) {
     t.addEventListener("click", function () {
       if (t.dataset.tab === "similar") { openSimilar(); return; }
+      if (t.dataset.tab === "greats") { openGreats(); return; }
       state.similar = false;
+      state.greats = false;
       state.tab = t.dataset.tab;
       history.replaceState(null, "", state.tab === "bargains" ? "#bargains" : "#candidates");
       ["q", "age-min", "age-max"].forEach(function (id) { $(id).value = ""; });
@@ -857,6 +972,9 @@ footer p { margin: 6px 0; max-width: 100ch; }
   });
   ["sim-at", "sim-age-min", "sim-age-max", "sim-ability"].forEach(function (id) { $(id).addEventListener("input", simDraw); });
   $("sim-league").addEventListener("change", simDraw);
+  $("gr-name").addEventListener("change", function () { gr.name = $("gr-name").value; greatAgeOptions(); greatsDraw(); });
+  $("gr-age").addEventListener("change", function () { gr.age = Number($("gr-age").value); greatsDraw(); });
+  $("gr-pool").addEventListener("change", greatsDraw);
 
   header();
   howto();
@@ -866,6 +984,7 @@ footer p { margin: 6px 0; max-width: 100ch; }
   setupTab();
   draw();
   if (state.similar) openSimilar();
+  if (state.greats) openGreats();
 })();
 </script>
 </body>

@@ -989,6 +989,242 @@ players aged Y minus 1 to Y plus 1). Examples, top five:
   S. Mladenović, B. Mazurek, I. Alemayehu.
 * Mike Maignan now: I. Radu, Fábio, M. Di Gregorio, Joel Robles, M. Bleve.
 
+## The measured greats (prompt 18b, 25 October 2026)
+
+`scout statsbomb download | build` and `scout greats` (`src/scout/providers/statsbomb/`,
+`src/scout/greats.py`, `src/scout/greats_check.py`; report `reports/greats.md`).
+Nothing here feeds the lists' models.
+
+**Data.** StatsBomb open data (github.com/statsbomb/open-data): La Liga
+2004/05 to 2020/21 and the Premier League 2003/04, matches, lineups and
+events, cached byte for byte under `data/raw/statsbomb` (rule 4): 1,829
+files, 2.83 GB (2,825,097,646 bytes), 904 matches, plus the user agreement
+and the logo. Before 2015/16 a season holds Barcelona's league matches only,
+and in the early seasons only those Messi played (7 in 2004/05, 17 in
+2005/06, 26 in 2006/07); the Premier League 2003/04 is Arsenal's 38;
+2015/16 is complete (380). The StatsBomb Public Data User Agreement allows
+research and published analysis, not commercial use and not passing the
+data on (1.2), and asks every published analysis to carry the StatsBomb
+logo (1.4): the page shows results computed from the data with the logo,
+never the data. StatsBomb also asks users to register at
+statsbomb.com/resource-centre (the owner's step).
+
+**The mapping.** `parse_match` turns one match into our per match player
+table (`PLAYER_MATCH_STATS` passes on all 30,714 rows; ids are StatsBomb's
+own and the table lives in `processed/statsbomb/`, never mixed with API
+Football rows). Minutes come from the lineups on a regulation clock, as API
+Football counts them. Where no equivalent exists the measure is missing,
+never zero. Three definitions were chosen on the comparison below between
+principled alternatives, and say so: passes leave out throw ins, duels
+include fouls won and committed (r 0.858 against 0.804 without), and
+blocks are shot blocks only (0.726 against 0.368 for every block).
+
+| Column | StatsBomb event | What is counted |
+|---|---|---|
+| `minutes` | Lineups: positions | time between each spell's from and to (blank: the final whistle), regulation clock (first half capped at 45, second at 90, extra time at 105 and 120) |
+| `goals` | Shot | outcome Goal, periods 1 to 4; own goals (Own Goal Against) not counted |
+| `assists` | Pass | pass.goal_assist |
+| `shots_total` | Shot | every outcome, periods 1 to 4 |
+| `shots_on` | Shot | outcome Goal, Saved or Saved To Post |
+| `passes_total` | Pass | every pass but throw ins (pass.type Throw-in) |
+| `passes_key` | Pass | pass.shot_assist or pass.goal_assist |
+| `passes_accurate` | Pass | no pass.outcome (complete), throw ins left out |
+| `tackles_total` | Duel | duel.type Tackle, every outcome |
+| `blocks` | Block | blocks of a shot (the Block's related event is a Shot) |
+| `interceptions` | Interception | every outcome |
+| `duels_total` | Duel, 50/50, Dribble, Dribbled Past, aerial_won, Foul Won, Foul Committed | tackles (Duel Tackle), aerials lost (Duel Aerial Lost), aerials won (aerial_won on a Pass, Shot, Clearance or Miscontrol), 50/50s, dribbles, times dribbled past, fouls won and committed |
+| `duels_won` | Duel, 50/50, Dribble, aerial_won, Foul Won | tackles with outcome Won or Success (In Play, Out), aerials won, 50/50s Won or Success To Team, dribbles Complete, fouls won |
+| `dribbles_attempts` | Dribble | every outcome |
+| `dribbles_success` | Dribble | outcome Complete |
+| `dribbled_past` | Dribbled Past | every event |
+| `fouls_drawn` | Foul Won | every event |
+| `fouls_committed` | Foul Committed | every event |
+| `cards_yellow` | Lineups: cards | Yellow Card |
+| `cards_red` | Lineups: cards | Red Card or Second Yellow |
+| `saves` | Goal Keeper | goalkeeper.type Shot Saved, Shot Saved to Post, Penalty Saved (to Post), Save |
+| `goals_conceded` | Goal Keeper | goalkeeper.type Goal Conceded or Penalty Conceded; goalkeepers only |
+| `penalty_won` | Foul Won | foul_won.penalty |
+| `penalty_committed` | Foul Committed | foul_committed.penalty |
+| `penalty_scored` | Shot | shot.type Penalty, outcome Goal, periods 1 to 4 |
+| `penalty_missed` | Shot | shot.type Penalty, any other outcome |
+| `penalty_saved` | Goal Keeper | goalkeeper.type Penalty Saved (to Post) |
+| `rating` | none | no equivalent: missing |
+| `offsides` | none | no equivalent (the player caught offside is rarely recorded): missing |
+| `captain` | none | no equivalent: missing |
+
+**Validation, the same player and match.** La Liga 2015/16 to 2020/21 is in
+both sources: 551 of 552 StatsBomb matches found in API Football (same day,
+score and club names), 15,434 player matches linked (shirt number with a
+name check) where both give minutes. API Football's blank counts read as 0
+where its league season records them for anyone, as the style inputs read
+them. Difference is StatsBomb minus API Football per match.
+
+| Measure | Player matches | Correlation | Mean StatsBomb | Mean API Football | Difference |
+|---|---|---|---|---|---|
+| `minutes` | 15,434 | 0.989 | 71.00 | 70.83 | +0.18 |
+| `goals` | 15,434 | 0.999 | 0.10 | 0.10 | +0.00 |
+| `assists` | 15,434 | 0.963 | 0.07 | 0.07 | -0.00 |
+| `shots_total` | 15,434 | 0.985 | 0.88 | 0.86 | +0.02 |
+| `shots_on` | 15,434 | 0.982 | 0.32 | 0.33 | -0.00 |
+| `passes_total` | 15,434 | 0.955 | 34.48 | 26.35 | +8.14 |
+| `passes_key` | 15,434 | 0.940 | 0.62 | 0.65 | -0.03 |
+| `dribbles_attempts` | 15,434 | 0.831 | 1.36 | 1.24 | +0.13 |
+| `dribbles_success` | 15,434 | 0.776 | 0.77 | 0.66 | +0.11 |
+| `duels_total` | 15,434 | 0.858 | 8.39 | 7.34 | +1.04 |
+| `duels_won` | 15,434 | 0.810 | 4.01 | 3.67 | +0.33 |
+| `tackles_total` | 3,971 | 0.625 (below 0.7) | 1.16 | 0.71 | +0.45 |
+| `interceptions` | 15,434 | 0.675 (below 0.7) | 1.06 | 1.25 | -0.19 |
+| `blocks` | 3,971 | 0.726 | 0.22 | 0.13 | +0.09 |
+| `fouls_drawn` | 15,434 | 0.915 | 1.07 | 0.91 | +0.16 |
+| `fouls_committed` | 15,434 | 0.905 | 1.12 | 0.95 | +0.17 |
+| `dribbled_past` | 15,434 | 0.676 (below 0.7) | 0.84 | 0.66 | +0.18 |
+| `saves` | 15,434 | 0.986 | 0.23 | 0.22 | +0.00 |
+| `cards_yellow` | 15,434 | 0.968 | 0.18 | 0.19 | -0.00 |
+
+By season, the measures whose agreement moves:
+
+| Season | Passes r | diff | Completed passes r | diff | Tackles r | Interceptions r | Blocks r |
+|---|---|---|---|---|---|---|---|
+| 2015/16 | 0.948 | +9.2 | 0.983 | +1.1 |  | 0.675 |  |
+| 2016/17 | 0.963 | +7.4 | 0.981 | +1.0 |  | 0.667 |  |
+| 2017/18 | 0.963 | +7.1 | 0.979 | +0.6 | 0.320 | 0.656 | 0.433 |
+| 2018/19 | 0.974 | +7.1 | 0.988 | +0.9 | 0.764 | 0.691 | 0.910 |
+| 2019/20 | 0.984 | +6.6 | 0.996 | +0.8 | 0.791 | 0.672 | 0.870 |
+| 2020/21 | 0.994 | +1.3 | 0.990 | -3.9 | 0.822 | 0.623 | 0.675 |
+
+API Football's pass count is the completed passes until 2019/20 (StatsBomb's
+completed passes match it within a pass a match, r 0.98) and every pass from
+2020/21 (r 0.994, +1.3): a definition change in the source, absorbed by the
+season by season standardisation, and worth knowing when reading pass
+numbers across seasons in our own data. Tackles and blocks exist in API
+Football's La Liga only from 2017/18, and its 2017/18 tackles disagree with
+StatsBomb (0.32) while 2018/19 to 2020/21 agree at about 0.8.
+
+**Rule applied: a measure whose match counts correlate below 0.7 is left out
+of the StatsBomb vectors** (it reads as the position mean): tackles per 90
+(tackles 0.625) and interceptions per 90 (interceptions 0.675). 16 of 18
+measures stay. Season level, the same player and season with 450 minutes or
+more in both:
+
+| Measure | Player seasons | Correlation |
+|---|---|---|
+| `goals_per90` | 364 | 0.991 |
+| `assists_per90` | 331 | 0.953 |
+| `shots_total_per90` | 516 | 0.990 |
+| `passes_key_per90` | 516 | 0.982 |
+| `passes_total_per90` | 517 | 0.973 |
+| `dribbles_success_per90` | 515 | 0.929 |
+| `dribble_success_rate` | 484 | 0.661 |
+| `duels_won_per90` | 515 | 0.879 |
+| `duel_win_rate` | 513 | 0.677 |
+| `tackles_total_per90` | 73 | 0.624 |
+| `interceptions_per90` | 515 | 0.889 |
+| `blocks_per90` | 67 | 0.816 |
+| `fouls_drawn_per90` | 516 | 0.976 |
+| `saves_per90` | 37 | 0.984 |
+
+Interceptions per 90 agree well by season (0.889) though not by match; the
+rule was set on the match level before looking and is kept.
+
+**Cross source identity check.** Each StatsBomb regular season of 2015/16
+to 2020/21 linked to API Football, embedded with the stored model through
+the peer group pipeline below (the player in his API Football position
+group), searched among every API Football main row of that season and
+group: is his own API Football season among the five nearest?
+
+| Seasons | Peer group | Searches | Top 5 | Random | Median rank | Median pool |
+|---|---|---|---|---|---|---|
+| 2015/16, with the exclusions | whole league | 392 | 79.1% | 1.11% | 2 | 487 |
+| 2016/17 to 2020/21, with the exclusions | Barcelona and opponents | 98 | 14.3% | 0.62% | 25 | 874 |
+| all, with the exclusions | both | 490 | 66.1% | 1.01% | 2 | 487 |
+| 2015/16, every measure | whole league | 392 | 76.0% | 1.11% | 2 | 487 |
+| 2016/17 to 2020/21, every measure | Barcelona and opponents | 98 | 28.6% | 0.62% | 16 | 874 |
+| all, every measure | both | 490 | 66.5% | 1.01% | 2 | 487 |
+
+Where the peer group is the whole league (2015/16) the StatsBomb season
+lands next to the same player's own season 79.1% of the time (median rank
+2): the mapping measures the same football. Where the peer group is
+Barcelona and its opponents (2016/17 on, as every season before 2015/16 has)
+it does so 14.3% of the time (median rank 25, 98 searches), above 0.62% at
+random but far from the full league. With every measure kept the thin
+seasons do better (28.6%); the rule's two exclusions cost information
+there. Whether to keep the rule or the two measures is the owner's call.
+
+**Peers and level (before 2015/16).** Each StatsBomb season is standardised
+within position group and season against the players in those matches with
+90 minutes or more. **This peer group is Barcelona and its opponents only
+(Arsenal and its opponents for 2003/04): thinner, since most opponents are
+seen once or twice a season, and biased, since every opponent's numbers are
+those of a team playing Barcelona.** A thin peer group would inflate a
+regular's standardised values (shrunk low minute peers have little spread),
+so the true spread of each measure is estimated from the peers by the
+method of moments (squared deviation over 1 + k / minutes, k the stored
+prior minutes) and a regular's shrunk deviation is divided by it times the
+square root of the mean shrinkage weight our own regulars get, which is what
+our standardisation divides by on a full league. The level is removed with
+an ability percentile computed inside the same peer group (stored version 2
+weights over the shrunk measures, pooled with the previous season by
+minutes, no league or team term) and the level curves of our own data (a
+cubic per position group over 2015 to 2025), since 30 to 60 peers per group
+and season are too few to fit one. **Cross era comparisons are rough: our
+league and team adjustment starts in 2010 and is not applied to these
+seasons at all.**
+
+What the thin peer group costs, measured on 2015/16 where both exist:
+Barcelona's 19 regulars standardised against the whole league (502 players)
+and against Barcelona and its opponents only (276). The two vectors of the
+same player season have a median cosine of 0.68 (lowest 0.50), and his own
+API Football season is in the top five 100% of the time with the whole
+league against 15.8% with the thin peer group (median rank 1 against 25).
+The pre 2015 greats are therefore rough sketches. A correction learned on
+2015/16 (the opponents' bias by measure and group, where both peer groups
+exist) could narrow it; not built, the owner's call.
+
+**The greats.** 23 greats, 239 seasons, one per age: Messi from 17 to 38
+(StatsBomb to 2014/15, then our own data through Paris and Miami), Xavi,
+Iniesta, Busquets, Puyol, Piqué, Dani Alves, Henry, Vieira, Bergkamp and
+Pirès from StatsBomb (and our own data from 2015/16 for those still
+playing), and Ronaldo, Modrić, Ramos, Lewandowski, Kroos, Neymar, Suárez,
+De Bruyne, Kanté, Van Dijk, Buffon and Chiellini from our own data (2015
+on). Ages are taken in the middle of the season (1 January; 1 July in
+calendar year leagues), so Messi at 19 is 2006/07, and today's players are
+aged the same way. A season under 450 minutes is kept and marked thin (9 of
+239, Messi at 17 among them with 74 minutes): mostly the position mean.
+
+Examples (today's players of that age and the great's position group; the
+elite chance is the calibrated one of the candidates table, which exists
+only for the elite pool, 23 or under):
+
+* **Messi at 19** (2006/07, 2,001 minutes): G. De Pieri (Bari, 0.63),
+  N. Irankunda (Watford, 0.61), Lucas Ferreira (São Paulo, 0.59), M. Caprini
+  (Mantova, 0.59), B. Touré (Hoffenheim, 0.58, elite chance 20%). In the
+  elite pool: B. Touré, Jan Virgili (15%), S. El Mala (30%).
+* **Xavi at 25** (2005/06, a thin season: 437 minutes in the 17 matches
+  StatsBomb holds): N. Madsen (QPR, 0.62), A. Zorgane (Union St. Gilloise),
+  L. Johnsen (Malmö), E. López (Envigado), Alonso Coello (Toronto). At 26
+  (2006/07, 2,002 minutes): A. Sánchez (Atlético Tucumán), A. Mironov
+  (Rostov), Manu Morlanes (Mallorca), S. Sanna (Laval), A. Dozzell
+  (Portsmouth).
+* **Henry at 26** (Arsenal 2003/04, 3,328 minutes): E. Latte Lath (Atlanta,
+  0.72), J. Ardaiz (Sarmiento), Rafael Elias (Kyoto Sanga), M. Toye (Sporting
+  Kansas City), P. Judd (San Jose).
+
+Similar means plays the same way with the level taken out, so the nearest
+are rarely stars; the page labels every result "style similarity from box
+score stats is coarse; the same player is found in the top five about one
+time in five; treat lists as shortlists".
+
+**Garbled names (rule 7).** API Football sends some names as UTF-8 read as
+Latin-1 or Windows-1252 ("O. H\u00c3\u00b8jlund") or with HTML entities
+("M. O&apos;Riley"). `scout.providers.api_football.names.clean_name`
+repairs both in every adapter (a run that does not decode to a letter is
+left alone), and the contracts reject a name it would still change. 741
+distinct names in 379 of 1,986 processed partitions were affected, far more
+than the ten first noticed (most were the `&apos;` of N'Diaye, O'Brien and
+D'Alessandro); `scripts/repair_names.py` applied the same repair to them
+(a pure function of the name, so the same as parsing the cache again). On
+the 2025 tables 9 candidates' and 3 bargains' names changed.
+
 ## Next
 
 1. The clean check above: tune on earlier seasons, score on later ones.

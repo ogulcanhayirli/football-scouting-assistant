@@ -15,10 +15,17 @@
   earlier season of players once ranked in the top ``HISTORY_TOP`` by value,
   each with name, age, club, league, ability and his embedding as 8 bit
   integers (``scout embed``). Without embeddings it says so and the page
-  shows a note.
+  shows a note. Since prompt 18b it also holds the measured greats
+  (``scout greats``): each great's season vector by age, for the page to
+  search today's players of that age; today's rows carry their age in the
+  middle of the season for it;
+* ``statsbomb-logo.png``: the logo the StatsBomb user agreement asks every
+  published analysis of its data to carry, written only with the greats
+  (no greats are shown without it).
 
-Only the two tables, the dictionary and the similar players file are
-published, never raw match stats or API responses. The rising tag of a
+Only the two tables, the dictionary, the similar players file and the logo
+are published, never raw match stats, API responses or StatsBomb data (the
+greats are results computed from it). The rising tag of a
 bargain is the riser model's top 50 of ``scouting.parquet``
 (``scout.lists.rising_ids``), the same set the candidates table marks;
 nothing else is read from the model outputs.
@@ -45,6 +52,7 @@ log = logging.getLogger(__name__)
 TEMPLATE = Path(__file__).with_name("site_template.html")
 PUBLISHED = ("candidates", "bargains")  # each as .csv and .parquet, plus dictionary.csv
 SIMILAR = "similar.json"  # in data/, next to the downloads
+LOGO = "statsbomb-logo.png"  # next to the page, only with the greats
 HISTORY_TOP = 500  # "looks like X at Y": every season of players once ranked this high
 SCALE = 127  # unit vectors as 8 bit integers
 
@@ -193,6 +201,7 @@ def page_data(
     built: pd.Timestamp,
     forecasts: list[dict],
     tracked: int,
+    greats: bool = False,
 ) -> dict:
     """Everything the page shows, as plain JSON values."""
     season = int(cand["season"].max())
@@ -220,6 +229,7 @@ def page_data(
         "so_far_date": _day(cand["so_far_date"].max()) if "so_far_date" in cand else None,
         "leagues": int(cand["league"].nunique()),
         "tracked": tracked,
+        "greats": greats,
         "candidates": _records(cand, [*CANDIDATE_COLUMNS, "flag_keys"]),
         "bargains": _records(barg, [*BARGAIN_COLUMNS, "flag_keys"]),
         "dictionary": _records(words, ["table", "column", "meaning"]),
@@ -240,16 +250,67 @@ def _int8(frame: pd.DataFrame, columns: list[str]) -> str:
     return base64.b64encode(q.tobytes()).decode("ascii")
 
 
+def greats_data(greats: pd.DataFrame | None, info: dict | None, leagues: dict[str, str]) -> dict:
+    """The measured greats block of the similar players file: one row per
+    great and age (in the middle of the season), the vectors as 8 bit
+    integers, the label and the caveats the tab shows."""
+    if greats is None or greats.empty or info is None:
+        return {"available": False}
+    emb = [c for c in greats.columns if c.startswith("emb_")]
+    rows = greats.sort_values(["great", "age_years"], kind="stable")
+    parts = [
+        rows["great"].tolist(),
+        rows["season"].astype(int).tolist(),
+        rows["age_years"].astype(int).tolist(),
+        rows["source"].tolist(),
+        rows["team"].tolist(),
+        rows["league_key"].map(leagues).fillna(rows["league_key"]).tolist(),
+        rows["group"].tolist(),
+        rows["minutes"].astype(float).round(0).astype(int).tolist(),
+        rows["thin"].astype(bool).tolist(),
+        rows["ability_pct"].astype(float).round(0).astype(int).tolist(),
+        rows["peers"].tolist(),
+    ]
+    return {
+        "available": True,
+        "label": info["label"],
+        "attribution": info["attribution"],
+        "excluded": info.get("excluded", []),
+        "identity_hit": info.get("identity_hit"),
+        "logo": LOGO,
+        "columns": [
+            "great",
+            "season",
+            "age",
+            "source",
+            "club",
+            "league",
+            "group",
+            "minutes",
+            "thin",
+            "ability",
+            "peers",
+        ],
+        "rows": [list(r) for r in zip(*parts, strict=True)],
+        "vectors": _int8(rows, emb),
+    }
+
+
 def similar_data(
     vectors: pd.DataFrame | None,
     current: pd.DataFrame | None,
     leagues: dict[str, str],
     tested: dict | None = None,
+    greats: dict | None = None,
+    calendar_leagues=(),
 ) -> dict:
     """The similar players file: today's players (main rows of the newest
     season) and the earlier seasons of players once ranked in the top
     ``HISTORY_TOP`` by value, rows as lists, vectors as one base64 string
-    of 8 bit integers per table (row after row)."""
+    of 8 bit integers per table (row after row); and the measured greats
+    (``greats_data``), with today's age in the middle of the season."""
+    from scout.greats import mid_season_age
+
     if vectors is None or vectors.empty:
         return {"available": False}
     emb = [c for c in vectors.columns if c.startswith("emb_")]
@@ -267,6 +328,7 @@ def similar_data(
     else:
         main["club_now"] = None
     today = main[main["season"] == newest].sort_values("player_name", kind="stable")
+    today = today.assign(age_mid=mid_season_age(today, calendar_leagues))
     once_top = main.loc[main["value_rank"] <= HISTORY_TOP, "source_player_id"].unique()
     history = main[(main["season"] < newest) & main["source_player_id"].isin(once_top)]
     history = history.sort_values(["source_player_id", "season"], kind="stable")
@@ -282,7 +344,8 @@ def similar_data(
         out = {
             "columns": ["id", "name", "season", "age", "group", "position", "club", "league"]
             + (["club_now"] if with_now else [])
-            + ["ability", "value_rank"],
+            + ["ability", "value_rank"]
+            + (["age_mid"] if with_now else []),
             "rows": [],
             "vectors": _int8(rows, columns),
         }
@@ -300,6 +363,8 @@ def similar_data(
             parts.append(_codes(rows["club_now"], clubs))
         parts.append(rows["ability_pct"].astype(float).round(0).astype(int).tolist())
         parts.append([int(v) if pd.notna(v) else None for v in rows["value_rank"]])
+        if with_now:
+            parts.append((np.floor(rows["age_mid"].astype(float) * 10) / 10).tolist())
         out["rows"] = [list(r) for r in zip(*parts, strict=True)]
         return out
 
@@ -316,6 +381,7 @@ def similar_data(
         "clubs": clubs,
         "today": table(today, with_now=True),
         "history": table(history, with_now=False),
+        "greats": greats or {"available": False},
     }
 
 
@@ -347,6 +413,8 @@ def build_site(settings, out_dir: Path | None = None, forecasts_root: Path = Pat
     newest = scouting[scouting["season"].astype(int) == season]
     tm = TransfermarktValuationProvider(settings.paths.raw_dir / "transfermarkt")
     latest = newest["value_date"].max()
+    greats, info, logo = _greats_inputs(processed)
+    greats_ready = all(x is not None for x in (greats, info, logo))
     data = page_data(
         cand,
         barg,
@@ -358,6 +426,7 @@ def build_site(settings, out_dir: Path | None = None, forecasts_root: Path = Pat
         built=pd.Timestamp.now(tz="UTC"),
         forecasts=registered_forecasts(forecasts_root),
         tracked=len(settings.leagues),
+        greats=greats_ready,
     )
     out_dir.mkdir(parents=True, exist_ok=True)
     page = out_dir / "index.html"
@@ -373,10 +442,21 @@ def build_site(settings, out_dir: Path | None = None, forecasts_root: Path = Pat
     shutil.copyfile(lists_dir / "dictionary.csv", downloads / "dictionary.csv")
     written.append(downloads / "dictionary.csv")
     vectors, current, tested = _similar_inputs(processed)
-    similar = similar_data(vectors, current, league_names(settings), tested)
+    names = league_names(settings)
+    calendar = [lg.key for lg in settings.leagues if lg.calendar_year]
+    great_block = greats_data(greats, info, names) if greats_ready else {"available": False}
+    similar = similar_data(vectors, current, names, tested, great_block, calendar)
     target = downloads / SIMILAR
     atomic_write_text(target, json.dumps(similar, ensure_ascii=False, separators=(",", ":")))
     written.append(target)
+    stale_logo = out_dir / LOGO
+    if great_block["available"]:
+        shutil.copyfile(logo, stale_logo)
+        written.append(stale_logo)
+    else:
+        stale_logo.unlink(missing_ok=True)  # no greats, no logo
+        if greats is not None:
+            log.warning("site: greats left out: no %s next to them", LOGO)
     if not similar["available"]:
         log.warning("site: no embeddings; run `scout embed` (the similar panel shows a note)")
     log.info(
@@ -398,3 +478,19 @@ def _similar_inputs(processed: Path) -> tuple:
     stored = store_dir(processed) / STORED
     tested = json.loads(stored.read_text()).get("tested") if stored.is_file() else None
     return vectors, current, tested
+
+
+def _greats_inputs(processed: Path) -> tuple:
+    """The greats' table, its notes and the logo (``scout greats``), each None
+    when missing."""
+    from scout.greats import GREATS_OUT
+
+    folder = Path(processed) / GREATS_OUT
+    table = folder / "greats.parquet"
+    info = folder / "greats.json"
+    logo = folder / LOGO
+    return (
+        pd.read_parquet(table) if table.is_file() else None,
+        json.loads(info.read_text()) if info.is_file() else None,
+        logo if logo.is_file() else None,
+    )

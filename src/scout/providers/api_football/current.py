@@ -31,6 +31,7 @@ from scout.config import LeagueConfig
 from scout.providers.api_football.client import SOURCE, ApiFootballClient
 from scout.providers.api_football.extras import joined
 from scout.providers.api_football.matches import FINISHED
+from scout.providers.api_football.names import clean_names
 
 log = logging.getLogger(__name__)
 
@@ -123,7 +124,7 @@ def squad_rows_to_frame(rows: list[dict]) -> pd.DataFrame:
     a player id is dropped; an age outside 14 to 46, a shirt number outside
     1 to 99 and an unknown position become missing; a player listed twice
     in one squad is kept once."""
-    frame = pd.DataFrame(rows, columns=SQUAD_COLUMNS)
+    frame = clean_names(pd.DataFrame(rows, columns=SQUAD_COLUMNS), log=log)
     for column in ["team_id", "source_player_id", "age", "shirt_number"]:
         frame[column] = pd.to_numeric(frame[column], errors="coerce").astype("Int64")
     frame["as_of"] = pd.to_datetime(frame["as_of"]).astype("datetime64[ns]")
