@@ -14,15 +14,18 @@ bucket. The data bucket stays private.
    5. scout score                          stored models (processed/models/stored/), no training
    6. scout embed                          stored embedding: vectors, today's ten nearest each
    7. scout archetypes                     archetypes/*/*.yaml reloaded and checked, their vectors
-   8. scout lists, scout site              the two tables, explanations, index.html, similar.json
-   9. scout publish                        processed/lists/ in the data bucket, the site bucket
+   8. scout lists                          the two tables and their explanations
+   9. scout reports                        prompt 19: written reports, checked; never blocks
+  10. scout site                           index.html, similar.json, reports.json
+  11. scout publish                        processed/lists/ and processed/reports_text/ in the
+                                           data bucket, the site bucket
                                                     │
  S3 football-scout-data-<owner> (private)            ▼
-   processed/ ── read ──►  runner  ── write ──► processed/lists/
-   raw/transfermarkt/ ──►           └─ write ──► S3 scout-site-<account> (public read, website)
-                                                     index.html, data/*.csv, data/*.parquet,
-                                                     data/similar.json,
-                                                     statsbomb-logo.png (with the greats)
+   processed/ ── read ──►  runner  ── write ──► processed/lists/, processed/reports_text/
+   raw/transfermarkt/ ──►    │      └─ write ──► S3 scout-site-<account> (public read, website)
+                             │                       index.html, data/*.csv, data/*.parquet,
+   Claude API (Message  ◄────┘ step 9 only,          data/similar.json, data/reports.json,
+   Batches) with ANTHROPIC_API_KEY                   statsbomb-logo.png (with the greats)
 ```
 
 The page is <http://scout-site-098499087060.s3-website.eu-central-1.amazonaws.com/>
@@ -68,9 +71,10 @@ being readable; the deploy of 21 October succeeded, so it is off today.
 ### 2. An IAM user for the weekly run
 
 `scout-weekly` may read the processed tables and the Transfermarkt snapshot,
-and write only `processed/lists/` and the site bucket. It cannot delete
-anything, and it cannot touch `raw/api_football/`, `reports/` or any other
-bucket.
+and write only `processed/lists/`, `processed/reports_text/` (prompt 19: the
+written reports, kept so the next run reuses every one whose facts did not
+change) and the site bucket. It cannot delete anything, and it cannot touch
+`raw/api_football/`, `reports/` or any other bucket.
 
 ```bash
 ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
@@ -104,6 +108,12 @@ cat > scout-weekly.json <<EOF
       "Resource": "arn:aws:s3:::${DATA}/processed/lists/*"
     },
     {
+      "Sid": "KeepTheReports",
+      "Effect": "Allow",
+      "Action": "s3:PutObject",
+      "Resource": "arn:aws:s3:::${DATA}/processed/reports_text/*"
+    },
+    {
       "Sid": "WriteTheSite",
       "Effect": "Allow",
       "Action": "s3:PutObject",
@@ -122,6 +132,11 @@ aws iam create-access-key --user-name scout-weekly
 The last command prints `AccessKeyId` and `SecretAccessKey` once. Put them
 into GitHub (next step) and clear the CloudShell screen.
 
+If `scout-weekly` was created before prompt 19, run the `put-user-policy`
+line again with the file above to add `KeepTheReports`. Without it the run
+still publishes; `scout publish` logs a warning that `processed/reports_text/`
+was not kept, and the next run writes again every report it cannot reuse.
+
 ### 3. GitHub secrets and variables
 
 In the repository: Settings, Secrets and variables, Actions.
@@ -131,12 +146,17 @@ In the repository: Settings, Secrets and variables, Actions.
 | Secret | `AWS_ACCESS_KEY_ID` | `AccessKeyId` of `scout-weekly` |
 | Secret | `AWS_SECRET_ACCESS_KEY` | `SecretAccessKey` of `scout-weekly` |
 | Secret | `API_FOOTBALL_KEY` | the API Football key (used by the free tier update only) |
+| Secret | `ANTHROPIC_API_KEY` | a Claude API key for the written reports (prompt 19); optional: without it the step logs one line and the page shows the explanations written by rule |
 | Variable | `SCOUT_S3_BUCKET` | `football-scout-data-ogulcanhayirli` |
 | Variable | `SCOUT_SITE_BUCKET` | `scout-site-098499087060` |
 
 The bucket names are variables, not secrets, so the logs can show the page
 address. The first step of the run fails with the name of any secret or
-variable that is missing.
+variable that is missing, except `ANTHROPIC_API_KEY`, which is optional.
+
+The Claude API key comes from the Claude Console (API keys). Give it its own
+workspace with a monthly spend limit (a few dollars is plenty, see The scout
+reports below) so a mistake can never cost more than that.
 
 ### 4. The stored models in S3 (done 23 October 2026)
 
@@ -237,6 +257,70 @@ So the run and the page add a few cents at most. The rest of the bill is
 unchanged: the data bucket's 8.7 GB (about 0.21 USD a month, plus any old
 versions it keeps) and the retired stacks while they stay deployed (next to
 nothing). About 0.25 to 0.50 USD a month in all.
+
+## The scout reports (prompt 19)
+
+Step 9 runs `scout reports` (`src/scout/reports_text.py`): for every player of
+the two tables (2,734 on the 24 October tables: 1,830 candidates and 1,602
+bargains, 698 in both) a fact sheet is built from the table columns, Claude
+Haiku 5.5 writes 120 to 150 words from it through the Message Batches API,
+code checks every number and proper noun against the sheet, a failing report
+goes back with the findings at most twice, and after that the explanation
+written by rule is shown. A report is written again only when its fact sheet
+changed (`fact_hash`); otherwise the stored one is reused. Each run, Claude
+Sonnet 5.5 judges 50 reports not judged before (structured output: faithful
+with the offending passage, hedging adequate, readability 1 to 5).
+
+* **The step never blocks the page.** Without the `ANTHROPIC_API_KEY` secret it
+  logs one line and does nothing; any failure is ignored (`continue-on-error`);
+  batches still running after `max_run_minutes` (100) are cancelled and their
+  players show the explanation this week.
+* **Hard token cap** (`reports_text.max_tokens_per_run` in
+  `configs/backfill.ultra.yaml`, 30 million): before a batch is sent, each
+  request's worst case (its input counted at one token per two bytes, which
+  is above any real count, plus its `max_tokens`) is added to what the run
+  has used, and requests that could pass the cap are held back until the
+  next run. The judge's worst case is kept free first. A full first round
+  is about 13.5 million tokens in the worst case.
+* **Cost line.** The run's cost is computed from the usage fields of every
+  reply (input, cache writes at 2 times for the one hour cache, cache reads at
+  0.1 times, output; half price through the Message Batches API) and printed
+  in the run's summary as one line, `Reports: <n> written (<n> failed the
+  check first, <n> still after retries, <n> held), <n> reused, <n> judged;
+  cost $<total> (writer $<x>, judge $<y>); <tokens> of 30,000,000 tokens.`
+  Every run also appends its numbers to `processed/reports_text/runs.jsonl`.
+
+What it should cost. No real run exists yet (no key in the session that built
+it), so these are estimates from the sizes of the 24 October fact sheets
+(`scout reports --dry-run`): the fixed prefix about 1,240 tokens, a sheet
+about 490, a report about 220 plus about 230 of thinking at low effort, a
+judge verdict about 800 with its thinking. Rates: Claude Haiku 5.5 0.10 and
+0.50 USD per million input and output tokens, Claude Sonnet 5.5 2 and 10,
+both halved in a batch.
+
+| Run | Estimate |
+|---|---|
+| Full regeneration, writer (2,734 reports, prefix read from the cache) | about 0.40 USD |
+| The same with no cache hit at all (every request writes the prefix) | about 0.70 USD |
+| Retries (one report in five failing the check once) | about 0.10 USD more |
+| Judge, 50 reports | about 0.30 USD |
+| **Full regeneration with the judge** | **about 0.70 to 1.10 USD** |
+| **Weekly run, nothing changed** (today: the tables are rebuilt byte for byte until a `scout current` pull) | **about 0.30 USD** (the judge only) |
+| Weekly run after a pull that moves the season so far of most players | about a full regeneration |
+
+So about 1.20 USD a month while nothing changes and at most about 4.50 USD
+a month if every week brought new data, billed by Anthropic, not AWS. The
+first real run's cost line replaces these estimates.
+
+For the owner, each run writes `reports/reports_text.md` (the run in numbers,
+the judge's verdicts, and 20 of the judged reports with their facts, the ones
+the judge faulted first) and `reports/judge_sample.csv` with the same 20 rows.
+Write yes or no in `owner_agrees` and append the rows to `judge/agreement.csv`
+in the repository; the page's "how to read this" box shows the agreement rate
+from the next run on. The weekly run keeps both files as the artifact
+`scout-reports-judged` of the run (Actions, the run, Artifacts; 90 days); a
+session running `scout reports` writes them under `reports/`. Every verdict
+also stays in `processed/reports_text/verdicts.jsonl`.
 
 ## Retraining (manual, never in the weekly run)
 

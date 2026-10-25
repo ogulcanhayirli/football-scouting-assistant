@@ -65,8 +65,12 @@ fix this file.
    (owner, prompt 15): the automated weekly run
    (`.github/workflows/weekly.yml`, IAM user `scout-weekly`) may write
    `processed/lists/` in the data bucket and the site bucket
-   (`scout-site-<account>`) without asking. Nothing else: a session still
-   asks before any upload, a manual `scout publish` included.
+   (`scout-site-<account>`) without asking, and since prompt 19
+   `processed/reports_text/` (the written reports, best effort; the owner's
+   IAM policy must add it, docs/DEPLOY.md). Nothing else: a session still
+   asks before any upload, a manual `scout publish` included. The weekly
+   run's calls to the Claude API (`scout reports`) use the
+   `ANTHROPIC_API_KEY` secret; a session never asks for that key either.
 
 ## Commands
 
@@ -97,6 +101,7 @@ $C elo                                       # team Elo from cached fixtures, re
 $C scouting [--strength v2|transfer|elo|transfer_elo]  # league strength, ability, elite, step up, riser
 $C ability                                  # ability versions: stability, backtest (reports/ability.md)
 $C lists                                    # the two tables and reports/candidates.md; run after backtest, moves, scouting, forecast history
+$C reports [--dry-run]                      # prompt 19: a written report per player (Claude Haiku 5.5, Message Batches), checked in code, 50 judged (Claude Sonnet 5.5); after lists, before site; needs ANTHROPIC_API_KEY, else one log line and nothing
 $C current [--as-of DAY] [--max-requests N]  # today's squads, transfers, season in progress (about 2,000 requests)
 $C features --current                       # the weekly run: newest season only, earlier ones as stored, plus the season so far
 $C score                                    # the weekly run: newest season with the stored models, no training
@@ -163,6 +168,7 @@ bucket named by `$SCOUT_S3_BUCKET` (eu-central-1).
 | The measured greats (prompts 18b, 18c) | `data/processed/greats/` | `greats.parquet` (239 seasons of 23 greats, one per age, 48 `emb_*`), `greats.json` (label, attribution, measures left out and kept, the correction's test), `correction.csv` (shift and spread ratio per position group and measure), `statsbomb-logo.png`; read by `scout site`; in S3 since 25 October (owner's yes; the 18c rebuild too) |
 | Archetypes (prompt 18c) | `archetypes/` (committed) and `data/processed/archetypes/` | one YAML file per player (`legends/`: 8, `calibration/`: 6), drafted 25 October and awaiting the owner's review; `archetypes.parquet` (each archetype's `z_*`, ability, `style_*`, 48 `emb_*`), `archetypes.json` (traits, sources, label, calibration verdict), `neighbours.parquet` (today's ten nearest each), `calibration.parquet` (drafted against measured per trait); written by `scout archetypes`, read by `scout site`; in S3 since 25 October (owner's yes) |
 | The page | `data/site/` | `index.html` (both tables embedded, 1.8 MB, 0.3 MB gzip on 24 October) and `data/` (the two tables as CSV and Parquet, `dictionary.csv`, `similar.json`); published to `scout-site-<account>` |
+| Written reports (prompt 19) | `data/processed/reports_text/` | `reports.parquet` (one row a player: fact sheet, its hash, the report or the template, source, status, attempts, the check's violations, the judge's verdict), `runs.jsonl` (each run's counts, tokens and cost), `verdicts.jsonl`, `failures.jsonl`, `summary.json`, `dictionary.csv`; written by `scout reports`, read by `scout site`, kept in S3 by `scout publish` (best effort). None yet: no run with a key so far |
 | User facing tables | `data/processed/lists/` | `candidates`, `bargains` (Parquet, CSV), `dictionary.csv` (see Outputs) |
 | Quota state, log | `data/state/` | |
 
@@ -209,6 +215,7 @@ through the native API, and model only regular players (450+ minutes).
 | Similar players (decision 10) | `embed --train` | the same player's other season among the five nearest (identity retrieval, 2023 to 2025) | cosine on the style vectors | hit rate overall and by position group against random; replacement check (a sale and a same position signing within 60 days: signing among the departed player's ten nearest) |
 | Greats correction (prompt 18c) | `greats` | a StatsBomb season held for Barcelona lands next to the same player's API Football season (top five, 2016/17 to 2020/21) | the uncorrected thin peer group | top five hit rate, median rank, players better and worse |
 | Archetypes (prompt 18c) | `archetypes` | drafted percentiles against the measured ones for six players drafted blind | a draft of 50 on every trait | share within 15 points (the owner's rule: most), mean gap; the real season's rank when searched with the draft |
+| Scout reports (prompt 19) | `reports` | a report whose every number and name is in its fact sheet (the check in code), then the judge's faithful, hedging and readability | the explanation written by rule (shown whenever the check still fails) | share passing on the first try and after two retries, judge verdicts on 50 a week, the owner's agreement with the judge on 20 (`judge/agreement.csv`); cost per run |
 | Riser (decision 3) | `scouting` | one season ability: both next seasons 20 above the best of this and last season and at the 70th percentile or better; half of team minutes now | `rank_rate` | as above, plus top 50 precision per season against the base rate |
 
 `scouting` also estimates league strength from players who changed leagues
@@ -293,6 +300,13 @@ October 2026, from MODELS.md and `reports/`:
   half is not most, so **illustrative only**. Searched with the draft, the
   real season ranks 1st of 352 (Kanté), 16th of 1,264 (Van Dijk), 17th of
   431 (Iniesta), 121st of 725 (Modrić). MODELS.md.
+* Scout reports (prompt 19, MODELS.md): built and tested with a fake client
+  on the real 24 October tables (2,734 fact sheets, four batches, retries,
+  fallback, judge, storage, page); no real run yet, so no pass rate, verdict
+  or cost: the first weekly run with the `ANTHROPIC_API_KEY` secret gives
+  them. Estimated 0.70 to 1.10 USD per full regeneration with the judge,
+  about 0.30 USD a week while nothing changes (docs/DEPLOY.md). The check
+  cannot tell which fact a number of the sheet belongs to; the judge can.
 * Bargains (19 October, 37 leagues, seasons 2015 to 2023, experienced 30 to
   33): the top 50 gained value far more often than matched peers (prime
   63.2% against 43.3%, experienced 11.0% against 4.5%), but moved to a club
@@ -337,6 +351,19 @@ Decision 5: two user facing tables, written by `scout lists`
 * `dictionary.csv`: one plain sentence per column of both tables (`DICTIONARY`
   in `src/scout/lists.py`; a test checks every column has one).
 
+**Written reports** (prompt 19, `src/scout/reports_text.py`): every player's
+panel ("Report and similar players") shows his report above the similar
+players, under the label "written by Claude Haiku 5.5 from the facts above
+and checked automatically; odds are historical rates", only while its fact
+sheet's hash matches today's (else, and whenever the check failed, a note
+that the explanation under the row is the one written by rule). The page
+loads them from `data/reports.json` when a panel first opens; the "how to
+read this" box says how they are written and checked, the judge's count of
+faithful reports and, once `judge/agreement.csv` holds an answer, the
+owner's agreement with the judge. The published `dictionary.csv` gains the
+`reports` rows (the stored table's columns); `scout lists` and the
+registered forecasts keep their two table dictionary.
+
 The one readable report is `reports/candidates.md`: both tables' top 50 and
 every backtest number next to its baseline, then the dictionary.
 
@@ -377,11 +404,12 @@ calibration drafts) and lists today's ten nearest of its position group
 (age range and elite pool filters) with the label "archetype from the
 record, not measured" on every result, the calibration verdict
 (illustrative only), and the archetype's 18 drafted traits with their
-reasons, sources and review status; its data is an `archetypes` block
-inside `similar.json`. `scout publish`
-sends only the page, the two tables with the dictionary, `similar.json`
-and, with the greats, `statsbomb-logo.png` (an allowlist; without the logo
-`scout site` leaves the greats out). Model
+reasons, sources and review status (an unreviewed legend's status reads
+"to watch: not yet reviewed by the owner", prompt 19); its data is an
+`archetypes` block inside `similar.json`. `scout publish`
+sends only the page, the two tables with the dictionary, `similar.json`,
+`reports.json` and, with the greats, `statsbomb-logo.png` (an allowlist;
+without the logo `scout site` leaves the greats out). Model
 detail stays in `reports/scouting.md`, `reports/moves.md`,
 `reports/backtest_fair_value.md`, `reports/ability.md` and `reports/elo.md`.
 
@@ -476,6 +504,7 @@ detail stays in `reports/scouting.md`, `reports/moves.md`,
 * Similar players, tested by finding the same player's other season among the nearest neighbours: **done 24 October (prompt 18, decision 10).**
 * The measured greats from StatsBomb open data, against today's players with the calibrated elite chance: **done 25 October (prompt 18b).**
 * The thin peer group's correction and archetypes for players without data, with a blind calibration: **done 25 October (prompt 18c); the archetypes await the owner's review.**
+* Generated scout reports with a faithfulness check and a weekly judge: **built 25 October (prompt 19); the first real run waits for the `ANTHROPIC_API_KEY` secret.**
 * January window forecast, published mid December and scored in February.
 * A capped chat over the two tables.
 * A matchup report before any match model.
@@ -489,7 +518,10 @@ when `configs/update.free.yaml` exists (skipped with a notice until prompt 4
 creates it; it then calls `scout update`, which prompt 4 must add), then
 `features --current`, `score`, `embed` (prompt 18: 17 seconds, 1.3 GB),
 `archetypes` (prompt 18c: 21 seconds; reloads `archetypes/` from the
-checkout, so the owner's edits reach the page), `lists`, `site`, `publish`. There is no daily run; the neighbours of the
+checkout, so the owner's edits reach the page), `lists`, `reports` (prompt
+19: `continue-on-error`, up to 100 minutes of batches, the cost line in the
+run's summary, the owner's 20 judged reports kept as the run's artifact
+`scout-reports-judged`), `site`, `publish`. There is no daily run; the neighbours of the
 current rows are computed by this weekly one. It never trains.
 A clean run took 254 seconds on 4 cores (pull 80, features 92, score 56,
 lists 22) and 2.5 GB of memory, and rebuilt the registered tables byte for
@@ -497,6 +529,8 @@ byte. Its credentials are GitHub secrets (`AWS_ACCESS_KEY_ID`,
 `AWS_SECRET_ACCESS_KEY` of the IAM user `scout-weekly`, `API_FOOTBALL_KEY`);
 the bucket names are repository variables (`SCOUT_S3_BUCKET`,
 `SCOUT_SITE_BUCKET`); the first step fails naming any that is missing.
+`ANTHROPIC_API_KEY` (prompt 19) is an optional secret: without it the
+reports step logs one line and the page shows the explanations.
 
 CDK app in `infra/` with its own uv environment: one stack, `ScoutSite`
 (deployed 21 October): the bucket `scout-site-098499087060` with static
@@ -537,12 +571,14 @@ src/scout/  config, secrets, ratelimit, storage, sync, athena, featurestore,
   candidates.py             decile chance tables, fall back pool and flag count rates
   bargains.py               bargains eligibility, ranking, backtest
   lists.py                  the two user facing tables, their dictionary, reports/candidates.md
+  reports_text.py           written reports: fact sheets, the check in code, Message Batches, the judge, the cost (prompt 19)
   site.py, site_template.html  the static page (scout site)
   publish.py                the weekly run's uploads, with an allowlist (scout publish)
   features/                 build.py (core), context.py (cups, team, injuries, transfers), pipeline.py
   models/                   targets, backtest, estimators, moves, run, store (the stored models)
 forecasts/  registered forecasts, one dated folder each (committed)
 archetypes/ legends/ and calibration/: one YAML file per player, drafted, for the owner to review and edit
+judge/      agreement.csv: the owner's yes or no on the weekly judge's verdicts (prompt 19), read by scout site
 training/   SageMaker entry point and requirements
 scripts/    feasibility.py, run_extras.py, rebuild_match_seasons.py, run_expansion.py, repair_names.py
 tests/      unit, contracts, fixtures (synthetic)
@@ -751,3 +787,15 @@ Settle them with the owner rather than guessing.
   test: edited after reading `reports/archetypes.md` they stop being one, so
   a new check needs a fresh draft by someone who has not seen the measured
   table.
+* Written reports (prompt 19, 25 October): built and tested with a fake
+  client only; the session had no Claude API key. The owner's part: the
+  `ANTHROPIC_API_KEY` secret (a key in its own Claude Console workspace with
+  a monthly spend limit) and the `KeepTheReports` statement in
+  `scout-weekly`'s policy (docs/DEPLOY.md). Without that statement every
+  weekly run finds no stored reports and writes all of them again (a full
+  regeneration, about 0.70 to 1.10 USD, instead of about 0.30 for the judge
+  alone). The length rule (120 to 150 words) is part of the check and may
+  send reports to the template; the first run's first try and retry counts
+  will tell. The check matches a number to the sheet, not to its fact; the
+  judge reads meaning. Batches take no server side fallback, so a refused
+  verdict is left out. Nothing was uploaded to S3 by this session.

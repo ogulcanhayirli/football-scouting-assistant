@@ -23,7 +23,13 @@
   traits and the calibration verdict;
 * ``statsbomb-logo.png``: the logo the StatsBomb user agreement asks every
   published analysis of its data to carry, written only with the greats
-  (no greats are shown without it).
+  (no greats are shown without it);
+* ``data/reports.json`` (prompt 19): each player's written report when the
+  stored one (``scout reports``) still matches today's fact sheet, else his
+  template explanation, with the label the panel shows under it; loaded
+  when a panel is first opened. The dictionary gains the report's columns,
+  and the "how to read this" box the judge's numbers and, once the owner has
+  recorded any, his agreement with the judge (``judge/agreement.csv``).
 
 Only the two tables, the dictionary, the similar players file and the logo
 are published, never raw match stats, API responses or StatsBomb data (the
@@ -54,6 +60,7 @@ log = logging.getLogger(__name__)
 TEMPLATE = Path(__file__).with_name("site_template.html")
 PUBLISHED = ("candidates", "bargains")  # each as .csv and .parquet, plus dictionary.csv
 SIMILAR = "similar.json"  # in data/, next to the downloads
+REPORTS = "reports.json"  # in data/, next to the downloads
 LOGO = "statsbomb-logo.png"  # next to the page, only with the greats
 HISTORY_TOP = 500  # "looks like X at Y": every season of players once ranked this high
 SCALE = 127  # unit vectors as 8 bit integers
@@ -204,6 +211,7 @@ def page_data(
     forecasts: list[dict],
     tracked: int,
     greats: bool = False,
+    reports: dict | None = None,
 ) -> dict:
     """Everything the page shows, as plain JSON values."""
     season = int(cand["season"].max())
@@ -232,6 +240,7 @@ def page_data(
         "leagues": int(cand["league"].nunique()),
         "tracked": tracked,
         "greats": greats,
+        "reports": {k: v for k, v in (reports or {"available": False}).items() if k != "rows"},
         "candidates": _records(cand, [*CANDIDATE_COLUMNS, "flag_keys"]),
         "bargains": _records(barg, [*BARGAIN_COLUMNS, "flag_keys"]),
         "dictionary": _records(words, ["table", "column", "meaning"]),
@@ -441,8 +450,14 @@ def render(data: dict, template: Path = TEMPLATE) -> str:
     )
 
 
-def build_site(settings, out_dir: Path | None = None, forecasts_root: Path = Path("forecasts")):
+def build_site(
+    settings,
+    out_dir: Path | None = None,
+    forecasts_root: Path = Path("forecasts"),
+    agreement: Path | None = None,
+):
     """``scout site``: ``index.html`` and the downloads in ``data/site/``."""
+    from scout import reports_text
     from scout.forecast import feature_dates
     from scout.lists import league_names, rising_ids
     from scout.providers.transfermarkt import TransfermarktValuationProvider
@@ -452,7 +467,10 @@ def build_site(settings, out_dir: Path | None = None, forecasts_root: Path = Pat
     out_dir = Path(out_dir) if out_dir else settings.paths.processed_dir.parent / "site"
     cand = pd.read_parquet(lists_dir / "candidates.parquet")
     barg = pd.read_parquet(lists_dir / "bargains.parquet")
-    words = pd.read_csv(lists_dir / "dictionary.csv")
+    words = pd.concat(
+        [pd.read_csv(lists_dir / "dictionary.csv"), reports_text.dictionary()], ignore_index=True
+    )
+    reports = reports_text.page_reports(settings, cand, barg, agreement or reports_text.AGREEMENT)
     scouting = pd.read_parquet(processed / "models" / "scouting.parquet")
     season = int(cand["season"].max())
     newest = scouting[scouting["season"].astype(int) == season]
@@ -472,6 +490,7 @@ def build_site(settings, out_dir: Path | None = None, forecasts_root: Path = Pat
         forecasts=registered_forecasts(forecasts_root),
         tracked=len(settings.leagues),
         greats=greats_ready,
+        reports=reports,
     )
     out_dir.mkdir(parents=True, exist_ok=True)
     page = out_dir / "index.html"
@@ -484,8 +503,13 @@ def build_site(settings, out_dir: Path | None = None, forecasts_root: Path = Pat
             target = downloads / f"{name}.{suffix}"
             shutil.copyfile(lists_dir / f"{name}.{suffix}", target)
             written.append(target)
-    shutil.copyfile(lists_dir / "dictionary.csv", downloads / "dictionary.csv")
+    words.to_csv(downloads / "dictionary.csv", index=False)
     written.append(downloads / "dictionary.csv")
+    target = downloads / REPORTS
+    atomic_write_text(target, json.dumps(reports, ensure_ascii=False, separators=(",", ":")))
+    written.append(target)
+    if not reports["available"]:
+        log.warning("site: no written reports; run `scout reports` (the panels say so)")
     vectors, current, tested = _similar_inputs(processed)
     names = league_names(settings)
     calendar = [lg.key for lg in settings.leagues if lg.calendar_year]

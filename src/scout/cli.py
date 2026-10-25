@@ -354,6 +354,17 @@ def cmd_lists(settings: Settings, args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_reports(settings: Settings, args: argparse.Namespace) -> int:
+    from scout.reports_text import cost_line, estimate_run, run_reports
+
+    if args.dry_run:
+        for key, value in estimate_run(settings).items():
+            print(f"{key}: {value}")
+        return 0
+    print(cost_line(run_reports(settings)))
+    return 0
+
+
 def cmd_forecast(settings: Settings, args: argparse.Namespace) -> int:
     from scout import forecast
 
@@ -568,6 +579,7 @@ def cmd_publish(settings: Settings, args: argparse.Namespace) -> int:
         site_dir,
         args.dry_run,
         site_client,
+        reports_dir=settings.paths.processed_dir / "reports_text",
     )
     suffix = " (dry run)" if args.dry_run else ""
     print(f"processed/lists: {lists.summary()}{suffix}")
@@ -789,6 +801,20 @@ def main(argv: list[str] | None = None) -> int:
     )
     lists.set_defaults(func=cmd_lists)
 
+    rep = sub.add_parser(
+        "reports",
+        help="Scout reports: Claude Haiku 5.5 writes one per player from his fact sheet, code "
+        "checks every number and name, Claude Sonnet 5.5 judges a sample "
+        "(data/processed/reports_text/, reports/reports_text.md); after lists, before site. "
+        "Needs ANTHROPIC_API_KEY, else it logs one line and does nothing",
+    )
+    rep.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Build the fact sheets and estimate the run's tokens and cost; no request is sent",
+    )
+    rep.set_defaults(func=cmd_reports)
+
     fc = sub.add_parser(
         "forecast",
         help="Registered forecasts: freeze today's lists into forecasts/<date>, score a "
@@ -840,7 +866,8 @@ def main(argv: list[str] | None = None) -> int:
 
     pub = sub.add_parser(
         "publish",
-        help="Upload the lists to processed/lists/ and the page to the site bucket, nothing else "
+        help="Upload the lists to processed/lists/, the page to the site bucket and keep "
+        "processed/reports_text/ (best effort), nothing else "
         "(the weekly run)",
     )
     pub.add_argument("--bucket", help="Data bucket; defaults to $SCOUT_S3_BUCKET")

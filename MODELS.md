@@ -1393,6 +1393,68 @@ rebuilds the vectors, today's neighbours (`processed/archetypes/`), the
 calibration and the report; the weekly run calls it before `scout site`, so
 an edited file reaches the page at the next run.
 
+## Scout reports with a faithfulness check (prompt 19, 25 October 2026)
+
+`scout reports` (`src/scout/reports_text.py`) writes a short report for every
+player of the two tables, one per player (2,734 on the 24 October tables:
+1,830 candidates, 1,602 bargains, 698 in both). It is a writing task, not a
+model of football: nothing here changes a table, a chance or a flag.
+
+* **Fact sheet.** One fact per line from the table columns: age, position,
+  club at forecast and today, league, value rank, market and fair value (and
+  the ratio), ability percentile, every chance with its count of past players,
+  its decile and what it measured, fall back risk, the flags with their raw
+  numbers, the rising tag, the three explanation stats, the season so far,
+  the three most similar players of today (`neighbours.parquet`), and on the
+  bargains the list and rank, the minutes share, the contract and the tags.
+  About 490 tokens; the fixed prefix (system prompt and instructions, cached
+  for an hour) about 1,240.
+* **Writer.** Claude Haiku 5.5 at low effort through the Message Batches API,
+  120 to 150 words, odds as historical rates ("of 142 past players in his
+  band, 30% became ..."), never as predictions. Rewritten only when the
+  sheet's hash changes (the sheet, the prompt version and the model).
+* **The check, in code.** Every number of the report, read with its unit (%,
+  €, m, k, million, ordinals), its precision and the word it counts (years,
+  minutes, matches, players, flags, goals, assists, seasons, months, rank,
+  decile), must equal a number of the sheet within the rounding the report
+  wrote it with: €21.6m and €22m pass for 21,632,000 euros, €21.7m fails;
+  0.5 passes for 0.47, 0.4 fails; a percent must match a percent and euros
+  euros. Every proper noun (a run of capitalised words inside a sentence, a
+  name joined with its number such as Ligue 1, a known player, club or league
+  opening a sentence) must be a name of the sheet; a surname alone is allowed
+  for a person, not a half of a club. The length must be 120 to 150 words. A
+  failing report goes back with its violations, at most twice; then the
+  explanation written by rule is shown and the failure is logged. Tests: a
+  report that invents a club (Juventus, Real Madrid, Barcelona opening a sentence),
+  wrong roundings (€21.7m, 140% for 139%, 0.4 for 0.47, 91st for 92nd), a
+  computed number (€8.4m more than fair), wrong units (€30 for 30%, 142
+  minutes for 142 players), the wrong league number (Ligue 1 on a sheet with
+  Ligue 2), the length, and reports that pass.
+* **Its limits, by design.** The check reads that a number exists in the
+  sheet, not which fact it belongs to: "93rd percentile" for a player whose
+  ability is 92nd passes when a similar player in the sheet is 93rd (a test
+  says so). A number without a unit or a counted word is matched against the
+  whole sheet. A word opening a sentence is read as an ordinary word unless
+  it is a known name of the tables. The judge is there for meaning.
+* **Judge.** Claude Sonnet 5.5, structured output (faithful with the
+  offending passage, hedging adequate, readability 1 to 5), on 50 reports a
+  week not judged before. `reports/reports_text.md` and
+  `reports/judge_sample.csv` give the owner 20 of them, the faulted ones
+  first; his yes or no goes to `judge/agreement.csv`, and its rate to the
+  page. Batches take no server side fallback, so a refused verdict is logged
+  and left out.
+* **Budget.** A hard cap per run (30 million tokens in the config, every
+  billed token counted; each request's worst case is reserved before it is
+  sent) and the cost from the usage fields, in the run's summary.
+
+Results: none yet. The session that built it had no Claude API key, so the
+pipeline ran end to end on the real 24 October tables with a fake client
+(four batches, the retries, the fallback, the judge, the storage and the
+page), and three reports drafted by hand for real sheets (Marc Bernal,
+Sabino, I. Zabarnyi) passed the check on numbers and names. The first
+weekly run with the key gives the pass rates on the first try and after the
+retries, the cost, and the judge's verdicts; they go here.
+
 ## Next
 
 1. The clean check above: tune on earlier seasons, score on later ones.

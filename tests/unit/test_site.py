@@ -8,7 +8,16 @@ import pandas as pd
 import pytest
 
 from scout.lists import DICTIONARY, dictionary
-from scout.publish import LISTS_PREFIX, SITE_FILES, check_lists, publish, publish_site, website_url
+from scout.publish import (
+    LISTS_PREFIX,
+    REPORTS_PREFIX,
+    SITE_FILES,
+    check_lists,
+    keep_reports,
+    publish,
+    publish_site,
+    website_url,
+)
 from scout.site import BARGAIN_COLUMNS, CANDIDATE_COLUMNS, flag_keys, page_data, render
 
 
@@ -195,3 +204,77 @@ def test_website_url_uses_the_regional_endpoint():
     assert website_url("scout-site-1", "eu-central-1") == (
         "http://scout-site-1.s3-website.eu-central-1.amazonaws.com/"
     )
+
+
+def test_the_panel_shows_the_written_report_under_its_label():
+    reports = {
+        "available": True,
+        "label": "written by Claude Haiku 5.5 from the facts above and checked automatically; "
+        "odds are historical rates",
+        "writer": "Claude Haiku 5.5",
+        "judge": "Claude Sonnet 5.5",
+        "written": 1,
+        "template": 1,
+        "judged": 1,
+        "judge_faithful": 1,
+        "agreement": {"read": 2, "agreed": 1},
+        "rows": {"1": ["report", "text"], "2": ["template", "No stat stands out."]},
+    }
+    data = page_data(
+        _candidates(),
+        _bargains(),
+        dictionary(),
+        rising={2},
+        feature_dates={"2026-06-30": ["Serie A"]},
+        valuation_end=pd.Timestamp("2026-06-12"),
+        latest_value_date=None,
+        built=pd.Timestamp("2026-10-26"),
+        forecasts=[],
+        tracked=37,
+        reports=reports,
+    )
+    assert "rows" not in data["reports"]  # the reports load from data/reports.json
+    assert data["reports"]["agreement"] == {"read": 2, "agreed": 1}
+    html = render(data)
+    assert 'fetch("data/reports.json")' in html
+    assert "Report and similar players" in html
+    assert "Written reports." in html
+    assert _data()["reports"] == {"available": False}
+
+
+def test_an_unreviewed_legend_reads_to_watch():
+    assert "Status: to watch: not yet reviewed by the owner." in render(_data())
+
+
+class RefusingS3(FakeS3):
+    def __init__(self, refuse: str):
+        super().__init__()
+        self.refuse = refuse
+
+    def put_object(self, Bucket, Key, Body, **kw):  # noqa: N803 (boto3 names)
+        if Key.startswith(self.refuse):
+            raise PermissionError("AccessDenied")
+        super().put_object(Bucket, Key, Body, **kw)
+
+
+def test_publish_keeps_the_reports_best_effort(tmp_path):
+    reports = tmp_path / "reports_text"
+    reports.mkdir()
+    (reports / "reports.parquet").write_bytes(b"x")
+    (reports / "summary.json").write_bytes(b"{}")
+    s3 = FakeS3()
+    publish(
+        s3, "data-bucket", "site-bucket", _lists(tmp_path), _site(tmp_path), reports_dir=reports
+    )
+    assert ("data-bucket", REPORTS_PREFIX + "reports.parquet") in s3.objects
+    # a policy without processed/reports_text/ never stops the page
+    s3 = RefusingS3(REPORTS_PREFIX)
+    other = tmp_path / "again"
+    other.mkdir()
+    _, sent = publish(
+        s3, "data-bucket", "site-bucket", _lists(other), _site(other), reports_dir=reports
+    )
+    assert sent[-1] == "index.html"
+    assert not [k for b, k in s3.objects if k.startswith(REPORTS_PREFIX)]
+    (reports / "secrets.txt").write_bytes(b"x")  # only the known files are ever kept
+    assert keep_reports(FakeS3(), "data-bucket", reports) == []

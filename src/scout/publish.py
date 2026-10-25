@@ -6,8 +6,14 @@ Two destinations, nothing else (CLAUDE.md, the one exception to rule 8):
   dictionary of ``scout lists``, skipped when the bytes are already there
   (``scout.sync``);
 * the public site bucket: ``index.html`` and ``data/`` from ``scout site``
-  (the two tables, the dictionary and the similar players file, and the
-  StatsBomb logo when the measured greats are in it).
+  (the two tables, the dictionary, the similar players file, the written
+  reports, and the StatsBomb logo when the measured greats are in it).
+
+Since prompt 19 it also keeps ``processed/reports_text/`` (``scout
+reports``) in the data bucket, so next week's run reuses every report whose
+facts did not change. That copy is best effort: when it fails (the IAM
+user's policy predates prompt 19, docs/DEPLOY.md) a warning is logged and
+the page is published all the same.
   Only the files in ``SITE_FILES`` are ever sent, so no other table can be
   published by mistake. The page and the CSV files are stored gzip encoded
   (S3 serves them with ``Content-Encoding: gzip``, which browsers unpack),
@@ -28,6 +34,15 @@ from scout.sync import SyncResult, sync_dir
 log = logging.getLogger(__name__)
 
 LISTS_PREFIX = "processed/lists/"
+REPORTS_PREFIX = "processed/reports_text/"
+REPORT_FILES = {
+    "reports.parquet",
+    "dictionary.csv",
+    "summary.json",
+    "runs.jsonl",
+    "verdicts.jsonl",
+    "failures.jsonl",
+}
 LIST_FILES = {
     f"{name}.{suffix}"
     for name in ("candidates", "bargains", "dictionary")
@@ -41,6 +56,7 @@ SITE_FILES = {
     "data/candidates.parquet": "application/vnd.apache.parquet",
     "data/bargains.parquet": "application/vnd.apache.parquet",
     "data/similar.json": "application/json; charset=utf-8",
+    "data/reports.json": "application/json; charset=utf-8",
 }
 # Sent when ``scout site`` wrote it: the StatsBomb logo comes only with the
 # measured greats (prompt 18b), which are never shown without it.
@@ -89,6 +105,24 @@ def publish_site(client: Any, bucket: str, site_dir: Path, dry_run: bool = False
     return sent
 
 
+def keep_reports(client: Any, bucket: str, reports_dir: Path, dry_run: bool = False) -> list[str]:
+    """``processed/reports_text/`` up to the data bucket, the files in
+    ``REPORT_FILES`` only; never raises, so the page never waits on it."""
+    reports_dir = Path(reports_dir)
+    if not reports_dir.is_dir():
+        return []
+    extra = {p.name for p in reports_dir.iterdir() if p.is_file()} - REPORT_FILES
+    if extra:
+        log.warning("reports: not kept, unexpected files in %s: %s", reports_dir, sorted(extra))
+        return []
+    try:
+        result = sync_dir(client, bucket, reports_dir, REPORTS_PREFIX, "up", dry_run)
+    except Exception as exc:  # the page is published either way
+        log.warning("reports: %s not kept in s3://%s/ (%s)", reports_dir, bucket, exc)
+        return []
+    return result.transferred
+
+
 def publish(
     client: Any,
     data_bucket: str,
@@ -97,12 +131,18 @@ def publish(
     site_dir: Path,
     dry_run: bool = False,
     site_client: Any = None,
+    reports_dir: Path | None = None,
 ) -> tuple[SyncResult, list[str]]:
     """``site_client``: another client for the site bucket (a session publishing
-    by hand assumes ``scout-site-publisher``); the weekly run's user has both."""
+    by hand assumes ``scout-site-publisher``); the weekly run's user has both.
+    ``reports_dir``: ``processed/reports_text/``, kept best effort."""
     check_lists(lists_dir)
     lists = sync_dir(client, data_bucket, Path(lists_dir), LISTS_PREFIX, "up", dry_run)
-    return lists, publish_site(site_client or client, site_bucket, site_dir, dry_run)
+    sent = publish_site(site_client or client, site_bucket, site_dir, dry_run)
+    if reports_dir is not None:
+        kept = keep_reports(client, data_bucket, reports_dir, dry_run)
+        log.info("reports: %d files kept under %s", len(kept), REPORTS_PREFIX)
+    return lists, sent
 
 
 def website_url(bucket: str, region: str) -> str:

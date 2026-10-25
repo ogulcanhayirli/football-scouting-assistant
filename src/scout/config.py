@@ -132,6 +132,59 @@ class CompetitionConfig(LeagueConfig):
     kind: Literal["club", "national", "youth"]
 
 
+class ModelPrice(BaseModel):
+    """Standard Claude API rates in USD per million tokens (prompts up to 100K tokens)."""
+
+    input: float = Field(gt=0)
+    output: float = Field(gt=0)
+
+
+class ReportsConfig(BaseModel):
+    """Generated scout reports (prompt 19, ``scout reports``): the writer and
+    the judge, the hard token cap of one run and the rates its cost is
+    computed with."""
+
+    writer_model: str = "claude-haiku-5-5"
+    writer_effort: Literal["low", "medium", "high"] = "low"
+    writer_max_tokens: int = Field(default=2000, gt=0, description="Thinking counts toward it.")
+    judge_model: str = "claude-sonnet-5-5"
+    judge_effort: Literal["low", "medium", "high"] = "medium"
+    judge_max_tokens: int = Field(default=4000, gt=0)
+    judge_sample: int = Field(default=50, ge=0)
+    retries: int = Field(default=2, ge=0, description="Regenerations after a failed check.")
+    words_min: int = 120
+    words_max: int = 150
+    max_tokens_per_run: int = Field(
+        default=30_000_000,
+        gt=0,
+        description="Every token one run may be billed for, writer and judge together "
+        "(input, cache writes and reads, output); requests that could pass it are not sent.",
+    )
+    poll_seconds: float = Field(default=30.0, gt=0)
+    max_run_minutes: float = Field(
+        default=100.0, gt=0, description="Batches still running then are cancelled."
+    )
+    prices: dict[str, ModelPrice] = Field(
+        default_factory=lambda: {
+            "claude-haiku-5-5": ModelPrice(input=0.10, output=0.50),
+            "claude-sonnet-5-5": ModelPrice(input=2.00, output=10.00),
+        }
+    )
+    batch_discount: float = Field(default=0.5, gt=0, le=1)
+    cache_read: float = 0.1  # of the input rate
+    cache_write_5m: float = 1.25
+    cache_write_1h: float = 2.0
+
+    @model_validator(mode="after")
+    def _priced(self) -> ReportsConfig:
+        for model in (self.writer_model, self.judge_model):
+            if model not in self.prices:
+                raise ValueError(f"reports_text.prices has no rate for {model}")
+        if not 0 < self.words_min <= self.words_max:
+            raise ValueError("reports_text: words_min must be positive and at most words_max")
+        return self
+
+
 class Settings(BaseModel):
     api_football: ApiFootballConfig
     transfermarkt: TransfermarktConfig = TransfermarktConfig()
@@ -140,6 +193,7 @@ class Settings(BaseModel):
     competitions: list[CompetitionConfig] = Field(default_factory=list)
     paths: PathsConfig = PathsConfig()
     backfill: BackfillConfig = BackfillConfig()
+    reports_text: ReportsConfig = ReportsConfig()
 
     def league(self, key: str) -> LeagueConfig:
         for league in self.leagues:

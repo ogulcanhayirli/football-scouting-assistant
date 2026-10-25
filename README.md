@@ -53,6 +53,7 @@ chances shown as the rates that past forecasts actually achieved.
 | Similar players (`scout embed`, `scout similar`, decision 10) | Done 24 October 2026: a learned embedding finds the same player's other season among his five nearest 19.9% of the time against 13.2% for plain style vectors (0.35% at random); in S3 since 25 October, on the page at the next publish |
 | Measured greats (`scout greats`, prompts 18b and 18c) | Done 25 October 2026: StatsBomb open data (La Liga 2004/05 to 2020/21, Premier League 2003/04, 2.83 GB) mapped to our match table and checked against API Football (tackles and interceptions agree at 0.63 and 0.68 per match and are kept, the owner's call on the identity test); Barcelona's old seasons corrected for the thin peer group (the same player found 55.1% of the time on 2016/17 to 2020/21 against 28.6% uncorrected); 23 greats by age against today's players, with the calibrated elite chance, in a page tab at the next publish |
 | Archetypes (`scout archetypes`, prompt 18c) | Drafted 25 October 2026, awaiting the owner's review: eight legends from the historical record (Cruyff, Gullit, Rio Ferdinand, Maldini, Zidane, Ronaldo Nazário, Baresi, Pirlo) searched among today's players; a calibration on six players we can measure lands within 15 points on half the traits (28% for a draft of 50 everywhere), so they are labelled illustrative only |
+| Scout reports (`scout reports`, prompt 19) | Built 25 October 2026: Claude Haiku 5.5 writes 120 to 150 words per player from a fact sheet of the table columns (Message Batches API, cached prefix, rewritten only when the facts change), code checks every number and name against the sheet (two retries, then the explanation written by rule), Claude Sonnet 5.5 judges 50 a week; tested with a fake client only, the first real run waits for the `ANTHROPIC_API_KEY` secret; estimated 0.70 to 1.10 USD per full regeneration, about 0.30 USD a week while nothing changes |
 | Free tier update of the current season | Not started: prompt 4, from 6 November; the weekly run skips it until its config exists |
 | Glue and Athena, Feature Store, SageMaker training stacks | Retired by decision 9, code in `infra/archive/`; still deployed until the owner removes them |
 
@@ -152,8 +153,10 @@ $C score                  # the newest season with the stored models, no trainin
 $C embed                  # every player season embedded with the stored model; today's ten nearest
 $C archetypes             # archetypes/*/*.yaml reloaded and checked, vectors, calibration, reports/archetypes.md
 $C lists                  # candidates and bargains, reports/candidates.md
+$C reports                # written reports, checked; a sample judged (needs ANTHROPIC_API_KEY)
+$C reports --dry-run      # the fact sheets and the run's tokens and cost, estimated; no request
 $C site                   # data/site/index.html and the downloads
-$C publish                # processed/lists/ and the site bucket ($SCOUT_SITE_BUCKET)
+$C publish                # processed/lists/, processed/reports_text/ and the site bucket
 
 # Retraining, by hand (about 10 GB of memory; the models are stored as they train)
 $C features               # full rebuild
@@ -183,8 +186,9 @@ $C forecast score forecasts/2026-10-21 --as-of 2027-06-30
 ```
 
 Uploading to S3 (`sync up`) and deploying a stack need the owner's yes
-(CLAUDE.md, rule 8); the weekly run's writes to `processed/lists/` and the
-site bucket are the one exception.
+(CLAUDE.md, rule 8); the weekly run's writes to `processed/lists/`,
+`processed/reports_text/` (prompt 19) and the site bucket are the one
+exception.
 
 ## Limits
 
@@ -227,6 +231,13 @@ site bucket are the one exception.
   within 15 points on half the traits (the owner's bar is most), against
   28% for a draft of 50 on every trait; every result is labelled
   "archetype from the record, not measured" (MODELS.md).
+* **A written report is checked for its numbers and names, not its
+  meaning.** Code rejects any number that is not in the player's fact sheet
+  within its rounding and any name that is not in it, but a number of the
+  sheet attached to the wrong fact (another player's ability percentile)
+  passes, and so does an ordinary word that opens a sentence. The weekly
+  judge (Claude Sonnet 5.5, 50 reports) reads the meaning; the owner checks
+  the judge on 20 of them (MODELS.md, docs/DEPLOY.md).
 * **The page is plain HTTP.** S3 website hosting has no HTTPS, and
   CloudFront is left out on purpose; the page holds public tables only.
 
