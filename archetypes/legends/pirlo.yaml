@@ -1,0 +1,29 @@
+name: Andrea Pirlo
+position_group: defensive_mid
+era: AC Milan 2005/06 to 2006/07 and Juventus 2011/12 to 2012/13, the regista in front of the defence
+measured: false
+drafted: Drafted by a Claude Code session on 2026-10-25 from the historical record; awaits the owner's review.
+reviewed: false
+traits:
+  goals_per90: {percentile: 60, why: "Free kicks and the odd long shot: more goals than most deep midfielders."}
+  assists_per90: {percentile: 95, why: "Long passes over the top and set pieces made him a leading assister for a deep midfielder."}
+  shots_total_per90: {percentile: 65, why: "Long range shots and direct free kicks."}
+  passes_key_per90: {percentile: 97, why: "Created chances from deep, a rare thing in his position."}
+  passes_total_per90: {percentile: 99, why: "The team's passing went through him; among the most passes in Serie A."}
+  dribbles_success_per90: {percentile: 35, why: "Passed rather than dribbled."}
+  dribble_success_rate: {percentile: 60, why: "When he did, a drop of the shoulder usually got him out of trouble."}
+  duels_won_per90: {percentile: 15, why: "Avoided duels; not physical."}
+  duel_win_rate: {percentile: 30, why: "Lost more physical duels than a typical defensive midfielder."}
+  tackles_total_per90: {percentile: 25, why: "Not a tackler; Gattuso, Vidal and Marchisio did that."}
+  interceptions_per90: {percentile: 50, why: "Positioned well enough to cut passes, without chasing."}
+  blocks_per90: {percentile: 35, why: "Rarely in the block."}
+  fouls_drawn_per90: {percentile: 55, why: "Opponents pressed and fouled him to stop the passing."}
+  saves_per90: {percentile: 50, why: "Outfield player: no saves."}
+  share_shots: {percentile: 55, why: "Took the free kicks and some long shots."}
+  share_dribbles: {percentile: 25, why: "Left the dribbling to others."}
+  share_passes: {percentile: 99, why: "The team's passing hub."}
+  share_duels: {percentile: 10, why: "Teammates did the running and the fighting."}
+sources:
+  - "Wikipedia, Andrea Pirlo (English article): career, positions and honours."
+  - "Andrea Pirlo with Alessandro Alciato, I Think Therefore I Play (English edition 2014)."
+  - "Jonathan Wilson, Inverting the Pyramid (2008), on the regista."

@@ -1,0 +1,29 @@
+name: Virgil van Dijk
+position_group: centre_back
+era: Liverpool 2018/19 (age 27 in the middle of the season)
+measured: false
+drafted: Drafted by a Claude Code session on 2026-10-25 from the historical record, without looking at his data; awaits the owner's review.
+reviewed: false
+calibration: {source: api_football, player_id: 290, season: 2018}
+traits:
+  goals_per90: {percentile: 80, why: "A real set piece goal threat for a centre back."}
+  assists_per90: {percentile: 65, why: "The odd assist from long passes and knock downs."}
+  shots_total_per90: {percentile: 80, why: "Many headed attempts from corners and free kicks."}
+  passes_key_per90: {percentile: 55, why: "Switches play more than he creates chances."}
+  passes_total_per90: {percentile: 85, why: "Liverpool kept the ball and built through him."}
+  dribbles_success_per90: {percentile: 50, why: "Not a dribbler."}
+  dribble_success_rate: {percentile: 75, why: "Composed when he does carry it."}
+  duels_won_per90: {percentile: 65, why: "Dominant in the air, though Liverpool faced few attacks."}
+  duel_win_rate: {percentile: 95, why: "Famously hard to get past that season; dominant in the air."}
+  tackles_total_per90: {percentile: 20, why: "Rarely needed to tackle; defended by position."}
+  interceptions_per90: {percentile: 40, why: "The high press won the ball before it reached him."}
+  blocks_per90: {percentile: 40, why: "Liverpool conceded few shots."}
+  fouls_drawn_per90: {percentile: 40, why: "Not often fouled."}
+  saves_per90: {percentile: 50, why: "Outfield player: no saves."}
+  share_shots: {percentile: 70, why: "A good share of set piece shots for a centre back."}
+  share_dribbles: {percentile: 45, why: "About a typical centre back's share."}
+  share_passes: {percentile: 75, why: "Build up through him and Matip or Gomez."}
+  share_duels: {percentile: 60, why: "Takes the aerial duels."}
+sources:
+  - "Wikipedia, Virgil van Dijk (English article): career and honours."
+  - "PFA Players' Player of the Year 2018/19; widely reported Opta figures that he was rarely if ever dribbled past in that league season."

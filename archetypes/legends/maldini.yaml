@@ -1,0 +1,28 @@
+name: Paolo Maldini
+position_group: full_back
+era: AC Milan 1988/89 to 1994/95, left back (later a centre back; that would be a second file)
+measured: false
+drafted: Drafted by a Claude Code session on 2026-10-25 from the historical record; awaits the owner's review.
+reviewed: false
+traits:
+  goals_per90: {percentile: 35, why: "Scored rarely over a 25 season career."}
+  assists_per90: {percentile: 55, why: "Overlapped and crossed, but Milan attacked mostly through the middle."}
+  shots_total_per90: {percentile: 40, why: "Rarely shot."}
+  passes_key_per90: {percentile: 55, why: "A useful final ball from the left, not a creator."}
+  passes_total_per90: {percentile: 65, why: "Composed on the ball in a team that kept it."}
+  dribbles_success_per90: {percentile: 60, why: "Could carry the ball forward on either foot."}
+  dribble_success_rate: {percentile: 75, why: "Rarely lost the ball when he carried it."}
+  duels_won_per90: {percentile: 70, why: "Strong and good in the air for a full back."}
+  duel_win_rate: {percentile: 92, why: "Famously hard to beat one against one."}
+  tackles_total_per90: {percentile: 45, why: "Defended by position; the line attributed to him: if I have to tackle, I have already made a mistake."}
+  interceptions_per90: {percentile: 85, why: "Anticipation was his defining strength."}
+  blocks_per90: {percentile: 55, why: "Milan conceded little; he blocked when needed."}
+  fouls_drawn_per90: {percentile: 40, why: "Not often fouled."}
+  saves_per90: {percentile: 50, why: "Outfield player: no saves."}
+  share_shots: {percentile: 40, why: "A small share of the team's shots."}
+  share_dribbles: {percentile: 55, why: "Carried the ball more than most full backs of his day, less than the forwards."}
+  share_passes: {percentile: 55, why: "Part of the build up; Baresi and the midfield led it."}
+  share_duels: {percentile: 50, why: "Took his share of duels on the left."}
+sources:
+  - "Wikipedia, Paolo Maldini (English article): career, positions and honours."
+  - "Jonathan Wilson, Inverting the Pyramid (2008), on Sacchi's Milan and its back four."

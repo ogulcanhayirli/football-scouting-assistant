@@ -1,0 +1,29 @@
+name: Ruud Gullit
+position_group: attacking_mid
+era: AC Milan 1987/88 to 1989/90, attacking midfielder and second striker behind Van Basten
+measured: false
+drafted: Drafted by a Claude Code session on 2026-10-25 from the historical record; awaits the owner's review.
+reviewed: false
+traits:
+  goals_per90: {percentile: 80, why: "Scored regularly from midfield and as a second striker in a low scoring Serie A; Ballon d'Or 1987."}
+  assists_per90: {percentile: 75, why: "Created for Van Basten, though more a driving runner than a pure creator."}
+  shots_total_per90: {percentile: 85, why: "A powerful shooter, also from distance."}
+  passes_key_per90: {percentile: 75, why: "Gave the final ball often, but his game was carrying and finishing more than threading."}
+  passes_total_per90: {percentile: 60, why: "Not a deep playmaker; Sacchi's Milan played direct and fast through him."}
+  dribbles_success_per90: {percentile: 80, why: "Powerful runs with the ball that defenders could not stop."}
+  dribble_success_rate: {percentile: 70, why: "Strength and stride made his dribbles hard to stop."}
+  duels_won_per90: {percentile: 95, why: "Exceptionally strong and good in the air for an attacking midfielder; won the ball back too."}
+  duel_win_rate: {percentile: 85, why: "Physically dominant, in the air and on the ground."}
+  tackles_total_per90: {percentile: 80, why: "Sacchi's pressing asked everyone to defend; he had played sweeper and could tackle."}
+  interceptions_per90: {percentile: 70, why: "Pressed high in a compact team that won the ball early."}
+  blocks_per90: {percentile: 55, why: "Defended deeper than most attacking midfielders, but rarely in his own box."}
+  fouls_drawn_per90: {percentile: 80, why: "His surging runs were often stopped by fouls."}
+  saves_per90: {percentile: 50, why: "Outfield player: no saves."}
+  share_shots: {percentile: 70, why: "Van Basten took the most shots; Gullit was the second shooter."}
+  share_dribbles: {percentile: 80, why: "With Donadoni, the team's main ball carrier."}
+  share_passes: {percentile: 55, why: "Milan's passing ran through Ancelotti, Rijkaard and Baresi more than through him."}
+  share_duels: {percentile: 90, why: "A physical presence everywhere: aerials, pressing and runs."}
+sources:
+  - "Wikipedia, Ruud Gullit (English article): career, positions and honours."
+  - "Jonathan Wilson, Inverting the Pyramid (2008), on Sacchi's Milan."
+  - "France Football, Ballon d'Or 1987."

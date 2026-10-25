@@ -1,0 +1,29 @@
+name: Luka Modrić
+position_group: central_mid
+era: Real Madrid 2018/19 (age 33 in the middle of the season)
+measured: false
+drafted: Drafted by a Claude Code session on 2026-10-25 from the historical record, without looking at his data; awaits the owner's review.
+reviewed: false
+calibration: {source: api_football, player_id: 754, season: 2018}
+traits:
+  goals_per90: {percentile: 50, why: "Scores a few a season, about a typical central midfielder."}
+  assists_per90: {percentile: 70, why: "Creates from midfield in a team that scores a lot."}
+  shots_total_per90: {percentile: 65, why: "Shoots from distance now and then, the outside of the foot included."}
+  passes_key_per90: {percentile: 80, why: "One of Real Madrid's main chance creators from midfield."}
+  passes_total_per90: {percentile: 95, why: "High volume passer in a possession team."}
+  dribbles_success_per90: {percentile: 85, why: "Turns away from pressure and carries the ball forward."}
+  dribble_success_rate: {percentile: 80, why: "Press resistant; rarely loses the ball when he goes past a man."}
+  duels_won_per90: {percentile: 60, why: "Small but combative; wins ground duels."}
+  duel_win_rate: {percentile: 50, why: "Strong on the ground, weak in the air."}
+  tackles_total_per90: {percentile: 50, why: "Works back, but Real Madrid have the ball most of the time."}
+  interceptions_per90: {percentile: 45, why: "Reads the game, without being a ball winner."}
+  blocks_per90: {percentile: 40, why: "Rarely in the block."}
+  fouls_drawn_per90: {percentile: 70, why: "Fouled to stop him turning and starting attacks."}
+  saves_per90: {percentile: 50, why: "Outfield player: no saves."}
+  share_shots: {percentile: 55, why: "The forwards take most of the shots."}
+  share_dribbles: {percentile: 70, why: "Carries more than most central midfielders, less than the wingers."}
+  share_passes: {percentile: 85, why: "With Kroos, the team's passing runs through him."}
+  share_duels: {percentile: 50, why: "An average share of the team's duels."}
+sources:
+  - "Wikipedia, Luka Modrić (English article): career, position and honours."
+  - "Ballon d'Or 2018 and FIFA The Best 2018."

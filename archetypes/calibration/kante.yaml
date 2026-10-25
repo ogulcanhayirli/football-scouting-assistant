@@ -1,0 +1,29 @@
+name: N'Golo Kanté
+position_group: defensive_mid
+era: Leicester City 2015/16, the title season (age 24 in the middle of the season)
+measured: false
+drafted: Drafted by a Claude Code session on 2026-10-25 from the historical record, without looking at his data; awaits the owner's review.
+reviewed: false
+calibration: {source: api_football, player_id: 2290, season: 2015}
+traits:
+  goals_per90: {percentile: 30, why: "Scored once or so."}
+  assists_per90: {percentile: 45, why: "A few assists from winning the ball and moving it on in transition."}
+  shots_total_per90: {percentile: 35, why: "Rarely shot."}
+  passes_key_per90: {percentile: 50, why: "Moved the ball on quickly rather than creating."}
+  passes_total_per90: {percentile: 25, why: "Leicester had little of the ball."}
+  dribbles_success_per90: {percentile: 75, why: "Carried the ball forward after winning it."}
+  dribble_success_rate: {percentile: 70, why: "Quick and low; hard to stop over a few yards."}
+  duels_won_per90: {percentile: 97, why: "Won the ball constantly."}
+  duel_win_rate: {percentile: 80, why: "Won most of his ground duels; small in the air."}
+  tackles_total_per90: {percentile: 99, why: "Made more tackles than anyone in the league (widely reported Opta figures)."}
+  interceptions_per90: {percentile: 99, why: "Made more interceptions than anyone in the league (widely reported Opta figures)."}
+  blocks_per90: {percentile: 60, why: "Leicester defended deep; he got in the way of shots."}
+  fouls_drawn_per90: {percentile: 55, why: "Fouled after winning the ball now and then."}
+  saves_per90: {percentile: 50, why: "Outfield player: no saves."}
+  share_shots: {percentile: 30, why: "Vardy and Mahrez took the shots."}
+  share_dribbles: {percentile: 65, why: "Mahrez did most of the dribbling."}
+  share_passes: {percentile: 45, why: "Drinkwater did more of the passing."}
+  share_duels: {percentile: 95, why: "Most of the team's midfield duels were his."}
+sources:
+  - "Wikipedia, N'Golo Kanté (English article): career and honours."
+  - "Widely reported Opta figures for the 2015/16 Premier League (tackles and interceptions)."

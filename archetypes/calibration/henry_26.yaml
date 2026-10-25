@@ -1,0 +1,29 @@
+name: Thierry Henry at 26
+position_group: centre_forward
+era: Arsenal 2003/04, the unbeaten season (age 26 in the middle of the season)
+measured: false
+drafted: Drafted by a Claude Code session on 2026-10-25 from the historical record, without looking at his data; awaits the owner's review.
+reviewed: false
+calibration: {source: statsbomb, player_id: 15516, season: 2003}
+traits:
+  goals_per90: {percentile: 97, why: "30 league goals (Golden Boot)."}
+  assists_per90: {percentile: 90, why: "A prolific creator for a striker in these years."}
+  shots_total_per90: {percentile: 90, why: "The team's main shooter."}
+  passes_key_per90: {percentile: 90, why: "Drifted left and set up Pirès, Ljungberg and Bergkamp's runs."}
+  passes_total_per90: {percentile: 80, why: "Linked play from the left more than a typical centre forward."}
+  dribbles_success_per90: {percentile: 95, why: "Pace and close control; ran at defenders constantly."}
+  dribble_success_rate: {percentile: 70, why: "Many attempts at speed."}
+  duels_won_per90: {percentile: 80, why: "Won his dribbles; not an aerial forward."}
+  duel_win_rate: {percentile: 60, why: "Lost aerial duels, won ground ones."}
+  tackles_total_per90: {percentile: 30, why: "Little defending."}
+  interceptions_per90: {percentile: 30, why: "Little defending."}
+  blocks_per90: {percentile: 25, why: "A forward."}
+  fouls_drawn_per90: {percentile: 70, why: "Defenders fouled him to stop his runs."}
+  saves_per90: {percentile: 50, why: "Outfield player: no saves."}
+  share_shots: {percentile: 95, why: "Most of Arsenal's shots."}
+  share_dribbles: {percentile: 90, why: "Arsenal's main dribbler, with Pirès."}
+  share_passes: {percentile: 70, why: "Above a typical centre forward's share."}
+  share_duels: {percentile: 75, why: "Took players on often."}
+sources:
+  - "Wikipedia, Thierry Henry (English article): career and honours."
+  - "Premier League 2003/04 Golden Boot (30 goals) and Arsenal's unbeaten season."

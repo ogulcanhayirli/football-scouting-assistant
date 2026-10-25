@@ -1,0 +1,28 @@
+name: Zinedine Zidane
+position_group: attacking_mid
+era: Juventus 1997/98 to Real Madrid 2001/02
+measured: false
+drafted: Drafted by a Claude Code session on 2026-10-25 from the historical record; awaits the owner's review.
+reviewed: false
+traits:
+  goals_per90: {percentile: 50, why: "Not a prolific scorer for an attacking midfielder; decisive goals more than many."}
+  assists_per90: {percentile: 70, why: "Created, but more by moving the ball on than by the last pass."}
+  shots_total_per90: {percentile: 55, why: "Did not shoot often."}
+  passes_key_per90: {percentile: 80, why: "Found the forwards from deep and wide positions."}
+  passes_total_per90: {percentile: 90, why: "Kept the ball and set the tempo; many touches."}
+  dribbles_success_per90: {percentile: 95, why: "Close control and the roulette: beat players in tight spaces."}
+  dribble_success_rate: {percentile: 90, why: "Extremely hard to dispossess."}
+  duels_won_per90: {percentile: 85, why: "Shielded the ball with his body and won duels by dribbling."}
+  duel_win_rate: {percentile: 80, why: "Strong on the ball; rarely lost a duel in possession."}
+  tackles_total_per90: {percentile: 45, why: "Not a defender."}
+  interceptions_per90: {percentile: 35, why: "Did little defending in midfield."}
+  blocks_per90: {percentile: 40, why: "Rarely in his own box."}
+  fouls_drawn_per90: {percentile: 90, why: "Fouled a lot because he could not be dispossessed fairly."}
+  saves_per90: {percentile: 50, why: "Outfield player: no saves."}
+  share_shots: {percentile: 50, why: "Left the shooting to the forwards."}
+  share_dribbles: {percentile: 85, why: "The team's main ball carrier in midfield."}
+  share_passes: {percentile: 85, why: "The hub of the team's passing."}
+  share_duels: {percentile: 75, why: "Many duels with the ball."}
+sources:
+  - "Wikipedia, Zinedine Zidane (English article): career, positions and honours."
+  - "Zidane: A 21st Century Portrait (2006 film by Douglas Gordon and Philippe Parreno), one match followed by every camera."

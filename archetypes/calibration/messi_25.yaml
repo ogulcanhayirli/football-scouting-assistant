@@ -1,0 +1,29 @@
+name: Lionel Messi at 25
+position_group: centre_forward
+era: Barcelona 2012/13, the false nine (age 25 in the middle of the season)
+measured: false
+drafted: Drafted by a Claude Code session on 2026-10-25 from the historical record, without looking at his data; awaits the owner's review.
+reviewed: false
+calibration: {source: statsbomb, player_id: 5503, season: 2012}
+traits:
+  goals_per90: {percentile: 99, why: "46 league goals (Pichichi)."}
+  assists_per90: {percentile: 95, why: "Also among the league's leading creators."}
+  shots_total_per90: {percentile: 97, why: "Shot a lot."}
+  passes_key_per90: {percentile: 97, why: "Created as much as he finished."}
+  passes_total_per90: {percentile: 95, why: "Dropped deep as a false nine in a possession team."}
+  dribbles_success_per90: {percentile: 99, why: "The best dribbler in the world."}
+  dribble_success_rate: {percentile: 75, why: "High volume yet efficient."}
+  duels_won_per90: {percentile: 95, why: "Dribbles count as duels; he won most."}
+  duel_win_rate: {percentile: 70, why: "No aerial duels to speak of; ground duels mostly won."}
+  tackles_total_per90: {percentile: 30, why: "Little defending."}
+  interceptions_per90: {percentile: 30, why: "Little defending."}
+  blocks_per90: {percentile: 20, why: "A forward."}
+  fouls_drawn_per90: {percentile: 85, why: "Fouled often, though he stayed on his feet when he could."}
+  saves_per90: {percentile: 50, why: "Outfield player: no saves."}
+  share_shots: {percentile: 99, why: "The team's main shooter."}
+  share_dribbles: {percentile: 99, why: "Most of the team's dribbles."}
+  share_passes: {percentile: 85, why: "High for a forward; Xavi, Iniesta and Busquets still passed more."}
+  share_duels: {percentile: 90, why: "Constantly taking players on."}
+sources:
+  - "Wikipedia, Lionel Messi (English article): career and honours."
+  - "La Liga 2012/13 Pichichi Trophy (46 goals)."

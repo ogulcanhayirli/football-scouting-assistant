@@ -1,0 +1,30 @@
+name: Johan Cruyff
+position_group: centre_forward
+era: Ajax 1970/71 to 1972/73 and Barcelona 1973/74, the nominal centre forward who roamed
+measured: false
+drafted: Drafted by a Claude Code session on 2026-10-25 from the historical record; awaits the owner's review.
+reviewed: false
+traits:
+  goals_per90: {percentile: 85, why: "Scored often (Eredivisie top scorer in 1971/72), but dropped deep, so below the pure goal scorers among centre forwards."}
+  assists_per90: {percentile: 97, why: "The team's creator as much as its striker; set up Keizer, Swart and Neeskens."}
+  shots_total_per90: {percentile: 70, why: "Shot when it was on, but passed more than a centre forward usually does."}
+  passes_key_per90: {percentile: 97, why: "Total Football ran through his final passes; the false nine before the term."}
+  passes_total_per90: {percentile: 95, why: "Dropped into midfield and out wide to link play: far more passes than a centre forward."}
+  dribbles_success_per90: {percentile: 97, why: "Beat players constantly; the Cruyff turn is named after him."}
+  dribble_success_rate: {percentile: 70, why: "Attempted a lot of dribbles; elite skill, but volume keeps the rate below the safest dribblers."}
+  duels_won_per90: {percentile: 80, why: "Involved all over the pitch, winning duels mostly by dribbling and pressing."}
+  duel_win_rate: {percentile: 60, why: "Slight and not an aerial forward; his dribbles succeeded more than his challenges."}
+  tackles_total_per90: {percentile: 70, why: "Ajax pressed from the front and he led it; more defending than a centre forward of his day."}
+  interceptions_per90: {percentile: 65, why: "Read the play and pressed passing lanes, as Michels' Ajax asked of everyone."}
+  blocks_per90: {percentile: 40, why: "A forward; rarely in his own box blocking shots."}
+  fouls_drawn_per90: {percentile: 95, why: "Man marked and kicked throughout his career (Vogts in the 1974 World Cup final)."}
+  saves_per90: {percentile: 50, why: "Outfield player: no saves."}
+  share_shots: {percentile: 75, why: "The leader of the attack, though Keizer and the midfield runners shared the shooting."}
+  share_dribbles: {percentile: 95, why: "His team's main dribbler by a distance."}
+  share_passes: {percentile: 90, why: "Unusually high for a centre forward: the hub of the team's passing."}
+  share_duels: {percentile: 75, why: "Pressed and dribbled, so a large share of the team's duels for a forward."}
+sources:
+  - "Wikipedia, Johan Cruyff (English article): career, positions and honours."
+  - "Johan Cruyff, My Turn: A Life of Total Football (2016), his autobiography."
+  - "David Winner, Brilliant Orange: The Neurotic Genius of Dutch Football (2000)."
+  - "Jonathan Wilson, Inverting the Pyramid (2008), on Michels' Ajax and Total Football."

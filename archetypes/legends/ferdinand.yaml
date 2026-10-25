@@ -1,0 +1,29 @@
+name: Rio Ferdinand
+position_group: centre_back
+era: Manchester United 2006/07 to 2008/09
+measured: false
+drafted: Drafted by a Claude Code session on 2026-10-25 from the historical record; awaits the owner's review.
+reviewed: false
+traits:
+  goals_per90: {percentile: 25, why: "Scored rarely, even for a centre back; not a set piece goal threat."}
+  assists_per90: {percentile: 40, why: "Rarely assisted."}
+  shots_total_per90: {percentile: 25, why: "Rarely shot."}
+  passes_key_per90: {percentile: 40, why: "Built play rather than creating chances."}
+  passes_total_per90: {percentile: 85, why: "A ball playing centre back in a team that dominated possession."}
+  dribbles_success_per90: {percentile: 80, why: "Stepped out of defence with the ball, unusual for an English centre back of his day."}
+  dribble_success_rate: {percentile: 80, why: "Composed and quick when he carried the ball."}
+  duels_won_per90: {percentile: 35, why: "United faced few attacks, and he defended by position and pace rather than by duels."}
+  duel_win_rate: {percentile: 85, why: "Pace, timing and height: rarely beaten when he did engage."}
+  tackles_total_per90: {percentile: 25, why: "Rarely needed to go to ground; anticipation did the work."}
+  interceptions_per90: {percentile: 65, why: "Read the game and stepped in, though a dominant team gives fewer chances to intercept."}
+  blocks_per90: {percentile: 40, why: "United conceded few shots."}
+  fouls_drawn_per90: {percentile: 45, why: "Calm in possession; not often fouled."}
+  saves_per90: {percentile: 50, why: "Outfield player: no saves."}
+  share_shots: {percentile: 30, why: "Took a small share of his team's shots."}
+  share_dribbles: {percentile: 85, why: "For a centre back, a large share of the team's carries out of defence."}
+  share_passes: {percentile: 80, why: "Play was built through him; Vidić was the stopper beside him."}
+  share_duels: {percentile: 30, why: "Vidić took the physical duels; Ferdinand covered and read."}
+sources:
+  - "Wikipedia, Rio Ferdinand (English article): career and honours."
+  - "Rio Ferdinand, #2Sides: My Autobiography (2014)."
+  - "Common description of the Ferdinand and Vidić partnership in Premier League coverage of 2006 to 2009."

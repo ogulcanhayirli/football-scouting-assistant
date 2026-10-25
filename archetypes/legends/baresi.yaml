@@ -1,0 +1,28 @@
+name: Franco Baresi
+position_group: centre_back
+era: AC Milan 1987/88 to 1993/94, the libero who led Sacchi's and Capello's line
+measured: false
+drafted: Drafted by a Claude Code session on 2026-10-25 from the historical record; awaits the owner's review.
+reviewed: false
+traits:
+  goals_per90: {percentile: 40, why: "Took penalties at times; scored a few."}
+  assists_per90: {percentile: 50, why: "Started attacks more than finished them."}
+  shots_total_per90: {percentile: 40, why: "Rarely shot."}
+  passes_key_per90: {percentile: 50, why: "Built play, rarely the last pass."}
+  passes_total_per90: {percentile: 80, why: "The libero who stepped into midfield and distributed."}
+  dribbles_success_per90: {percentile: 70, why: "Carried the ball out of defence, as a libero did."}
+  dribble_success_rate: {percentile: 70, why: "Composed in possession."}
+  duels_won_per90: {percentile: 45, why: "Short for a centre back (about 1.76 m) and in a dominant team: fewer duels."}
+  duel_win_rate: {percentile: 70, why: "A superb tackler, less dominant in the air."}
+  tackles_total_per90: {percentile: 65, why: "Stepped up and tackled decisively when the press forced a pass."}
+  interceptions_per90: {percentile: 95, why: "Reading of the game and stepping out to intercept: his defining trait."}
+  blocks_per90: {percentile: 50, why: "Milan conceded few shots."}
+  fouls_drawn_per90: {percentile: 50, why: "Typical for a centre back."}
+  saves_per90: {percentile: 50, why: "Outfield player: no saves."}
+  share_shots: {percentile: 40, why: "A small share of the team's shots."}
+  share_dribbles: {percentile: 75, why: "For a centre back, a large share of the team's carries."}
+  share_passes: {percentile: 75, why: "The build up started with him."}
+  share_duels: {percentile: 50, why: "Shared the duels with Costacurta and Maldini."}
+sources:
+  - "Wikipedia, Franco Baresi (English article): career, positions and honours."
+  - "Jonathan Wilson, Inverting the Pyramid (2008), on Sacchi's Milan, its high line and offside trap."

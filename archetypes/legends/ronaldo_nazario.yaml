@@ -1,0 +1,29 @@
+name: Ronaldo Nazário
+position_group: centre_forward
+era: Barcelona 1996/97 and Inter 1997/98
+measured: false
+drafted: Drafted by a Claude Code session on 2026-10-25 from the historical record; awaits the owner's review.
+reviewed: false
+traits:
+  goals_per90: {percentile: 99, why: "34 league goals in 37 matches for Barcelona in 1996/97 (Pichichi)."}
+  assists_per90: {percentile: 75, why: "Set up others too, but finishing came first."}
+  shots_total_per90: {percentile: 98, why: "Shot constantly."}
+  passes_key_per90: {percentile: 70, why: "Created from his dribbles, but not a link player."}
+  passes_total_per90: {percentile: 40, why: "Direct: received to run and shoot, not to circulate."}
+  dribbles_success_per90: {percentile: 99, why: "The most explosive dribbler of his era."}
+  dribble_success_rate: {percentile: 65, why: "So many attempts that the rate stays below the safest dribblers."}
+  duels_won_per90: {percentile: 95, why: "Dribbles count as duels, and he won most of his."}
+  duel_win_rate: {percentile: 55, why: "Not an aerial forward; many contested attempts."}
+  tackles_total_per90: {percentile: 25, why: "Did not defend."}
+  interceptions_per90: {percentile: 20, why: "Did not defend."}
+  blocks_per90: {percentile: 20, why: "A forward."}
+  fouls_drawn_per90: {percentile: 99, why: "Defenders could only stop him by fouling."}
+  saves_per90: {percentile: 50, why: "Outfield player: no saves."}
+  share_shots: {percentile: 99, why: "The focal point: most of his team's shots were his."}
+  share_dribbles: {percentile: 99, why: "Most of his team's dribbles were his."}
+  share_passes: {percentile: 40, why: "Below a typical centre forward's share."}
+  share_duels: {percentile: 90, why: "Constantly taking defenders on."}
+sources:
+  - "Wikipedia, Ronaldo (Brazilian footballer) (English article): career and honours."
+  - "La Liga 1996/97 Pichichi Trophy (34 goals)."
+  - "FIFA World Player of the Year 1996 and 1997; Ballon d'Or 1997."

@@ -1,0 +1,29 @@
+name: Andrés Iniesta
+position_group: central_mid
+era: Barcelona 2015/16 (age 31 in the middle of the season)
+measured: false
+drafted: Drafted by a Claude Code session on 2026-10-25 from the historical record, without looking at his data; awaits the owner's review.
+reviewed: false
+calibration: {source: api_football, player_id: 33243, season: 2015}
+traits:
+  goals_per90: {percentile: 30, why: "Scored very rarely by then."}
+  assists_per90: {percentile: 75, why: "Set up Messi, Suárez and Neymar regularly."}
+  shots_total_per90: {percentile: 45, why: "Did not shoot much."}
+  passes_key_per90: {percentile: 85, why: "The last or second last pass into the front three."}
+  passes_total_per90: {percentile: 97, why: "Barcelona's possession game; a very high volume passer."}
+  dribbles_success_per90: {percentile: 97, why: "Among the best dribbling midfielders of his generation."}
+  dribble_success_rate: {percentile: 90, why: "Famous for slipping pressure without losing the ball."}
+  duels_won_per90: {percentile: 70, why: "Wins duels by dribbling rather than by force."}
+  duel_win_rate: {percentile: 60, why: "Not physical, but his dribbles succeed."}
+  tackles_total_per90: {percentile: 35, why: "Not a ball winner."}
+  interceptions_per90: {percentile: 30, why: "Barcelona had the ball; he rarely needed to intercept."}
+  blocks_per90: {percentile: 30, why: "Rarely in the block."}
+  fouls_drawn_per90: {percentile: 90, why: "Fouled constantly when he turned past players."}
+  saves_per90: {percentile: 50, why: "Outfield player: no saves."}
+  share_shots: {percentile: 40, why: "The front three took the shots."}
+  share_dribbles: {percentile: 80, why: "High for a central midfielder, though Messi and Neymar dribbled more."}
+  share_passes: {percentile: 75, why: "Shared the passing with Busquets, Rakitić and Alves."}
+  share_duels: {percentile: 60, why: "His dribbles give him an above average share of duels."}
+sources:
+  - "Wikipedia, Andrés Iniesta (English article): career, position and honours."
+  - "Andrés Iniesta, The Artist: Being Iniesta (2016), his autobiography."
