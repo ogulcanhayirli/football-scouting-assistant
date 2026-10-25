@@ -157,9 +157,9 @@ bucket named by `$SCOUT_S3_BUCKET` (eu-central-1).
 | Model outputs | `data/processed/models/*.parquet` | backtest predictions (`backtest_<model>.parquet`), `scouting.parquet`, `big_move_current.parquet`, labels |
 | Embeddings (prompt 18) | `data/processed/embeddings/` | `vectors.parquet` (93,474 regular player seasons from 2015 with match stats: keys, name, age, club, group, ability, `main`, 18 `style_*` and 48 `emb_*` columns), `neighbours.parquet` (today's 11,908 players, ten nearest each), `dictionary.csv`; written by `embed`; in S3 since 25 October (owner's yes) |
 | Stored models | `data/processed/models/stored/` | the boosters behind the newest season's scores (`fair_value_fold_2024`, `fair_value_fold_2025`, `big_move_24m`, `elite`, `step_up`, `riser`; LightGBM text plus a `.json` of columns and training rows) and `ability_v2.json` (the ability fit); written by `backtest`, `moves`, `scouting`, read by `score`. Trained 21 October 2026; in S3 since 23 October (owner's yes; only these 13 files went up, and a dry run of `sync up --only processed` then found nothing to copy). Plus `embedding.json` (prompt 18, 24 October: shrinkage priors and the encoder, written by `embed --train`, read by `embed`), in S3 since 25 October (owner's yes; with `processed/embeddings/` only these 4 files went up, and a dry run then found nothing left) |
-| StatsBomb raw cache (prompt 18b) | `data/raw/statsbomb/` | 1,829 files, 2.83 GB (2,825,097,646 bytes): `competitions.json`, `matches/`, `lineups/`, `events/` (904 matches, each with a `.meta.json`), `files/LICENSE.pdf` and `files/statsbomb-logo.png`; fetched 25 October 2026 from the repository's master branch; not yet in S3 |
-| StatsBomb tables (prompt 18b) | `data/processed/statsbomb/` | `player_match_stats/league=<key>/season=<year>.parquet` (30,714 rows, StatsBomb ids, never mixed with API Football rows) and `vectors.parquet` (every StatsBomb season with minutes, peer group standardised and embedded); not yet in S3 |
-| The measured greats (prompt 18b) | `data/processed/greats/` | `greats.parquet` (239 seasons of 23 greats, one per age, 48 `emb_*`), `greats.json` (label, attribution, excluded measures), `statsbomb-logo.png`; read by `scout site`; not yet in S3 |
+| StatsBomb raw cache (prompt 18b) | `data/raw/statsbomb/` | 1,829 files, 2.83 GB (2,825,097,646 bytes): `competitions.json`, `matches/`, `lineups/`, `events/` (904 matches, each with a `.meta.json`), `files/LICENSE.pdf` and `files/statsbomb-logo.png`; fetched 25 October 2026 from the repository's master branch; in S3 since 25 October (owner's yes) |
+| StatsBomb tables (prompt 18b) | `data/processed/statsbomb/` | `player_match_stats/league=<key>/season=<year>.parquet` (30,714 rows, StatsBomb ids, never mixed with API Football rows) and `vectors.parquet` (every StatsBomb season with minutes, peer group standardised and embedded); in S3 since 25 October (owner's yes) |
+| The measured greats (prompt 18b) | `data/processed/greats/` | `greats.parquet` (239 seasons of 23 greats, one per age, 48 `emb_*`), `greats.json` (label, attribution, excluded measures), `statsbomb-logo.png`; read by `scout site`; in S3 since 25 October (owner's yes), so the weekly run shows the greats tab from its next publish |
 | The page | `data/site/` | `index.html` (both tables embedded, 1.8 MB, 0.3 MB gzip on 24 October) and `data/` (the two tables as CSV and Parquet, `dictionary.csv`, `similar.json`); published to `scout-site-<account>` |
 | User facing tables | `data/processed/lists/` | `candidates`, `bargains` (Parquet, CSV), `dictionary.csv` (see Outputs) |
 | Quota state, log | `data/state/` | |
@@ -673,12 +673,17 @@ Settle them with the owner rather than guessing.
   nothing else (bar the tie order and float noise above). Feature rows of
   seasons before 2025 keep the old names until the next full `scout
   features` (the similar players history rows show them).
-* Prompt 18b local changes await the owner's `sync up` (none was made):
-  `raw/statsbomb/` (2.83 GB), `processed/statsbomb/`, `processed/greats/`
-  (the weekly run needs it for the greats tab), the 379 repaired partitions,
-  the rebuilt 2025 feature partitions, `models/` outputs of `score`,
-  `embeddings/`, `lists/`, `reports/greats.md` and `reports/candidates.md`.
-  The registered forecast folders are unchanged.
+* Prompt 18b went to S3 on 25 October with the owner's yes (`sync up
+  --only raw --only processed --only reports`): raw 3,658 files (all of
+  `raw/statsbomb/`, 2.83 GB; the 12 Transfermarkt files were already there),
+  processed 441 (311 `player_season_stats`, 15 `player_match_stats`, 15
+  `fixture_events`, 7 `match_lineups`, 2 `injuries`, 1 `transfers` and 29
+  under `current/` with repaired names; 30 rebuilt 2025 feature partitions;
+  `scouting.parquet`, `big_move_current.parquet`, `backtest_fair_value.parquet`;
+  2 embedding files; 4 list files; 19 under `statsbomb/`; 3 under
+  `greats/`), reports 2 (`greats.md`, `candidates.md`); a dry run after
+  found nothing left. The registered forecast folders are unchanged. The
+  live page shows the greats and the repaired names from the next publish.
 * The measured greats leave three calls to the owner: keep the 0.7 rule
   (the two excluded measures help the thin seasons' identity check, 28.6%
   against 14.3%) or keep the measures; build a correction for the
