@@ -196,6 +196,13 @@ def cmd_greats(settings: Settings, args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_archetypes(settings: Settings, args: argparse.Namespace) -> int:
+    from scout.archetypes import run_archetypes
+
+    print(run_archetypes(settings, root=Path(args.dir)))
+    return 0
+
+
 def cmd_features(settings: Settings, args: argparse.Namespace) -> int:
     if args.current or args.season is not None:
         from scout.features import run_current_features
@@ -660,11 +667,20 @@ def main(argv: list[str] | None = None) -> int:
 
     greats = sub.add_parser(
         "greats",
-        help="The measured greats: validate the StatsBomb mapping against API Football, peer "
-        "group vectors, the greats' table (data/processed/greats/) and reports/greats.md; "
-        "after statsbomb build and embed",
+        help="The measured greats: validate the StatsBomb mapping against API Football, learn "
+        "and test the thin peer group's correction, peer group vectors, the greats' table "
+        "(data/processed/greats/) and reports/greats.md; after statsbomb build and embed",
     )
     greats.set_defaults(func=cmd_greats)
+
+    arch = sub.add_parser(
+        "archetypes",
+        help="Archetypes from the record (prompt 18c): reload and check archetypes/*/*.yaml, "
+        "their vectors and today's nearest (data/processed/archetypes/), the calibration check "
+        "and reports/archetypes.md; after embed and greats, before site",
+    )
+    arch.add_argument("--dir", default="archetypes", help="the folder of archetype files")
+    arch.set_defaults(func=cmd_archetypes)
 
     features = sub.add_parser("features", help="Build point in time feature and label tables")
     features.add_argument(

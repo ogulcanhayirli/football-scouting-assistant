@@ -197,6 +197,18 @@ tr.sim td { padding: 0 10px 12px; }
 .label { background: var(--warn-soft); color: var(--warn); border-radius: 8px; padding: 9px 12px; font-weight: 600; font-size: 13.5px; max-width: 100ch; margin: 0 0 12px; }
 .pair { display: flex; gap: 4px 14px; flex-wrap: wrap; margin-top: 2px; font-size: 13px; }
 .pair b { font-variant-numeric: tabular-nums; }
+.traits { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 7px; }
+.traits li { display: grid; grid-template-columns: 11em 90px 2.2em minmax(0, 1fr); gap: 2px 10px; align-items: baseline; font-size: 13px; }
+.traits .bar { height: 6px; background: var(--line); border-radius: 3px; position: relative; overflow: hidden; align-self: center; }
+.traits .bar i { position: absolute; left: 0; top: 0; bottom: 0; background: var(--accent); }
+.traits b { font-variant-numeric: tabular-nums; text-align: right; }
+.traits .why { color: var(--muted); }
+.tag { display: inline-block; font-size: 11.5px; color: var(--warn); background: var(--warn-soft); border-radius: 5px; padding: 1px 6px; margin-left: 6px; }
+#ar-out, #ar-card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; box-shadow: var(--shadow); margin: 0 0 12px; }
+#ar-out:empty, #ar-card:empty { display: none; }
+#ar-out h3, #ar-card h3 { font-size: 13px; margin: 0 0 6px; }
+#ar-card .query { color: var(--muted); font-size: 13px; margin: 0 0 8px; }
+#ar-card .sources { margin: 8px 0 0; padding-left: 18px; color: var(--muted); font-size: 13px; }
 .credit img, footer img.logo { height: 26px; vertical-align: middle; background: #fff; padding: 3px 6px; border-radius: 6px; margin-right: 8px; }
 footer { margin-top: 28px; color: var(--muted); font-size: 13px; border-top: 1px solid var(--line); padding-top: 14px; }
 footer p { margin: 6px 0; max-width: 100ch; }
@@ -223,6 +235,8 @@ footer p { margin: 6px 0; max-width: 100ch; }
     content: attr(data-label); display: block; font-size: 11px; color: var(--faint); margin-bottom: 1px;
   }
   tr.why td { padding: 2px 12px 10px; }
+  .traits li { grid-template-columns: minmax(0, 1fr) 70px 2.2em; }
+  .traits .why { grid-column: 1 / -1; }
 }
 </style>
 </head>
@@ -243,6 +257,7 @@ footer p { margin: 6px 0; max-width: 100ch; }
     <button class="tab" role="tab" id="tab-bargains" data-tab="bargains">Bargains <span class="n"></span></button>
     <button class="tab" role="tab" id="tab-similar" data-tab="similar">Similar players</button>
     <button class="tab" role="tab" id="tab-greats" data-tab="greats">Measured greats</button>
+    <button class="tab" role="tab" id="tab-archetypes" data-tab="archetypes">Archetypes</button>
   </div>
 
   <div id="tables">
@@ -324,6 +339,25 @@ footer p { margin: 6px 0; max-width: 100ch; }
     <div id="gr-out"></div>
     <p class="note" id="gr-note"></p>
     <p class="note credit" id="gr-credit"></p>
+  </section>
+
+  <section id="archetypes" hidden>
+    <p class="label" id="ar-label"></p>
+    <div class="controls">
+      <label>Archetype <select id="ar-name"></select></label>
+      <label>Age today
+        <span class="ages">
+          <input type="number" id="ar-age-min" inputmode="numeric" min="14" max="46" placeholder="from">
+          <input type="number" id="ar-age-max" inputmode="numeric" min="14" max="46" placeholder="to">
+        </span>
+      </label>
+      <div class="checks"><label><input type="checkbox" id="ar-pool"> Elite pool only</label></div>
+    </div>
+    <p class="note" id="ar-verdict"></p>
+    <p class="status" id="ar-status" aria-live="polite"></p>
+    <div id="ar-out"></div>
+    <div id="ar-card"></div>
+    <p class="note" id="ar-note"></p>
   </section>
 
   <footer id="footer"></footer>
@@ -454,6 +488,7 @@ footer p { margin: 6px 0; max-width: 100ch; }
     tab: location.hash === "#bargains" ? "bargains" : "candidates",
     similar: location.hash === "#similar",
     greats: location.hash === "#greats",
+    archetypes: location.hash === "#archetypes",
     list: "prime",
     shown: PAGE,
     sort: { candidates: { key: "order", dir: 1 }, bargains: { key: "rank", dir: 1 } }
@@ -585,13 +620,14 @@ footer p { margin: 6px 0; max-width: 100ch; }
   function refresh() { state.shown = PAGE; draw(); }
 
   function tabs() {
-    var on = state.greats ? "greats" : state.similar ? "similar" : state.tab;
+    var on = state.archetypes ? "archetypes" : state.greats ? "greats" : state.similar ? "similar" : state.tab;
     document.querySelectorAll(".tab").forEach(function (t) {
       t.setAttribute("aria-selected", String(t.dataset.tab === on));
     });
-    $("tables").hidden = state.similar || state.greats;
+    $("tables").hidden = state.similar || state.greats || state.archetypes;
     $("similar").hidden = !state.similar;
     $("greats").hidden = !state.greats;
+    $("archetypes").hidden = !state.archetypes;
   }
 
   // Similar players (prompt 18): data/similar.json, loaded on first use
@@ -766,6 +802,7 @@ footer p { margin: 6px 0; max-width: 100ch; }
   function openSimilar(id) {
     state.similar = true;
     state.greats = false;
+    state.archetypes = false;
     history.replaceState(null, "", "#similar");
     tabs();
     simDraw();
@@ -817,8 +854,10 @@ footer p { margin: 6px 0; max-width: 100ch; }
     }).join("");
     greatAgeOptions();
     $("gr-note").innerHTML = "<b>Similar means plays the same way, not as good.</b> Each great's season is described as today's players are: his per 90 numbers and his share of the team's shots, dribbles, passes and duels against his position group that season, with his level taken out, through the same learned embedding. " +
-      "From 2015/16 the seasons are our own (API Football, every league). <b>Before 2015/16 they come from StatsBomb event data of Barcelona's league matches</b> (Arsenal's for 2003/04), so the peer group a season is measured against is <b>Barcelona and its opponents only</b>: thinner (most opponents are seen once or twice a season) and biased (their numbers are those of a team playing Barcelona). The level is taken out with an ability percentile inside that same group, and comparisons across eras are rough: our league and team adjustment starts in 2010 and is not applied to these seasons. " +
-      (g.excluded && g.excluded.length ? "Left out of the StatsBomb seasons because the two sources disagree on them (match correlation below 0.7): " + g.excluded.map(function (m) { return esc(m.replace(/_per90$/, "").replace(/_total/, "").replace(/_/g, " ")); }).join(" and ") + ". " : "") +
+      "From 2015/16 the seasons are our own (API Football, every league). <b>Before 2015/16 they come from StatsBomb event data of Barcelona's league matches</b> (Arsenal's for 2003/04), so the peer group a season is measured against is <b>Barcelona and its opponents only</b>: thinner (most opponents are seen once or twice a season) and biased (their numbers are those of a team playing Barcelona). The level is taken out with an ability percentile inside that same group" + (g.correction && g.correction.applied ? " (for Barcelona's seasons, against the 2015/16 league: see below)" : "") + ", and comparisons across eras are rough: our league and team adjustment starts in 2010 and is not applied to these seasons. " +
+      (g.excluded && g.excluded.length ? "Left out of the StatsBomb seasons because the two sources disagree on them (match correlation below 0.7): " + g.excluded.map(measureName).join(" and ") + ". " : "") +
+      (g.kept && g.kept.length ? "Kept although the two sources agree on them less (match correlation below 0.7): " + g.kept.map(measureName).join(" and ") + "; with them the check below finds the same player more often. " : "") +
+      (g.correction && g.correction.applied ? "<b>Barcelona's seasons before 2015/16 are corrected for the thin peer group.</b> In 2015/16, where StatsBomb holds the whole league, each measure's league average and spread were set against those of Barcelona's opponents, by position group; in an older season the league is rebuilt from that season's opponents the same way, and the level is read against the 2015/16 league. Tested on 2016/17 to 2020/21, where StatsBomb again holds Barcelona's matches only, a corrected season finds the same player's season in our own data among his five nearest " + Math.round(100 * g.correction.after) + "% of the time, against " + Math.round(100 * g.correction.before) + "% uncorrected (" + g.correction.searches + " searches). Arsenal's 2003/04 is not corrected: it was neither learned nor tested on the Premier League. " : "") +
       "Ages are in the middle of the season (1 January; 1 July in calendar year leagues), so Messi at 19 is 2006/07, and today's players are aged the same way. A thin season (under 450 minutes) is mostly the position average. The elite chance is the calibrated one of the Candidates tab and exists only for the elite pool (ranked #" + D.elite_pool.from + " to #" + int(D.elite_pool.to) + " by value and " + D.elite_pool.max_age + " or under).";
     $("gr-credit").innerHTML = '<img src="' + esc(g.logo) + '" alt="StatsBomb">' + esc(g.attribution);
     greatsDraw();
@@ -855,13 +894,83 @@ footer p { margin: 6px 0; max-width: 100ch; }
     }).join("") + "</ol>" : '<p class="none">No player of today matches: that age and position group' + (only ? " in the elite pool" : "") + " is empty.</p>";
     $("gr-out").innerHTML = '<p class="query">' + line + "</p><h3>Today's " + esc(q.group.replace(/_/g, " ")) + "s aged " + q.age + " nearest to him" + (only ? ", elite pool only" : "") + "</h3>" + items;
   }
+  function measureName(m) { return esc(m.replace(/_per90$/, "").replace(/_total/, "").replace(/_/g, " ")); }
+
   function openGreats() {
     state.greats = true;
     state.similar = false;
+    state.archetypes = false;
     history.replaceState(null, "", "#greats");
     tabs();
     $("gr-status").textContent = SIM ? "" : "Loading the measured greats.";
     loadSimilar().then(setupGreats, function () { $("gr-status").textContent = ""; $("gr-out").innerHTML = simFailed(); });
+  }
+
+  // Archetypes (prompt 18c): legends from the record, in data/similar.json
+
+  var ar = { key: null };
+
+  function setupArchetypes() {
+    var a = SIM && SIM.available ? SIM.d.archetypes : null;
+    if (!a || !a.available) {
+      $("ar-status").textContent = "The archetypes are not built yet.";
+      return;
+    }
+    if (!SIM.archetypes) SIM.archetypes = greatRows(a, SIM.d);
+    $("ar-label").textContent = a.label + " Every archetype is a draft from the historical record awaiting the owner's review.";
+    var groups = [["legends", "Legends"], ["calibration", "Calibration drafts (players we can measure)"]];
+    if (!ar.key) ar.key = SIM.archetypes[0].key;
+    $("ar-name").innerHTML = groups.map(function (g) {
+      var list = SIM.archetypes.filter(function (o) { return o.kind === g[0]; });
+      if (!list.length) return "";
+      return '<optgroup label="' + esc(g[1]) + '">' + list.map(function (o) {
+        return '<option value="' + esc(o.key) + '"' + (o.key === ar.key ? " selected" : "") + ">" + esc(o.name) + "</option>";
+      }).join("") + "</optgroup>";
+    }).join("");
+    $("ar-verdict").innerHTML = "<b>How far to trust it" + (a.calibration.calibrated ? "" : ": illustrative only") + ".</b> " + esc(a.calibration.text);
+    $("ar-note").innerHTML = "<b>Similar means plays the same way, not as good.</b> An archetype is a player we have no data for, described from the historical record: each of the 18 measures of the style vector as a percentile against the regular players of his position group in his own seasons, with a one line reason and the sources. " +
+      "The percentiles then go through the same steps as a measured season: each becomes a value on our own regular players since 2015, his level is taken out with the curves our own players go through, and the learned embedding places him among today's players of his position group. " +
+      "The calibration drafts describe players we can measure, drafted the same way before their data was looked at; they show how far a draft from the record lands from the measurement. Ages are in the middle of the season.";
+    arDraw();
+  }
+  function arDraw() {
+    if (!SIM || !SIM.archetypes) return;
+    var a = SIM.d.archetypes, q = SIM.archetypes.filter(function (o) { return o.key === ar.key; })[0];
+    if (!q) { $("ar-out").innerHTML = ""; $("ar-card").innerHTML = ""; return; }
+    var info = a.details[q.key], only = $("ar-pool").checked, lo = number("ar-age-min"), hi = number("ar-age-max");
+    var pool = SIM.today.filter(function (o) {
+      if (SIM.d.groups[o.group] !== q.group) return false;
+      var age = Math.floor(o.age_mid);
+      if (lo != null && age < lo) return false;
+      if (hi != null && age > hi) return false;
+      return !only || (ELITE[o.id] && ELITE[o.id].elite_chance_pct != null);
+    });
+    var found = nearest(q, pool, 10);
+    var tag = '<span class="tag">' + esc(a.label.replace(/\.$/, "").toLowerCase()) + "</span>";
+    var items = found.length ? '<ol class="simlist">' + found.map(function (p) {
+      var o = p.o;
+      var meta = [o.position, Math.floor(o.age_mid) + " years", clubOf(o), o.leagueName].filter(Boolean).map(esc).join(" · ");
+      return '<li><span class="name">' + esc(o.name) + "</span>" + tag + ' <span class="meta">' + meta + '</span><div class="pair"><span>similarity <b>' + p.sim.toFixed(2) + "</b></span><span>" + eliteCell(o.id) + '</span></div><span class="small">ability ' + o.ability + " percentile</span></li>";
+    }).join("") + "</ol>" : '<p class="none">No player of today matches these filters.</p>';
+    $("ar-status").textContent = "";
+    $("ar-out").innerHTML = "<h3>Today's " + esc(q.group.replace(/_/g, " ")) + "s nearest to the archetype of " + esc(q.name) + (only ? ", elite pool only" : "") + "</h3>" + items;
+    var traits = info.traits.map(function (t) {
+      return '<li><span class="t">' + esc(a.trait_names[t[0]] || t[0]) + '</span><span class="bar"><i style="width:' + Math.max(0, Math.min(100, t[1])) + '%"></i></span><b>' + Math.round(t[1]) + '</b><span class="why">' + esc(t[2]) + "</span></li>";
+    }).join("");
+    $("ar-card").innerHTML = "<h3>" + esc(q.name) + ", " + esc(q.group.replace(/_/g, " ")) + ": the drafted traits</h3>" +
+      '<p class="query">' + esc(info.era) + ". " + esc(info.drafted) + (info.reviewed ? " Reviewed by the owner." : "") + " Ability from these traits: " + q.ability + " percentile.</p>" +
+      '<ul class="traits">' + traits + "</ul>" +
+      '<p class="small">Each number is a percentile against the regular players of his position group in his own seasons, before the level is taken out; 50 is a typical regular.</p>' +
+      "<h3>Sources</h3><ul class=\"sources\">" + info.sources.map(function (x) { return "<li>" + esc(x) + "</li>"; }).join("") + "</ul>";
+  }
+  function openArchetypes() {
+    state.archetypes = true;
+    state.greats = false;
+    state.similar = false;
+    history.replaceState(null, "", "#archetypes");
+    tabs();
+    $("ar-status").textContent = SIM ? "" : "Loading the archetypes.";
+    loadSimilar().then(setupArchetypes, function () { $("ar-status").textContent = ""; $("ar-out").innerHTML = simFailed(); });
   }
 
   function dictionary() {
@@ -922,8 +1031,10 @@ footer p { margin: 6px 0; max-width: 100ch; }
     t.addEventListener("click", function () {
       if (t.dataset.tab === "similar") { openSimilar(); return; }
       if (t.dataset.tab === "greats") { openGreats(); return; }
+      if (t.dataset.tab === "archetypes") { openArchetypes(); return; }
       state.similar = false;
       state.greats = false;
+      state.archetypes = false;
       state.tab = t.dataset.tab;
       history.replaceState(null, "", state.tab === "bargains" ? "#bargains" : "#candidates");
       ["q", "age-min", "age-max"].forEach(function (id) { $(id).value = ""; });
@@ -975,6 +1086,9 @@ footer p { margin: 6px 0; max-width: 100ch; }
   $("gr-name").addEventListener("change", function () { gr.name = $("gr-name").value; greatAgeOptions(); greatsDraw(); });
   $("gr-age").addEventListener("change", function () { gr.age = Number($("gr-age").value); greatsDraw(); });
   $("gr-pool").addEventListener("change", greatsDraw);
+  $("ar-name").addEventListener("change", function () { ar.key = $("ar-name").value; arDraw(); });
+  ["ar-age-min", "ar-age-max"].forEach(function (id) { $(id).addEventListener("input", arDraw); });
+  $("ar-pool").addEventListener("change", arDraw);
 
   header();
   howto();
@@ -985,6 +1099,7 @@ footer p { margin: 6px 0; max-width: 100ch; }
   draw();
   if (state.similar) openSimilar();
   if (state.greats) openGreats();
+  if (state.archetypes) openArchetypes();
 })();
 </script>
 </body>

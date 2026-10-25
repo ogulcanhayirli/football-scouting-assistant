@@ -1124,7 +1124,16 @@ more in both:
 | `saves_per90` | 37 | 0.984 |
 
 Interceptions per 90 agree well by season (0.889) though not by match; the
-rule was set on the match level before looking and is kept.
+rule was set on the match level before looking.
+
+**The owner's call (prompt 18c): tackles and interceptions are kept in the
+StatsBomb vectors.** Their cross source correlation per match is 0.63
+(tackles) and 0.68 (interceptions), under the 0.7 rule, but the identity
+test, not the correlation, decided: with them the seasons held for
+Barcelona find the same player's API Football season in the top five 28.6%
+of the time against 14.3% without (table below). The rule stays in the code
+and the report as a flag (`MIN_CORRELATION`, `KEPT` in
+`src/scout/greats_check.py`); all 18 measures are in the vectors.
 
 **Cross source identity check.** Each StatsBomb regular season of 2015/16
 to 2020/21 linked to API Football, embedded with the stored model through
@@ -1140,6 +1149,8 @@ group: is his own API Football season among the five nearest?
 | 2015/16, every measure | whole league | 392 | 76.0% | 1.11% | 2 | 487 |
 | 2016/17 to 2020/21, every measure | Barcelona and opponents | 98 | 28.6% | 0.62% | 16 | 874 |
 | all, every measure | both | 490 | 66.5% | 1.01% | 2 | 487 |
+| 2015/16, every measure, corrected (prompt 18c) | whole league | 392 | 75.8% | 1.11% | 2 | 487 |
+| 2016/17 to 2020/21, every measure, corrected | Barcelona and opponents | 98 | 55.1% | 0.62% | 5 | 874 |
 
 Where the peer group is the whole league (2015/16) the StatsBomb season
 lands next to the same player's own season 79.1% of the time (median rank
@@ -1148,7 +1159,9 @@ Barcelona and its opponents (2016/17 on, as every season before 2015/16 has)
 it does so 14.3% of the time (median rank 25, 98 searches), above 0.62% at
 random but far from the full league. With every measure kept the thin
 seasons do better (28.6%); the rule's two exclusions cost information
-there. Whether to keep the rule or the two measures is the owner's call.
+there, and the owner kept the measures (above). With the correction below
+the thin seasons reach 55.1% (median rank 5). 2015/16 does not change with
+it (75.8% against 76.0%; only its pooling with the corrected 2014/15 moves).
 
 **Peers and level (before 2015/16).** Each StatsBomb season is standardised
 within position group and season against the players in those matches with
@@ -1176,9 +1189,58 @@ and against Barcelona and its opponents only (276). The two vectors of the
 same player season have a median cosine of 0.68 (lowest 0.50), and his own
 API Football season is in the top five 100% of the time with the whole
 league against 15.8% with the thin peer group (median rank 1 against 25).
-The pre 2015 greats are therefore rough sketches. A correction learned on
-2015/16 (the opponents' bias by measure and group, where both peer groups
-exist) could narrow it; not built, the owner's call.
+Uncorrected, the pre 2015 greats were rough sketches.
+
+**The correction (prompt 18c, `PeerCorrection` in `src/scout/greats.py`).**
+Learned on La Liga 2015/16, held twice: every match, and Barcelona's matches
+only (as every other StatsBomb season is held). Per position group and
+measure, two numbers: the shift, where the whole league's mean sits in
+spreads of the opponents' (the opponents' mean minus the league's, over
+the opponents' true spread; negative means Barcelona's opponents did less
+of it), and the ratio of the opponents' true spread to the league's. The
+opponents are the reference, not the whole thin group, so the players being
+measured never set their own baseline. In a season held for Barcelona the
+league's mean and spread are rebuilt from that season's opponents with the
+two numbers, every player is standardised against the rebuilt league, and
+his ability percentile, which takes the level out, is placed in the 2015/16
+league's distribution of the same score instead of ranked among the thin
+peers. A measure or group without both numbers keeps the opponents' own.
+
+The opponents of Barcelona won fewer duels (shifts of -1.3 to -2.6 spreads
+in every outfield group), drew fewer fouls, and among central midfielders
+scored, assisted and shot far less (about -3); spreads are true spreads, so
+a measure with very little real variation shows a large shift (a centre
+back's share of passes, -13.3). Every pair is in `reports/greats.md` and
+`processed/greats/correction.csv`.
+
+In sample (2015/16, where it was learned, so a check and not evidence):
+the median cosine between a Barcelona regular's thin and whole league
+vectors rises from 0.68 to 0.93, and his own API Football season is in the
+top five 94.7% of the time against 21.1% uncorrected (100% with the whole
+league; short of exact because the check puts each linked player in his
+API Football position group while the correction was learned with
+StatsBomb's).
+
+**The test, 2016/17 to 2020/21** (Barcelona's matches only, after the
+season it was learned on; every measure kept; the rule, set before the
+test: applied when the top five rate rises and the median rank does not):
+
+| Vectors | Searches | Top 5 | Median rank | Better | Worse |
+|---|---|---|---|---|---|
+| uncorrected | 98 | 28.6% | 16 | | |
+| corrected | 98 | 55.1% | 5 | 66 | 27 |
+
+By season, corrected: 63.2% (2016/17), 50.0%, 82.4%, 31.6%, 52.4%
+(2020/21). **It helps, so it is applied to every season held for Barcelona
+before 2015/16, and the page says what it does.** Arsenal's Premier League
+2003/04 stays uncorrected: the correction was learned and tested on
+Barcelona's opponents in La Liga only, and the one look at that season
+(Henry's, in the archetypes' calibration below) showed the La Liga shifts
+misplacing a Premier League forward. Arsenal's opponents' forwards drew
+more fouls (2.42 per 90) than the thin group's mean (2.01), where
+Barcelona's opponents drew fewer than the league, so the rebuilt league
+mean (3.49) put Henry's 1.79 at the bottom of every forward. Henry's season
+keeps the thin peer group (Arsenal and its opponents) and its caveat.
 
 **The greats.** 23 greats, 239 seasons, one per age: Messi from 17 to 38
 (StatsBomb to 2014/15, then our own data through Paris and Miami), Xavi,
@@ -1195,19 +1257,21 @@ Examples (today's players of that age and the great's position group; the
 elite chance is the calibrated one of the candidates table, which exists
 only for the elite pool, 23 or under):
 
-* **Messi at 19** (2006/07, 2,001 minutes): G. De Pieri (Bari, 0.63),
-  N. Irankunda (Watford, 0.61), Lucas Ferreira (São Paulo, 0.59), M. Caprini
-  (Mantova, 0.59), B. Touré (Hoffenheim, 0.58, elite chance 20%). In the
-  elite pool: B. Touré, Jan Virgili (15%), S. El Mala (30%).
+With every measure kept and Barcelona's seasons corrected (prompt 18c; the
+18b lists before it are in git):
+
+* **Messi at 19** (2006/07, 2,001 minutes): B. Touré (Hoffenheim, 0.63,
+  elite chance 20%), J. Bal (ADO Den Haag, 0.55), Y. Diomande (RB Leipzig,
+  0.53), Jan Virgili (Mallorca, 0.52, 15%), Abdoulaye Camara (Vejle, 0.52).
+  In the elite pool: B. Touré, Jan Virgili, S. El Mala (30%).
 * **Xavi at 25** (2005/06, a thin season: 437 minutes in the 17 matches
-  StatsBomb holds): N. Madsen (QPR, 0.62), A. Zorgane (Union St. Gilloise),
-  L. Johnsen (Malmö), E. López (Envigado), Alonso Coello (Toronto). At 26
-  (2006/07, 2,002 minutes): A. Sánchez (Atlético Tucumán), A. Mironov
-  (Rostov), Manu Morlanes (Mallorca), S. Sanna (Laval), A. Dozzell
-  (Portsmouth).
-* **Henry at 26** (Arsenal 2003/04, 3,328 minutes): E. Latte Lath (Atlanta,
-  0.72), J. Ardaiz (Sarmiento), Rafael Elias (Kyoto Sanga), M. Toye (Sporting
-  Kansas City), P. Judd (San Jose).
+  StatsBomb holds): L. Johnsen (Malmö, 0.74), Tiago Dantas (Rijeka),
+  O. Kökçü (Beşiktaş), S. Mezei (TSC), J. Zapata (Atlético Nacional). At 26
+  (2006/07, 2,002 minutes): I. Louza (Watford, 0.59), U. Bislimi (Lugano),
+  R. Sedláček (Jablonec), Matheus Bueno (Shimizu), Monchu (Aris).
+* **Henry at 26** (Arsenal 2003/04, 3,328 minutes, uncorrected): E. Latte
+  Lath (Atlanta, 0.78), J. Ardaiz (Sarmiento), P. Judd (San Jose),
+  S. Surridge (Nashville), M. Toye (Sporting Kansas City).
 
 Similar means plays the same way with the level taken out, so the nearest
 are rarely stars; the page labels every result "style similarity from box
@@ -1224,6 +1288,110 @@ than the ten first noticed (most were the `&apos;` of N'Diaye, O'Brien and
 D'Alessandro); `scripts/repair_names.py` applied the same repair to them
 (a pure function of the name, so the same as parsing the cache again). On
 the 2025 tables 9 candidates' and 3 bargains' names changed.
+
+## Archetypes (prompt 18c, 25 October 2026)
+
+`scout archetypes` (`src/scout/archetypes.py`; files under `archetypes/`;
+report `reports/archetypes.md`). Nothing here feeds the lists' models.
+
+**What an archetype is.** A player we have no data for, described from the
+historical record: one YAML file per player with his position group, era,
+`measured: false`, each of the 18 style measures as a percentile against
+the regular players of his position group in his own seasons (before the
+level is taken out) with a one line reason, and the sources. Eight legends
+(`archetypes/legends/`: Cruyff and Ronaldo Nazário as centre forwards,
+Gullit and Zidane as attacking midfielders, Pirlo as a defensive
+midfielder, Rio Ferdinand and Baresi as centre backs, Maldini as a left
+back) and six calibration players (`archetypes/calibration/`). **Every file
+was drafted by this Claude Code session on 25 October 2026 from the
+historical record and awaits the owner's review**; the session watched no
+matches and did not open the listed sources while drafting. The drafts were
+committed on their own (f056480) before any calibration season was looked
+at.
+
+**Into the level free space.** A percentile becomes a standardised value:
+the value at that percentile of his position group's distribution over our
+own regular player seasons from 2015 (one row per player and season, level
+kept). His ability percentile is the stored version 2 weights over those
+values, placed in the same seasons' distribution of that score. The level
+is taken out with the curves our own players go through (the cubic per
+position group of the measured greats), and the stored model embeds the
+result, so an archetype is searched among today's players exactly as a
+measured season is. Every result is labelled "archetype from the record,
+not measured". The version 2 weights favour what a rising player shows
+(centre backs: goals, passes, shots; Open questions), so a defensive legend
+drafted with few goals gets a middling ability (Baresi 51, Ferdinand 47)
+and the level curves treat him as a middling centre back.
+
+**Calibration.** Six players we can measure, drafted the same way before
+their data was looked at: Modrić (Real Madrid 2018/19), Iniesta (Barcelona
+2015/16), Van Dijk (Liverpool 2018/19) and Kanté (Leicester 2015/16) in our
+own data; Messi at 25 (Barcelona 2012/13, corrected) and Henry at 26
+(Arsenal 2003/04, uncorrected) in StatsBomb's. Each drafted percentile is
+set against the measured one on the same scale (his standardised value
+placed among our regular player seasons of his position group). A trait
+without spread in the group (an outfield player's saves) or without data
+that season (API Football's La Liga has no tackles or blocks before
+2017/18) is not compared. The baseline drafts 50 on every trait.
+
+| Player | Season | Traits | Mean gap | Within 15 | Baseline mean gap | Baseline within 15 |
+|---|---|---|---|---|---|---|
+| Henry at 26 | 2003/04, StatsBomb | 17 | 20.7 | 47% | 33.2 | 24% |
+| Iniesta | 2015/16, API Football | 15 | 18.6 | 33% | 24.0 | 40% |
+| Kanté | 2015/16, API Football | 17 | 20.0 | 41% | 32.3 | 12% |
+| Messi at 25 | 2012/13, StatsBomb | 17 | 12.2 | 65% | 42.9 | 6% |
+| Modrić | 2018/19, API Football | 17 | 14.8 | 59% | 21.4 | 47% |
+| Van Dijk | 2018/19, API Football | 15 | 14.9 | 53% | 27.5 | 40% |
+| the 4 in our own data | | 64 | 17.1 | 47% | 26.3 | 34% |
+| **all 6** | | 98 | 16.9 | 50% | 30.4 | 28% |
+
+**Verdict, by the owner's rule (within 15 points on most traits): the
+drafts land within 15 points on 49 of 98 traits, exactly half, not most, so
+the archetypes are illustrative only**, and the page says so next to them.
+They carry real information (mean gap 17 points against 30 for the
+baseline; 50% within 15 against 28%) but are wrong by more than 15 points
+on half the traits. Where the record helps and where it misleads: goals,
+shots, passes and dribbles per 90, the volumes it reports, landed within
+15 points on 20 of 24. The two rates were missed by more than 15 on 9 of
+12, the duel win rate mostly drafted too low (Iniesta 60 against 98, Messi
+70 against 100) and one dribble success far too high (Kanté 70 against
+21). Assists of the deeper players were drafted too low (Kanté 45 against
+89, Modrić 70 against 89, Van Dijk 65 against 85). Defensive volumes were
+missed both ways (Modrić's tackles 50 against 20, Van Dijk's interceptions
+40 against 8, but Henry's interceptions 30 against 92 and blocks 25 against
+93 in the thin Arsenal season). The share of the team's passes was missed
+both ways (Kanté 45 against 85, Modrić 85 against 50) and the share of its
+duels drafted too high for four of five.
+
+Searched with his drafted archetype among every regular of his position
+group that season, the real season ranks 1st of 352 (Kanté), 16th of 1,264
+(Van Dijk), 17th of 431 (Iniesta) and 121st of 725 (Modrić); top five at
+random is 0.4% to 1.4%. The StatsBomb seasons are not searched: a season
+held for one club has no pool of other regulars.
+
+**Today's nearest five** (any age, the archetype's position group, the
+newest season; similarity on the learned embedding; ability is the
+player's own percentile):
+
+* **Cruyff** (centre forward, ability 98 from the drafted traits):
+  G. Melkadze (Akhmat, 0.87), N. Mohammed (Halmstad, 0.86), C. Brym (NAC
+  Breda, 0.80), Y. Silue (OFK Beograd, 0.77), B. Touré (Annecy, 0.76).
+* **Rio Ferdinand** (centre back, 47): Z. Monlouis (Toronto, 0.80),
+  Jahmai Simpson-Pusey (Köln, 0.75), E. Mihaj (Atlanta, 0.75), Robert
+  Renan (Vasco da Gama, 0.75), J. Quarshie (Southampton, 0.74).
+* **Pirlo** (defensive midfielder, 92): Damián Rodríguez (Racing
+  Santander, 0.86), M. Castagnetti (Cesena, 0.81), M. Klich (Cracovia,
+  0.79), J. Gastien (Clermont, 0.79), Jorginho (Flamengo, 0.76); Kimmich
+  is seventh.
+
+The page's Archetypes tab shows each archetype's 18 drafted traits with
+their reasons and sources, the review status, the calibration verdict, and
+today's ten nearest (age range and elite pool filters). `scout archetypes`
+reloads every file after the owner edits it, checks it (every trait, a
+percentile from 0 to 100, a reason, a source; a test runs the same check),
+rebuilds the vectors, today's neighbours (`processed/archetypes/`), the
+calibration and the report; the weekly run calls it before `scout site`, so
+an edited file reaches the page at the next run.
 
 ## Next
 

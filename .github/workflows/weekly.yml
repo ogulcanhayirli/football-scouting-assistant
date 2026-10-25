@@ -89,6 +89,9 @@ jobs:
       - name: Similar players with the stored embedding
         run: uv run scout --config "$CONFIG" embed
 
+      - name: Archetypes from the record (reloads archetypes/, so an edited file reaches the page)
+        run: uv run scout --config "$CONFIG" archetypes
+
       - name: Rebuild the two tables and the explanations
         run: uv run scout --config "$CONFIG" lists
 

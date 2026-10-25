@@ -118,7 +118,8 @@ uv run python scripts/rebuild_match_seasons.py --from-s3 serie_b:2016  # re-pars
 uv run python scripts/repair_names.py [--dry-run]  # the adapter's name repair on processed partitions built before it (prompt 18b)
 $C statsbomb download                        # StatsBomb open data, once: La Liga 2004/05 to 2020/21, Premier League 2003/04
 $C statsbomb build                           # data/processed/statsbomb/player_match_stats/, checked by the contract
-$C greats                                    # mapping check against API Football, peer group vectors, the greats' table, reports/greats.md (after embed and lists)
+$C greats                                    # mapping check against API Football, the peer group correction and its test, peer group vectors, the greats' table, reports/greats.md (after embed and lists)
+$C archetypes                                # reload and check archetypes/*/*.yaml, their vectors and today's nearest, the calibration, reports/archetypes.md (after embed and greats, before site; the weekly run calls it)
 ```
 
 Also `athena "SQL"`, `featurestore ingest | pit --as-of DATE`,
@@ -157,9 +158,10 @@ bucket named by `$SCOUT_S3_BUCKET` (eu-central-1).
 | Model outputs | `data/processed/models/*.parquet` | backtest predictions (`backtest_<model>.parquet`), `scouting.parquet`, `big_move_current.parquet`, labels |
 | Embeddings (prompt 18) | `data/processed/embeddings/` | `vectors.parquet` (93,474 regular player seasons from 2015 with match stats: keys, name, age, club, group, ability, `main`, 18 `style_*` and 48 `emb_*` columns), `neighbours.parquet` (today's 11,908 players, ten nearest each), `dictionary.csv`; written by `embed`; in S3 since 25 October (owner's yes) |
 | Stored models | `data/processed/models/stored/` | the boosters behind the newest season's scores (`fair_value_fold_2024`, `fair_value_fold_2025`, `big_move_24m`, `elite`, `step_up`, `riser`; LightGBM text plus a `.json` of columns and training rows) and `ability_v2.json` (the ability fit); written by `backtest`, `moves`, `scouting`, read by `score`. Trained 21 October 2026; in S3 since 23 October (owner's yes; only these 13 files went up, and a dry run of `sync up --only processed` then found nothing to copy). Plus `embedding.json` (prompt 18, 24 October: shrinkage priors and the encoder, written by `embed --train`, read by `embed`), in S3 since 25 October (owner's yes; with `processed/embeddings/` only these 4 files went up, and a dry run then found nothing left) |
-| StatsBomb raw cache (prompt 18b) | `data/raw/statsbomb/` | 1,829 files, 2.83 GB (2,825,097,646 bytes): `competitions.json`, `matches/`, `lineups/`, `events/` (904 matches, each with a `.meta.json`), `files/LICENSE.pdf` and `files/statsbomb-logo.png`; fetched 25 October 2026 from the repository's master branch; not yet in S3 |
-| StatsBomb tables (prompt 18b) | `data/processed/statsbomb/` | `player_match_stats/league=<key>/season=<year>.parquet` (30,714 rows, StatsBomb ids, never mixed with API Football rows) and `vectors.parquet` (every StatsBomb season with minutes, peer group standardised and embedded); not yet in S3 |
-| The measured greats (prompt 18b) | `data/processed/greats/` | `greats.parquet` (239 seasons of 23 greats, one per age, 48 `emb_*`), `greats.json` (label, attribution, excluded measures), `statsbomb-logo.png`; read by `scout site`; not yet in S3 |
+| StatsBomb raw cache (prompt 18b) | `data/raw/statsbomb/` | 1,829 files, 2.83 GB (2,825,097,646 bytes): `competitions.json`, `matches/`, `lineups/`, `events/` (904 matches, each with a `.meta.json`), `files/LICENSE.pdf` and `files/statsbomb-logo.png`; fetched 25 October 2026 from the repository's master branch; in S3 since 25 October (owner's sync) |
+| StatsBomb tables (prompt 18b) | `data/processed/statsbomb/` | `player_match_stats/league=<key>/season=<year>.parquet` (30,714 rows, StatsBomb ids, never mixed with API Football rows) and `vectors.parquet` (every StatsBomb season with minutes, peer group standardised, Barcelona's seasons corrected since prompt 18c, the standardised measures as `z_*` and the embedding; the archetypes' calibration reads it); in S3 as of 18b, the 18c rebuild awaits the owner's sync |
+| The measured greats (prompts 18b, 18c) | `data/processed/greats/` | `greats.parquet` (239 seasons of 23 greats, one per age, 48 `emb_*`), `greats.json` (label, attribution, measures left out and kept, the correction's test), `correction.csv` (shift and spread ratio per position group and measure), `statsbomb-logo.png`; read by `scout site`; in S3 as of 18b, the 18c rebuild awaits the owner's sync |
+| Archetypes (prompt 18c) | `archetypes/` (committed) and `data/processed/archetypes/` | one YAML file per player (`legends/`: 8, `calibration/`: 6), drafted 25 October and awaiting the owner's review; `archetypes.parquet` (each archetype's `z_*`, ability, `style_*`, 48 `emb_*`), `archetypes.json` (traits, sources, label, calibration verdict), `neighbours.parquet` (today's ten nearest each), `calibration.parquet` (drafted against measured per trait); written by `scout archetypes`, read by `scout site`; not yet in S3 |
 | The page | `data/site/` | `index.html` (both tables embedded, 1.8 MB, 0.3 MB gzip on 24 October) and `data/` (the two tables as CSV and Parquet, `dictionary.csv`, `similar.json`); published to `scout-site-<account>` |
 | User facing tables | `data/processed/lists/` | `candidates`, `bargains` (Parquet, CSV), `dictionary.csv` (see Outputs) |
 | Quota state, log | `data/state/` | |
@@ -205,6 +207,8 @@ through the native API, and model only regular players (450+ minutes).
 | Fall back | `scouting`, `lists` | elite pool player whose value rank is at least twice as bad after 2 seasons | the pool's base rate | rate with and without each flag, rate by flag count 0, 1, 2 or more (`reports/candidates.md`) |
 | Bargains | `lists` | ratio of value to the fair value prediction, ranked within position group; top 50 per season | other eligible players of the same season, ability band and age band | share whose value rose in 24 months, share who joined a club with higher Elo within 2 seasons |
 | Similar players (decision 10) | `embed --train` | the same player's other season among the five nearest (identity retrieval, 2023 to 2025) | cosine on the style vectors | hit rate overall and by position group against random; replacement check (a sale and a same position signing within 60 days: signing among the departed player's ten nearest) |
+| Greats correction (prompt 18c) | `greats` | a StatsBomb season held for Barcelona lands next to the same player's API Football season (top five, 2016/17 to 2020/21) | the uncorrected thin peer group | top five hit rate, median rank, players better and worse |
+| Archetypes (prompt 18c) | `archetypes` | drafted percentiles against the measured ones for six players drafted blind | a draft of 50 on every trait | share within 15 points (the owner's rule: most), mean gap; the real season's rank when searched with the draft |
 | Riser (decision 3) | `scouting` | one season ability: both next seasons 20 above the best of this and last season and at the 70th percentile or better; half of team minutes now | `rank_rate` | as above, plus top 50 precision per season against the base rate |
 
 `scouting` also estimates league strength from players who changed leagues
@@ -274,7 +278,21 @@ October 2026, from MODELS.md and `reports/`:
   opponents as peers (every season before 2015/16) 14.3% (28.6% with every
   measure kept). On 2015/16 the thin peer group alone takes a Barcelona
   regular's top five hit from 100% to 15.8% (cosine 0.68 between the two
-  vectors): the pre 2015 greats are rough sketches. MODELS.md.
+  vectors). Prompt 18c: tackles and interceptions are kept (the owner's
+  call: the identity test, not the 0.63 and 0.68 correlation, decided), and
+  a correction learned on 2015/16 (per position group and measure, the
+  league's mean and spread against Barcelona's opponents') lifts the thin
+  seasons' top five from 28.6% to 55.1% on 2016/17 to 2020/21 (98
+  searches, median rank 16 to 5, 66 better and 27 worse); applied to
+  Barcelona's seasons before 2015/16, not to Arsenal's 2003/04. MODELS.md.
+* Archetypes (prompt 18c, `reports/archetypes.md`): eight legends drafted
+  from the record, every one awaiting the owner's review. Calibration on
+  six players drafted blind (Modrić, Iniesta, Van Dijk, Kanté in our data;
+  Messi at 25, Henry at 26 in StatsBomb's): within 15 points on 49 of 98
+  traits (50%, mean gap 17) against 28% (mean gap 30) for 50 everywhere;
+  half is not most, so **illustrative only**. Searched with the draft, the
+  real season ranks 1st of 352 (Kanté), 16th of 1,264 (Van Dijk), 17th of
+  431 (Iniesta), 121st of 725 (Modrić). MODELS.md.
 * Bargains (19 October, 37 leagues, seasons 2015 to 2023, experienced 30 to
   33): the top 50 gained value far more often than matched peers (prime
   63.2% against 43.3%, experienced 11.0% against 4.5%), but moved to a club
@@ -351,7 +369,16 @@ pool only" switch, the label "style similarity from box score stats is
 coarse; the same player is found in the top five about one time in five;
 treat lists as shortlists", the peer group caveat, and the StatsBomb logo
 and credit (also in the footer); its data is a `greats` block inside
-`similar.json`, and today's rows there carry `age_mid`. `scout publish`
+`similar.json`, and today's rows there carry `age_mid`. Since prompt 18c the
+greats note says Barcelona's old seasons are corrected (and what the
+correction does, with its test) and that tackles and interceptions are
+kept. The Archetypes tab (prompt 18c) picks an archetype (legends, then the
+calibration drafts) and lists today's ten nearest of its position group
+(age range and elite pool filters) with the label "archetype from the
+record, not measured" on every result, the calibration verdict
+(illustrative only), and the archetype's 18 drafted traits with their
+reasons, sources and review status; its data is an `archetypes` block
+inside `similar.json`. `scout publish`
 sends only the page, the two tables with the dictionary, `similar.json`
 and, with the greats, `statsbomb-logo.png` (an allowlist; without the logo
 `scout site` leaves the greats out). Model
@@ -448,6 +475,7 @@ detail stays in `reports/scouting.md`, `reports/moves.md`,
 
 * Similar players, tested by finding the same player's other season among the nearest neighbours: **done 24 October (prompt 18, decision 10).**
 * The measured greats from StatsBomb open data, against today's players with the calibrated elite chance: **done 25 October (prompt 18b).**
+* The thin peer group's correction and archetypes for players without data, with a blind calibration: **done 25 October (prompt 18c); the archetypes await the owner's review.**
 * January window forecast, published mid December and scored in February.
 * A capped chat over the two tables.
 * A matchup report before any match model.
@@ -460,7 +488,8 @@ hand) pulls `processed/` and `raw/transfermarkt/`, runs the free tier update
 when `configs/update.free.yaml` exists (skipped with a notice until prompt 4
 creates it; it then calls `scout update`, which prompt 4 must add), then
 `features --current`, `score`, `embed` (prompt 18: 17 seconds, 1.3 GB),
-`lists`, `site`, `publish`. There is no daily run; the neighbours of the
+`archetypes` (prompt 18c: 21 seconds; reloads `archetypes/` from the
+checkout, so the owner's edits reach the page), `lists`, `site`, `publish`. There is no daily run; the neighbours of the
 current rows are computed by this weekly one. It never trains.
 A clean run took 254 seconds on 4 cores (pull 80, features 92, score 56,
 lists 22) and 2.5 GB of memory, and rebuilt the registered tables byte for
@@ -500,7 +529,8 @@ src/scout/  config, secrets, ratelimit, storage, sync, athena, featurestore,
   forecast.py               registered forecasts: freeze, score, history
   window.py                 the January window forecast: freeze, score
   embeddings.py             style vectors, the learned embedding, identity and replacement tests, similar player search
-  greats.py, greats_check.py  the measured greats: season rows, peer standardisation, level, the greats' table, report; the check against API Football
+  greats.py, greats_check.py  the measured greats: season rows, peer standardisation, the thin peer group's correction, level, the greats' table, report; the check against API Football
+  archetypes.py             archetypes from the record: files checked, percentiles to level free vectors, today's nearest, the calibration, report
   season_so_far.py          the season so far block (features --current)
   present.py                club today and season so far in both tables
   backfill/current.py       scout current: squads, transfers, the season in progress
@@ -512,6 +542,7 @@ src/scout/  config, secrets, ratelimit, storage, sync, athena, featurestore,
   features/                 build.py (core), context.py (cups, team, injuries, transfers), pipeline.py
   models/                   targets, backtest, estimators, moves, run, store (the stored models)
 forecasts/  registered forecasts, one dated folder each (committed)
+archetypes/ legends/ and calibration/: one YAML file per player, drafted, for the owner to review and edit
 training/   SageMaker entry point and requirements
 scripts/    feasibility.py, run_extras.py, rebuild_match_seasons.py, run_expansion.py, repair_names.py
 tests/      unit, contracts, fixtures (synthetic)
@@ -673,17 +704,41 @@ Settle them with the owner rather than guessing.
   nothing else (bar the tie order and float noise above). Feature rows of
   seasons before 2025 keep the old names until the next full `scout
   features` (the similar players history rows show them).
-* Prompt 18b local changes await the owner's `sync up` (none was made):
-  `raw/statsbomb/` (2.83 GB), `processed/statsbomb/`, `processed/greats/`
-  (the weekly run needs it for the greats tab), the 379 repaired partitions,
-  the rebuilt 2025 feature partitions, `models/` outputs of `score`,
-  `embeddings/`, `lists/`, `reports/greats.md` and `reports/candidates.md`.
-  The registered forecast folders are unchanged.
-* The measured greats leave three calls to the owner: keep the 0.7 rule
-  (the two excluded measures help the thin seasons' identity check, 28.6%
-  against 14.3%) or keep the measures; build a correction for the
-  opponents' bias learned on 2015/16, where both peer groups exist; and
-  register with StatsBomb (statsbomb.com/resource-centre), as its user
-  agreement asks. StatsBomb's 2015/16 La Liga is complete, so it was
-  downloaded in full (380 matches) and serves the validation and the bias
-  measurement; the other seasons are Barcelona's matches only.
+* Prompt 18b's changes were synced up by the owner on 25 October (S3
+  timestamps 09:09 to 09:13 UTC; the 18c session's pull afterwards matched
+  S3 file for file). That session fetched `raw/statsbomb/` again from GitHub
+  (1,829 requests, the same 2,825.1 MB of bodies) before noticing the S3
+  copy, which a fresh container should pull instead; its local
+  `.meta.json` sidecars carry the new fetch time, so `raw/statsbomb/` need
+  not be synced up from it.
+* Prompt 18c local changes await the owner's `sync up` (none was made):
+  `processed/greats/` (with `correction.csv`), `processed/statsbomb/vectors.parquet`
+  (the `z_*` columns the archetypes' calibration reads),
+  `processed/archetypes/`, `reports/greats.md` and `reports/archetypes.md`.
+  The weekly run rebuilds the archetypes itself; until the new
+  `vectors.parquet` is in S3 its calibration skips Messi and Henry and the
+  page's verdict reads the four players in our own data (47% within 15
+  against 34%, still illustrative only). The registered forecast folders
+  are unchanged.
+* The measured greats: the owner settled two of three calls in prompt 18c
+  (tackles and interceptions kept; the correction built, tested and
+  applied). Still open: register with StatsBomb
+  (statsbomb.com/resource-centre), as its user agreement asks. Arsenal's
+  Premier League 2003/04 stays uncorrected: the correction was learned on
+  La Liga and misplaced Henry's numbers there; a Premier League correction
+  would need a season StatsBomb holds in full for that league. StatsBomb's
+  2015/16 La Liga is complete, so it was downloaded in full (380 matches)
+  and serves the validation and the correction; the other seasons are
+  Barcelona's matches only.
+* Archetypes (prompt 18c): all 14 files are drafts by a session from the
+  record and await the owner's review (`reviewed: false`); the session
+  watched no matches and did not open the listed sources. Maldini is drafted
+  as a left back (1988 to 1995) and Cruyff as a centre forward, Pirlo as a
+  defensive midfielder: other readings would be further files. The version 2
+  ability weights favour goals, passes and shots for centre backs, so the
+  defensive legends get a middling ability (Baresi 51, Ferdinand 47) and
+  the level curves treat them so. The verdict (illustrative only) is the
+  owner's rule applied to 50% exactly. The calibration files are a blind
+  test: edited after reading `reports/archetypes.md` they stop being one, so
+  a new check needs a fresh draft by someone who has not seen the measured
+  table.

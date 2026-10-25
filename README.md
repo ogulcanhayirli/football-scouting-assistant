@@ -51,7 +51,8 @@ chances shown as the rates that past forecasts actually achieved.
 | Weekly run (`.github/workflows/weekly.yml`) | Built, and the stored models are in S3 (23 October); waits for the `scout-weekly` user and the GitHub secrets and variables (docs/DEPLOY.md). A clean run of the same steps took 4 minutes 14 seconds on a 4 core machine |
 | Static page (`scout site`) and its bucket (`ScoutSite`) | Live since 21 October 2026 |
 | Similar players (`scout embed`, `scout similar`, decision 10) | Done 24 October 2026: a learned embedding finds the same player's other season among his five nearest 19.9% of the time against 13.2% for plain style vectors (0.35% at random); in S3 since 25 October, on the page at the next publish |
-| Measured greats (`scout greats`, prompt 18b) | Done 25 October 2026: StatsBomb open data (La Liga 2004/05 to 2020/21, Premier League 2003/04, 2.83 GB) mapped to our match table and checked against API Football (every kept measure correlates 0.7 or more per match; tackles and interceptions left out); 23 greats by age against today's players, with the calibrated elite chance, in a page tab at the next publish |
+| Measured greats (`scout greats`, prompts 18b and 18c) | Done 25 October 2026: StatsBomb open data (La Liga 2004/05 to 2020/21, Premier League 2003/04, 2.83 GB) mapped to our match table and checked against API Football (tackles and interceptions agree at 0.63 and 0.68 per match and are kept, the owner's call on the identity test); Barcelona's old seasons corrected for the thin peer group (the same player found 55.1% of the time on 2016/17 to 2020/21 against 28.6% uncorrected); 23 greats by age against today's players, with the calibrated elite chance, in a page tab at the next publish |
+| Archetypes (`scout archetypes`, prompt 18c) | Drafted 25 October 2026, awaiting the owner's review: eight legends from the historical record (Cruyff, Gullit, Rio Ferdinand, Maldini, Zidane, Ronaldo Nazário, Baresi, Pirlo) searched among today's players; a calibration on six players we can measure lands within 15 points on half the traits (28% for a draft of 50 everywhere), so they are labelled illustrative only |
 | Free tier update of the current season | Not started: prompt 4, from 6 November; the weekly run skips it until its config exists |
 | Glue and Athena, Feature Store, SageMaker training stacks | Retired by decision 9, code in `infra/archive/`; still deployed until the owner removes them |
 
@@ -66,15 +67,16 @@ chances shown as the rates that past forecasts actually achieved.
                                                                                         │ sync up
                                                                                         ▼
  S3 data bucket (private): raw/, processed/ (tables, models/stored/, lists/), reports/
-            │ read processed/ and raw/transfermarkt/            ▲ write processed/lists/
-            ▼                                                   │
+            │ read processed/ and raw/transfermarkt/                          ▲ write processed/lists/
+            ▼                                                                 │
  GitHub Actions, weekly:  features --current ─► score (stored models, no training)
-                          ─► embed ─► lists ─► site ─► publish ─┤
-                                                                ▼ write
+                          ─► embed ─► archetypes ─► lists ─► site ─► publish ─┤
+                                                                              ▼ write
                          S3 site bucket (public read, static website hosting)
                          index.html with both tables embedded, data/*.csv, data/*.parquet,
-                         data/similar.json (the similar players panel and the measured
-                         greats, loaded on demand), statsbomb-logo.png (with the greats)
+                         data/similar.json (the similar players panel, the measured
+                         greats and the archetypes, loaded on demand),
+                         statsbomb-logo.png (with the greats)
 ```
 
 Deliberately small: one scheduled job and one static page, no servers. The
@@ -115,9 +117,11 @@ src/scout/
   forecast.py               registered forecasts: freeze, score, history, revise
   embeddings.py             style vectors, the learned embedding, similar players
   greats.py, greats_check.py  the measured greats from StatsBomb open data; the check against API Football
+  archetypes.py             archetypes from the record: files checked, level free vectors, calibration
   site.py, site_template.html   the static page
   publish.py, sync.py       the weekly upload; copying data to and from S3
   cli.py                    `scout <command>`
+archetypes/                 legends/ and calibration/: one YAML file per player, drafted, for the owner to edit
 configs/                    backfill.ultra.yaml (current), free, pro, expansion
 forecasts/<date>/           registered forecasts (committed)
 infra/                      ScoutSite CDK stack (own uv environment); archive/ holds the retired stacks
@@ -146,6 +150,7 @@ $C sync down --only processed && $C sync down --only transfermarkt
 $C features --current     # the newest season only, earlier ones as stored
 $C score                  # the newest season with the stored models, no training
 $C embed                  # every player season embedded with the stored model; today's ten nearest
+$C archetypes             # archetypes/*/*.yaml reloaded and checked, vectors, calibration, reports/archetypes.md
 $C lists                  # candidates and bargains, reports/candidates.md
 $C site                   # data/site/index.html and the downloads
 $C publish                # processed/lists/ and the site bucket ($SCOUT_SITE_BUCKET)
@@ -170,7 +175,7 @@ $C similar Rodri --at-age 21              # today's players aged 20 to 22 who lo
 # The measured greats (StatsBomb open data; download once, then offline)
 $C statsbomb download     # La Liga 2004/05 to 2020/21 and the Premier League 2003/04, 2.83 GB, cached
 $C statsbomb build        # per match player table, checked by the contract
-$C greats                 # mapping check against API Football, peer group vectors, reports/greats.md
+$C greats                 # mapping check, the peer group correction and its test, reports/greats.md
 
 # Registered forecasts
 $C forecast freeze        # copy today's lists into forecasts/<date>; never overwrites
@@ -207,13 +212,21 @@ site bucket are the one exception.
   no market value.
 * **The weekly run does not retrain.** It scores with the models stored on
   21 October 2026; new seasons of data need the manual retraining above.
-* **The measured greats before 2015/16 are rough sketches.** StatsBomb's
-  open seasons hold Barcelona's matches (Arsenal's for 2003/04), so a great
-  is measured against Barcelona and its opponents only: a thinner, biased
-  peer group, with no league or team adjustment (ours starts in 2010). On
-  2015/16, where the whole league exists too, the thin peer group moves a
-  Barcelona player's vector a long way (median cosine 0.68) and finds his
-  own season in the top five 16% of the time instead of 100% (MODELS.md).
+* **The measured greats before 2015/16 are sketches.** StatsBomb's open
+  seasons hold Barcelona's matches (Arsenal's for 2003/04), so a great is
+  measured against Barcelona and its opponents only: a thinner, biased peer
+  group, with no league or team adjustment (ours starts in 2010). A
+  correction learned on 2015/16 (prompt 18c) rebuilds the league from the
+  opponents for Barcelona's seasons; tested on 2016/17 to 2020/21 it finds
+  the same player's API Football season in the top five 55% of the time
+  against 29% uncorrected, still short of the 76% a whole league season
+  gets. Arsenal's 2003/04 is not corrected (MODELS.md).
+* **Archetypes are illustrative only.** The eight legends without data are
+  drafts from the historical record awaiting the owner's review. Drafted
+  the same way for six players we can measure, the percentiles landed
+  within 15 points on half the traits (the owner's bar is most), against
+  28% for a draft of 50 on every trait; every result is labelled
+  "archetype from the record, not measured" (MODELS.md).
 * **The page is plain HTTP.** S3 website hosting has no HTTPS, and
   CloudFront is left out on purpose; the page holds public tables only.
 
@@ -427,5 +440,25 @@ the same player's API Football season 79% of the time. The old seasons are
 measured against Barcelona and its opponents only, a thin and biased peer
 group, and say so on the page; the panel shows the calibrated elite chance
 next to every similarity so a style match is never mistaken for a forecast.
-*Would change if* a fuller source of old seasons appeared, or a correction
-for the opponents' bias were learned on 2015/16 and passed the same check.
+Prompt 18c settled two of the owner's calls: tackles and interceptions are
+kept (0.63 and 0.68 per match, but with them the thin seasons find the same
+player twice as often; the identity test decided), and a correction for the
+opponents' bias, learned on 2015/16 per measure and position group and
+tested on 2016/17 to 2020/21 (55.1% against 28.6% in the top five), is
+applied to Barcelona's old seasons. *Would change if* a fuller source of
+old seasons appeared, or the correction were learned for the Premier
+League too (Arsenal's 2003/04 stays uncorrected).
+
+**D24. Archetypes from the record, labelled and calibrated (prompt 18c).**
+Legends with no data at all (Cruyff, Gullit, Rio Ferdinand, Maldini,
+Zidane, Ronaldo Nazário, Baresi, Pirlo) are described in the style
+vector's own 18 measures, each a percentile against position peers with a
+reason and sources, in YAML files the owner edits after watching matches;
+they go through the same level free space as a measured season. Before
+trusting the method it was calibrated: six players we can measure were
+drafted the same way, blind, and the drafts landed within 15 points of the
+measurement on half the traits, which is not most, so the page calls the
+archetypes illustrative only and labels every result "archetype from the
+record, not measured". *Would change if* a second blind draft of the
+calibration players (by someone who has not seen the measured table)
+landed within 15 points on most traits.

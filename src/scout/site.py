@@ -18,7 +18,9 @@
   shows a note. Since prompt 18b it also holds the measured greats
   (``scout greats``): each great's season vector by age, for the page to
   search today's players of that age; today's rows carry their age in the
-  middle of the season for it;
+  middle of the season for it. Since prompt 18c it holds the archetypes
+  (``scout archetypes``): each legend's vector from the record, his drafted
+  traits and the calibration verdict;
 * ``statsbomb-logo.png``: the logo the StatsBomb user agreement asks every
   published analysis of its data to carry, written only with the greats
   (no greats are shown without it).
@@ -276,6 +278,8 @@ def greats_data(greats: pd.DataFrame | None, info: dict | None, leagues: dict[st
         "label": info["label"],
         "attribution": info["attribution"],
         "excluded": info.get("excluded", []),
+        "kept": info.get("kept", []),
+        "correction": info.get("correction"),
         "identity_hit": info.get("identity_hit"),
         "logo": LOGO,
         "columns": [
@@ -296,6 +300,44 @@ def greats_data(greats: pd.DataFrame | None, info: dict | None, leagues: dict[st
     }
 
 
+def archetypes_data(table: pd.DataFrame | None, info: dict | None) -> dict:
+    """The archetypes block of the similar players file (prompt 18c): one row
+    per archetype (legends first), its vector as 8 bit integers, and what the
+    tab shows beside it: the drafted traits with their reasons, the sources,
+    the review status, the label and the calibration verdict."""
+    from scout.archetypes import TRAIT_NAMES
+
+    if table is None or table.empty or info is None:
+        return {"available": False}
+    emb = [c for c in table.columns if c.startswith("emb_")]
+    rows = table.assign(_order=table["kind"].ne("legends")).sort_values(
+        ["_order", "name"], kind="stable"
+    )
+    details = {a["key"]: a for a in info["archetypes"]}
+    return {
+        "available": True,
+        "label": info["label"],
+        "calibration": {
+            "calibrated": info["calibration"]["calibrated"],
+            "text": info["calibration"]["text"],
+        },
+        "trait_names": TRAIT_NAMES,
+        "columns": ["key", "kind", "name", "group", "ability"],
+        "rows": [
+            [r.key, r.kind, r.name, r.group, round(float(r.ability_pct))]
+            for r in rows.itertuples(index=False)
+        ],
+        "details": {
+            k: {
+                f: details[k].get(f)
+                for f in ("era", "drafted", "reviewed", "traits", "sources", "calibration")
+            }
+            for k in rows["key"]
+        },
+        "vectors": _int8(rows, emb),
+    }
+
+
 def similar_data(
     vectors: pd.DataFrame | None,
     current: pd.DataFrame | None,
@@ -303,12 +345,14 @@ def similar_data(
     tested: dict | None = None,
     greats: dict | None = None,
     calendar_leagues=(),
+    archetypes: dict | None = None,
 ) -> dict:
     """The similar players file: today's players (main rows of the newest
     season) and the earlier seasons of players once ranked in the top
     ``HISTORY_TOP`` by value, rows as lists, vectors as one base64 string
     of 8 bit integers per table (row after row); and the measured greats
-    (``greats_data``), with today's age in the middle of the season."""
+    (``greats_data``), with today's age in the middle of the season, and the
+    archetypes (``archetypes_data``)."""
     from scout.greats import mid_season_age
 
     if vectors is None or vectors.empty:
@@ -382,6 +426,7 @@ def similar_data(
         "today": table(today, with_now=True),
         "history": table(history, with_now=False),
         "greats": greats or {"available": False},
+        "archetypes": archetypes or {"available": False},
     }
 
 
@@ -445,7 +490,8 @@ def build_site(settings, out_dir: Path | None = None, forecasts_root: Path = Pat
     names = league_names(settings)
     calendar = [lg.key for lg in settings.leagues if lg.calendar_year]
     great_block = greats_data(greats, info, names) if greats_ready else {"available": False}
-    similar = similar_data(vectors, current, names, tested, great_block, calendar)
+    archetypes = archetypes_data(*_archetype_inputs(processed))
+    similar = similar_data(vectors, current, names, tested, great_block, calendar, archetypes)
     target = downloads / SIMILAR
     atomic_write_text(target, json.dumps(similar, ensure_ascii=False, separators=(",", ":")))
     written.append(target)
@@ -478,6 +524,18 @@ def _similar_inputs(processed: Path) -> tuple:
     stored = store_dir(processed) / STORED
     tested = json.loads(stored.read_text()).get("tested") if stored.is_file() else None
     return vectors, current, tested
+
+
+def _archetype_inputs(processed: Path) -> tuple:
+    """The archetypes' vectors and notes (``scout archetypes``), each None when missing."""
+    from scout.archetypes import OUT
+
+    folder = Path(processed) / OUT
+    table, info = folder / "archetypes.parquet", folder / "archetypes.json"
+    return (
+        pd.read_parquet(table) if table.is_file() else None,
+        json.loads(info.read_text()) if info.is_file() else None,
+    )
 
 
 def _greats_inputs(processed: Path) -> tuple:

@@ -245,3 +245,93 @@ def test_the_logo_is_published_only_when_the_site_has_it(tmp_path):
     publish_site(s3, "site", tmp_path)
     assert set(OPTIONAL_SITE_FILES) <= set(s3.keys)
     assert s3.keys[-1] == "index.html"
+
+
+# The thin peer group's correction (prompt 18c)
+
+
+def test_the_club_a_season_is_held_for_is_found_from_its_minutes():
+    held = pd.DataFrame(
+        {
+            "league_key": "la_liga",
+            "season": [2010] * 4 + [2015] * 4,
+            "team_id": [217, 217, 1, 2, 217, 1, 2, 3],
+            "minutes": [2000.0, 1500.0, 180.0, 90.0, 900.0, 900.0, 900.0, 900.0],
+        }
+    )
+    focal = gr.focal_teams(held)
+    assert focal.to_dict() == {("la_liga", 2010): 217}  # 2015: every club, none held
+    thin, opponents = gr.opponent_rows(held, focal)
+    assert thin.tolist() == [True] * 4 + [False] * 4
+    assert opponents.tolist() == [False, False, True, True] + [False] * 4
+
+
+def test_the_correction_rebuilds_the_league_from_the_opponents():
+    # Learned where both exist: the league's mean 2 opponent spreads above theirs,
+    # its spread twice theirs. Applied to an old season's opponents.
+    corr = gr.PeerCorrection(
+        shift={"winger": {"m": -2.0}}, ratio={"winger": {"m": 0.5}}, reference={}
+    )
+    group = pd.Series(["winger", "winger", "centre_back"])
+    mu = pd.DataFrame({"m": [1.0, 1.0, 5.0]})
+    tau2 = pd.DataFrame({"m": [0.25, 0.25, 4.0]})
+    mu_l, tau2_l = corr.rebuild(mu, tau2, group)
+    assert mu_l["m"].tolist() == [2.0, 2.0, 5.0]  # 1 + 2 * 0.5; no pair learned: unchanged
+    assert tau2_l["m"].tolist() == [1.0, 1.0, 4.0]
+    table = corr.table()
+    assert table.to_dict("records") == [
+        {"group": "winger", "measure": "m", "shift": -2.0, "ratio": 0.5}
+    ]
+
+
+def test_a_corrected_row_takes_its_ability_from_the_league():
+    rows = pd.DataFrame(
+        {
+            "source_player_id": [1, 2, 3],
+            "season": 2008,
+            "minutes": [2500.0, 200.0, 180.0],
+            "sub_position": "Left Winger",
+        }
+    )
+    z = pd.DataFrame({"goals_per90": [1.0, 2.0, 3.0]})
+    weights = pd.DataFrame({"position": ["winger"], "measure": ["goals_per90"], "weight": [1.0]})
+    peers = rows["minutes"] >= 90
+    league = {"winger": np.array([-1.0, 0.0, 0.5, 2.0])}
+    corrected = pd.Series([True, False, False])
+    out = gr.peer_ability(z, rows, weights, peers, reference=league, corrected=corrected)
+    assert out.loc[0, "ability_pct_1s"] == 75.0  # placed among the league's four
+    assert out.loc[1:, "ability_pct_1s"].tolist() == [50.0, 100.0]  # ranked among the peers
+
+
+def test_the_correction_is_applied_only_when_it_helps_the_later_seasons():
+    def ranks(values, season=2017):
+        return pd.DataFrame(
+            {
+                "season": season,
+                "player": [f"p{i}" for i in range(len(values))],
+                "rank": values,
+                "hit": [r <= 5 for r in values],
+            }
+        )
+
+    learned = ranks([1, 1, 1], season=2015)  # the season it was learned on never counts
+    before = pd.concat([learned, ranks([3, 12, 30])])
+    better = pd.concat([learned, ranks([2, 4, 40])])
+    v = gr.correction_verdict(before, better)
+    assert v["helps"]
+    assert v["searches"] == 3
+    assert (v["before"], v["after"]) == (pytest.approx(1 / 3), pytest.approx(2 / 3))
+    assert (v["better"], v["worse"]) == (2, 1)
+    worse_rank = pd.concat([learned, ranks([4, 5, 90, 90])])
+    assert not gr.correction_verdict(pd.concat([learned, ranks([3, 12, 30, 30])]), worse_rank)[
+        "helps"
+    ]  # more hits, but the median rank got worse
+
+
+def test_tackles_and_interceptions_are_kept_below_the_floor():
+    excluded = {
+        "tackles_total_per90": ["tackles_total"],
+        "interceptions_per90": ["interceptions"],
+        "share_duels": ["duels_total"],
+    }
+    assert check.left_out(excluded) == {"share_duels": ["duels_total"]}

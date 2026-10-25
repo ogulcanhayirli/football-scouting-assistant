@@ -27,11 +27,22 @@ ability percentiles, a cubic per position group over 2015 to 2025, and its
 spread at that level), because 30 to 60 peers per group and season are too
 few to fit a cubic.
 
-**Validation** (``greats_check``) decides which measures are trusted: a
-style measure whose match counts correlate below 0.7 with API Football's is
-left out (it reads as the position mean). The cross source identity check
-embeds the StatsBomb seasons of 2015/16 to 2020/21 with the stored model and
-asks whether each lands next to the same player's API Football season.
+**Validation** (``greats_check``) compares the mapping with API Football
+match by match; a style measure whose counts correlate below 0.7 would read
+as the position mean, but the owner kept tackles and interceptions (prompt
+18c): the cross source identity check, which embeds the StatsBomb seasons
+of 2015/16 to 2020/21 with the stored model and asks whether each lands next
+to the same player's API Football season, finds the thin seasons' players
+twice as often with them.
+
+**The correction** (prompt 18c, ``PeerCorrection``). La Liga 2015/16 is held
+twice: every match, and Barcelona's matches only. Per position group and
+measure it learns where the whole league's mean and spread sit against the
+opponents' (a shift in the opponents' spreads and a spread ratio); a season
+held for one club is then standardised against the league rebuilt from its
+own opponents, and its ability percentile is placed in the 2015/16 league's
+distribution. Tested on 2016/17 to 2020/21 (Barcelona's matches only) and
+applied before 2015/16 only because it helped there.
 
 **The panel.** From 2015 the greats' seasons are our own vectors; before it,
 StatsBomb's. Ages are taken in the middle of the season (1 January; 1 July
@@ -55,6 +66,7 @@ from scout.embeddings import (
     FIRST_SEASON,
     HIT_AT,
     StoredEmbedding,
+    StyleVectors,
     level_basis,
     load_inputs,
     load_stored,
@@ -72,12 +84,14 @@ log = logging.getLogger(__name__)
 OUT = "statsbomb"  # processed/statsbomb/: the match table and the season vectors
 GREATS_OUT = "greats"  # processed/greats/: the panel's table and the logo
 PEER_MINUTES = 90
+FOCAL_SHARE = 0.4  # a club with this share of a season's minutes plays in every match held
 THIN_MINUTES = REGULAR_MINUTES
 # Who a StatsBomb season before 2015/16 is measured against.
 PEER_GROUPS = {
     "la_liga": "Barcelona and its opponents",
     "epl": "Arsenal and its opponents",
-}  # a great's season below this is shown, flagged thin
+}
+CORRECTED = ", corrected to the whole league"  # the peer group text when the correction applies
 TOP = 10
 LABEL = (
     "Style similarity from box score stats is coarse; the same player is found in the top "
@@ -210,6 +224,58 @@ def reference_weights(features: pd.DataFrame, ability: pd.DataFrame, priors: dic
     return out
 
 
+def peer_stats(
+    inputs: pd.DataFrame,
+    minutes: pd.Series,
+    group: pd.Series,
+    season: pd.Series,
+    priors: dict,
+    peers: pd.Series,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Per row, the minutes weighted mean and the true variance tau^2 (method
+    of moments) of each measure among the peers of its position group and
+    season."""
+    keys = [group, season]
+    mu = pd.DataFrame(np.nan, index=inputs.index, columns=inputs.columns)
+    tau2 = pd.DataFrame(np.nan, index=inputs.index, columns=inputs.columns)
+    m = minutes.astype(float)
+    for column in inputs.columns:
+        x = inputs[column].astype(float)
+        k = group.map({g: p.get(column) for g, p in priors.items()}).astype(float)
+        use = peers & x.notna() & k.notna() & (m > 0)
+        weight = m.where(use)
+        mu[column] = (x * weight).groupby(keys).transform("sum") / weight.groupby(keys).transform(
+            "sum"
+        )
+        term = ((x - mu[column]) ** 2 / (1 + k / m)).where(use)
+        tau2[column] = term.groupby(keys).transform("mean")
+    return mu, tau2
+
+
+def standardise(
+    inputs: pd.DataFrame,
+    minutes: pd.Series,
+    group: pd.Series,
+    priors: dict,
+    ref_w: dict,
+    mu: pd.DataFrame,
+    tau2: pd.DataFrame,
+) -> pd.DataFrame:
+    """Each measure shrunk towards ``mu`` and divided by tau times the root of
+    the regulars' mean shrinkage weight; clipped at ``CLIP``, missing reads as
+    the mean (0)."""
+    out = pd.DataFrame(0.0, index=inputs.index, columns=inputs.columns)
+    m = minutes.astype(float)
+    for column in inputs.columns:
+        x = inputs[column].astype(float)
+        k = group.map({g: p.get(column) for g, p in priors.items()}).astype(float)
+        rw = group.map({g: p.get(column) for g, p in ref_w.items()}).astype(float)
+        scale = tau2[column] * rw
+        z = (m / (m + k)) * (x - mu[column]) / np.sqrt(scale.where(scale > 1e-12))
+        out[column] = z.clip(-CLIP, CLIP).fillna(0.0)
+    return out
+
+
 def peer_z(
     inputs: pd.DataFrame,
     minutes: pd.Series,
@@ -222,33 +288,16 @@ def peer_z(
     """Each measure shrunk towards the peers' minutes weighted mean and put on
     a regular's scale (module docstring); clipped at ``CLIP``, missing reads
     as the mean (0)."""
-    keys = [group, season]
-    out = pd.DataFrame(0.0, index=inputs.index, columns=inputs.columns)
-    m = minutes.astype(float)
-    for column in inputs.columns:
-        x = inputs[column].astype(float)
-        k = group.map({g: p.get(column) for g, p in priors.items()}).astype(float)
-        rw = group.map({g: p.get(column) for g, p in ref_w.items()}).astype(float)
-        use = peers & x.notna() & k.notna() & (m > 0)
-        weight = m.where(use)
-        mu = (x * weight).groupby(keys).transform("sum") / weight.groupby(keys).transform("sum")
-        term = ((x - mu) ** 2 / (1 + k / m)).where(use)
-        tau2 = term.groupby(keys).transform("mean")
-        shrink = m / (m + k)
-        z = shrink * (x - mu) / np.sqrt(tau2 * rw).where(tau2 * rw > 1e-12)
-        out[column] = z.clip(-CLIP, CLIP).fillna(0.0)
-    return out
+    mu, tau2 = peer_stats(inputs, minutes, group, season, priors, peers)
+    return standardise(inputs, minutes, group, priors, ref_w, mu, tau2)
 
 
-def peer_ability(
-    z: pd.DataFrame, rows: pd.DataFrame, weights: pd.DataFrame, peers: pd.Series, skip=()
-) -> pd.DataFrame:
-    """Ability inside the peer group: the stored version 2 weights over the
-    shrunk standardised measures (measures in ``skip`` left out and the rest
-    reweighted), pooled with the player's previous season by minutes, as a
-    percentile within position group and season among the peers."""
+def composite_score(
+    z: pd.DataFrame, rows: pd.DataFrame, weights: pd.DataFrame, skip=()
+) -> pd.Series:
+    """The stored version 2 weights over the shrunk standardised measures
+    (measures in ``skip`` left out and the rest reweighted)."""
     group = position_group(rows)
-    season = rows["season"].astype(int)
     total = pd.Series(0.0, index=rows.index)
     wsum = pd.Series(0.0, index=rows.index)
     for measure in weights["measure"].unique():
@@ -258,21 +307,161 @@ def peer_ability(
         w = w.fillna(0.0).astype(float)
         total += w * z[measure]
         wsum += w
-    composite = (total / wsum).where(wsum > 0)
+    return (total / wsum).where(wsum > 0)
+
+
+def placed(score: pd.Series, ref: np.ndarray) -> pd.Series:
+    """Percentile of each score in a sorted reference distribution."""
+    found = np.searchsorted(ref, score.to_numpy(), side="right")
+    return pd.Series(100 * found / len(ref), index=score.index).where(score.notna())
+
+
+def peer_ability(
+    z: pd.DataFrame,
+    rows: pd.DataFrame,
+    weights: pd.DataFrame,
+    peers: pd.Series,
+    skip=(),
+    reference: dict | None = None,
+    corrected: pd.Series | None = None,
+) -> pd.DataFrame:
+    """Ability inside the peer group: the stored version 2 weights over the
+    shrunk standardised measures (``composite_score``), pooled with the
+    player's previous season by minutes, as a percentile within position
+    group and season among the peers. ``corrected`` rows (a season held for
+    one club, its bias corrected) are placed in ``reference`` instead, the
+    whole league's distribution of the one season score per position group."""
+    group = position_group(rows)
+    season = rows["season"].astype(int)
+    composite = composite_score(z, rows, weights, skip)
     pooled, _ = two_seasons(rows, composite)
     use = peers & group.notna() & composite.notna()
+    if corrected is not None:
+        use &= ~corrected
     out = pd.DataFrame(index=rows.index)
     for name, score in (("ability_pct", pooled), ("ability_pct_1s", composite)):
         pct = score[use].groupby([group[use], season[use]]).rank(pct=True).mul(100)
         # A row below the peer floor is placed in its peers' distribution.
         other = group.notna() & score.notna() & ~use
+        if corrected is not None:
+            other &= ~corrected
         for (g, s), idx in score[other].groupby([group[other], season[other]]).groups.items():
             ref = np.sort(score[use & (group == g) & (season == s)].to_numpy())
             if len(ref):
-                found = np.searchsorted(ref, score[idx].to_numpy(), side="right")
-                pct = pd.concat([pct, pd.Series(100 * found / len(ref), index=idx)])
+                pct = pd.concat([pct, placed(score[idx], ref)])
+        if corrected is not None and reference:
+            at = corrected & group.notna() & score.notna()
+            for g, idx in score[at].groupby(group[at]).groups.items():
+                if g in reference and len(reference[g]):
+                    pct = pd.concat([pct, placed(score[idx], np.asarray(reference[g]))])
         out[name] = pct.reindex(rows.index)
     return out
+
+
+# The thin peer group's bias (prompt 18c)
+
+
+def focal_teams(rows: pd.DataFrame) -> pd.Series:
+    """The club a league season is held for: StatsBomb holds one club's
+    matches only in every season but La Liga 2015/16, so that club plays in
+    every match and has half of the season's minutes (a full league season's
+    biggest share is about a twentieth). Indexed by (league, season); seasons
+    with every club are left out."""
+    per = rows.groupby(["league_key", "season", "team_id"])["minutes"].sum()
+    share = per / per.groupby(level=[0, 1]).transform("sum")
+    top = share[share >= FOCAL_SHARE].reset_index()
+    return top.set_index(["league_key", "season"])["team_id"]
+
+
+def opponent_rows(rows: pd.DataFrame, focal: pd.Series) -> tuple[pd.Series, pd.Series]:
+    """(thin, opponent): rows of a season held for one club, and among them
+    the players of the other clubs."""
+    at = pd.MultiIndex.from_frame(rows[["league_key", "season"]])
+    team = pd.Series(focal.reindex(at).to_numpy(), index=rows.index)
+    thin = team.notna()
+    return thin, thin & (rows["team_id"] != team)
+
+
+@dataclass
+class PeerCorrection:
+    """The thin peer group's bias, learned on La Liga 2015/16 where Barcelona's
+    players have both peer groups. Per position group and measure: where the
+    whole league's mean sat, in spreads of the opponents' mean (``shift``,
+    the opponents' mean minus the league's over the opponents' tau), and the
+    opponents' tau over the league's (``ratio``). In a thin season the
+    league's mean and tau are rebuilt from that season's opponents with these
+    two numbers; ``reference`` is the league's one season ability score per
+    position group (sorted), in which a corrected row's ability is placed.
+    It applies to ``league`` only, where it was learned and tested: Arsenal's
+    Premier League 2003/04 stays uncorrected (MODELS.md)."""
+
+    shift: dict
+    ratio: dict
+    reference: dict
+    learned_on: str = "La Liga 2015/16"
+    league: str = "la_liga"
+
+    def rebuild(
+        self, mu: pd.DataFrame, tau2: pd.DataFrame, group: pd.Series
+    ) -> tuple[pd.DataFrame, pd.DataFrame]:
+        """The league's mean and tau^2 from the opponents' (a measure or group
+        without a learned pair keeps the opponents' own)."""
+        mu_l, tau2_l = mu.copy(), tau2.copy()
+        for column in mu.columns:
+            d = group.map({g: s.get(column) for g, s in self.shift.items()}).astype(float)
+            r = group.map({g: s.get(column) for g, s in self.ratio.items()}).astype(float)
+            ok = d.notna() & r.notna() & (r > 0)
+            mu_l[column] = (mu[column] - d * np.sqrt(tau2[column])).where(ok, mu[column])
+            tau2_l[column] = (tau2[column] / r**2).where(ok, tau2[column])
+        return mu_l, tau2_l
+
+    def table(self) -> pd.DataFrame:
+        return pd.DataFrame(
+            [
+                {"group": g, "measure": c, "shift": d, "ratio": self.ratio[g].get(c)}
+                for g, by in self.shift.items()
+                for c, d in by.items()
+            ]
+        )
+
+
+def learn_correction(
+    full: pd.DataFrame, thin: pd.DataFrame, own: OwnData, skip=()
+) -> PeerCorrection:
+    """The correction from one season held twice: ``full`` with every match,
+    ``thin`` with the focal club's matches only (``season_rows`` of each);
+    ``skip``: measures the vectors leave out, left out of the ability too."""
+    columns = own.stored.columns
+
+    def parts(rows):
+        rows = rows[rows["minutes"].astype(float) > 0].reset_index(drop=True)
+        group = position_group(rows)
+        minutes = rows["minutes"].astype(float)
+        return rows, style_inputs(rows)[columns], group, rows["season"].astype(int), minutes
+
+    f_rows, f_x, f_g, f_s, f_m = parts(full)
+    t_rows, t_x, t_g, t_s, t_m = parts(thin)
+    f_peers = f_g.notna() & (f_m >= PEER_MINUTES)
+    _, opponents = opponent_rows(t_rows, focal_teams(t_rows))
+    t_peers = t_g.notna() & (t_m >= PEER_MINUTES) & opponents
+    mu_f, tau2_f = peer_stats(f_x, f_m, f_g, f_s, own.stored.priors, f_peers)
+    mu_o, tau2_o = peer_stats(t_x, t_m, t_g, t_s, own.stored.priors, t_peers)
+    shift: dict = {}
+    ratio: dict = {}
+    for g in sorted(set(f_g.dropna()) & set(t_g.dropna())):
+        fi, ti = f_g.index[f_g == g][0], t_g.index[t_g == g][0]
+        shift[g], ratio[g] = {}, {}
+        for c in columns:
+            a, b = tau2_o.at[ti, c], tau2_f.at[fi, c]
+            if not (a > 1e-12 and b > 1e-12):
+                continue
+            shift[g][c] = float((mu_o.at[ti, c] - mu_f.at[fi, c]) / np.sqrt(a))
+            ratio[g][c] = float(np.sqrt(a / b))
+    z = standardise(f_x, f_m, f_g, own.stored.priors, own.ref_w, mu_f, tau2_f)
+    score = composite_score(z, f_rows, own.weights, skip)
+    ok = f_peers & score.notna()
+    reference = {g: np.sort(score[ok & (f_g == g)].to_numpy()) for g in sorted(f_g[ok].unique())}
+    return PeerCorrection(shift, ratio, reference)
 
 
 @dataclass
@@ -318,8 +507,9 @@ def level_curves(z: np.ndarray, ability: pd.DataFrame, group: pd.Series) -> Leve
 class OwnData:
     """What the StatsBomb vectors borrow from our own data: the stored model,
     the stored ability weights, the regulars' shrinkage weights and the
-    level curves; plus our vectors (the search pool and the API greats) and
-    the feature table (the season level check)."""
+    level curves; plus our vectors (the search pool and the API greats), the
+    feature table (the season level check), its ability percentiles and the
+    standardised measures with the level kept (the archetypes' scale)."""
 
     stored: StoredEmbedding
     weights: pd.DataFrame
@@ -327,6 +517,8 @@ class OwnData:
     curves: LevelCurves
     vectors: pd.DataFrame
     features: pd.DataFrame
+    ability: pd.DataFrame | None = None
+    kept: StyleVectors | None = None
 
 
 def own_data(settings) -> OwnData:
@@ -342,7 +534,7 @@ def own_data(settings) -> OwnData:
     )
     vectors = pd.read_parquet(processed / "embeddings" / "vectors.parquet")
     ref_w = reference_weights(features, ability, stored.priors)
-    return OwnData(stored, fit.weights, ref_w, curves, vectors, features)
+    return OwnData(stored, fit.weights, ref_w, curves, vectors, features, ability, kept)
 
 
 def statsbomb_vectors(
@@ -350,13 +542,17 @@ def statsbomb_vectors(
     own: OwnData,
     excluded=(),
     sub_position: pd.Series | None = None,
+    correction: PeerCorrection | None = None,
 ) -> tuple[pd.DataFrame, np.ndarray]:
     """Peer standardised, level free StatsBomb vectors and their embedding
     for every row with minutes; the peers are the rows with ``PEER_MINUTES``
     or more. ``excluded`` style measures
     read as the position mean; ``sub_position`` overrides the season's
     position (the cross source check puts a linked player in his API
-    Football position group). Returns (meta, embedding)."""
+    Football position group). With ``correction``, a season held for one
+    club is standardised against the league rebuilt from its opponents and
+    its abilities placed in the league's distribution. Returns (meta with the
+    standardised measures as ``z_<measure>``, embedding)."""
     if sub_position is not None:
         rows = rows.assign(
             sub_position=sub_position.reindex(rows.index).fillna(rows["sub_position"])
@@ -369,14 +565,32 @@ def statsbomb_vectors(
     season = rows["season"].astype(int)
     minutes = rows["minutes"].astype(float)
     peers = group.notna() & (minutes >= PEER_MINUTES)
-    z = peer_z(inputs, minutes, group, season, own.stored.priors, own.ref_w, peers)
-    ability = peer_ability(z, rows, own.weights, peers, skip=excluded)
+    priors = own.stored.priors
+    mu, tau2 = peer_stats(inputs, minutes, group, season, priors, peers)
+    thin = None
+    if correction is not None:
+        thin, opponents = opponent_rows(rows, focal_teams(rows))
+        thin &= rows["league_key"] == correction.league
+        mu_o, tau2_o = peer_stats(inputs, minutes, group, season, priors, peers & opponents)
+        mu_l, tau2_l = correction.rebuild(mu_o, tau2_o, group)
+        mu, tau2 = mu.mask(thin, mu_l, axis=0), tau2.mask(thin, tau2_l, axis=0)
+    z = standardise(inputs, minutes, group, priors, own.ref_w, mu, tau2)
+    ability = peer_ability(
+        z,
+        rows,
+        own.weights,
+        peers,
+        skip=excluded,
+        reference=correction.reference if correction is not None else None,
+        corrected=thin,
+    )
     keep = group.notna() & ability["ability_pct"].notna()
     style = own.curves.apply(z.to_numpy(), ability, group)
     meta = rows.assign(
         group=group, ability_pct=ability["ability_pct"], ability_pct_1s=ability["ability_pct_1s"]
     )
     meta["player"] = display_name(meta)
+    meta = pd.concat([meta, z.add_prefix("z_")], axis=1)
     emb = own.stored.vectors(style)
     return meta[keep].reset_index(drop=True), emb[keep.to_numpy()]
 
@@ -445,11 +659,17 @@ def mid_season_age(meta: pd.DataFrame, calendar_leagues) -> pd.Series:
 
 
 def great_rows(
-    sb_meta: pd.DataFrame, sb_emb: np.ndarray, own: OwnData, calendar_leagues
+    sb_meta: pd.DataFrame,
+    sb_emb: np.ndarray,
+    own: OwnData,
+    calendar_leagues,
+    corrected: str | None = None,
 ) -> pd.DataFrame:
     """Every great's seasons: StatsBomb before 2015/16 (also thin ones,
     flagged), our own main rows from it; one row per great and season with
-    the age in the middle of the season and the embedding."""
+    the age in the middle of the season and the embedding. ``corrected``:
+    the league whose StatsBomb seasons carry the peer group correction."""
+    peers = {k: v + (CORRECTED if k == corrected else "") for k, v in PEER_GROUPS.items()}
     emb_cols = [c for c in own.vectors.columns if c.startswith("emb_")]
     parts = []
     for great in GREATS:
@@ -472,7 +692,7 @@ def great_rows(
                         "group": m["group"].to_numpy(),
                         "minutes": m["minutes"].astype(float).to_numpy(),
                         "ability_pct": m["ability_pct"].astype(float).to_numpy(),
-                        "peers": m["league_key"].map(PEER_GROUPS).to_numpy(),
+                        "peers": m["league_key"].map(peers).to_numpy(),
                     }
                 )
                 parts.append(pd.concat([part, pd.DataFrame(sb_emb[at], columns=emb_cols)], axis=1))
@@ -573,49 +793,77 @@ def run_greats(settings) -> Path:
     table = check.measure_table(pairs)
     by_season = check.season_measures(pairs)
     excluded = check.excluded_measures(table)
+    skip = list(check.left_out(excluded))
     ids = check.player_ids(links)
     log.info(
-        "greats: %d of %d matches linked; excluded %s",
+        "greats: %d of %d matches linked; below %.1f %s, left out %s",
         len(matches),
         sb_check["fixture_id"].nunique(),
+        check.MIN_CORRELATION,
         sorted(excluded),
+        sorted(skip),
     )
 
     own = own_data(settings)
     rows = season_rows(sb)
-    sb_meta, sb_emb = statsbomb_vectors(rows, own, excluded=list(excluded))
+    full, thin = held_twice(sb, rows)
+    correction = learn_correction(full, thin, own, skip)
 
-    # The check: linked players in their API Football position group.
+    # The check: linked players in their API Football position group, with
+    # the 18b exclusions, every measure kept, and kept and corrected.
     af_pos = own.vectors.drop_duplicates("source_player_id").set_index("source_player_id")[
         "sub_position"
     ]
     linked_pos = rows["source_player_id"].map(ids).map(af_pos)
     linked_pos = linked_pos.where(rows["season"].isin(list(check.CHECK_SEASONS)))
-    chk_meta, chk_emb = statsbomb_vectors(
-        rows, own, excluded=list(excluded), sub_position=linked_pos
+    identity = {}
+    for label, leave, corr in (
+        ("exclusions", list(excluded), None),
+        ("kept", skip, None),
+        ("corrected", skip, correction),
+    ):
+        chk_meta, chk_emb = statsbomb_vectors(
+            rows, own, excluded=leave, sub_position=linked_pos, correction=corr
+        )
+        identity[label] = identity_ranks(chk_meta, chk_emb, own.vectors, ids)
+    verdict = correction_verdict(identity["kept"], identity["corrected"])
+    applied = correction if verdict["helps"] else None
+    log.info(
+        "greats: thin seasons' identity %.3f before the correction, %.3f after; %s",
+        verdict["before"],
+        verdict["after"],
+        "applied" if applied else "not applied",
     )
-    identity = identity_ranks(chk_meta, chk_emb, own.vectors, ids)
-    every_meta, every_emb = statsbomb_vectors(rows, own, sub_position=linked_pos)
-    identity_all = identity_ranks(every_meta, every_emb, own.vectors, ids)
-    peer_bias = thin_peer_check(rows, own, list(excluded), ids, sb)
+    peer_bias = thin_peer_check(full, thin, own, skip, ids, correction)
+    sb_meta, sb_emb = statsbomb_vectors(rows, own, excluded=skip, correction=applied)
 
     season_cmp = check.season_table(rows, own.features, ids, COMPOSITE_CANDIDATES)
 
-    greats = great_rows(sb_meta, sb_emb, own, calendar)
+    greats = great_rows(
+        sb_meta, sb_emb, own, calendar, corrected=applied.league if applied else None
+    )
     out = processed / GREATS_OUT
     out.mkdir(parents=True, exist_ok=True)
     greats.to_parquet(out / "greats.parquet", index=False)
+    correction.table().to_csv(out / "correction.csv", index=False)
     logo = settings.paths.raw_dir / "statsbomb" / "files" / "statsbomb-logo.png"
     if logo.is_file():
         shutil.copyfile(logo, out / "statsbomb-logo.png")
+    final = identity["corrected" if applied else "kept"]
     atomic_write_text(
         out / "greats.json",
         json.dumps(
             {
                 "label": LABEL,
                 "attribution": ATTRIBUTION,
-                "excluded": sorted(excluded),
-                "identity_hit": float(identity["hit"].mean()) if len(identity) else None,
+                "excluded": sorted(skip),
+                "kept": sorted(m for m in excluded if m not in skip),
+                "identity_hit": float(final["hit"].mean()) if len(final) else None,
+                "correction": {
+                    "learned_on": correction.learned_on,
+                    "applied": bool(applied),
+                    **{k: v for k, v in verdict.items() if k != "helps"},
+                },
                 "created": pd.Timestamp.now(tz="UTC").strftime("%Y-%m-%d"),
             },
             indent=1,
@@ -623,7 +871,8 @@ def run_greats(settings) -> Path:
         + "\n",
     )
     sb_meta.drop(
-        columns=[c for c in sb_meta.columns if c.endswith("_per90")], errors="ignore"
+        columns=[c for c in sb_meta.columns if c.endswith("_per90") and not c.startswith("z_")],
+        errors="ignore",
     ).assign(
         **{f"emb_{i}": sb_emb[:, i].astype("float32") for i in range(sb_emb.shape[1])}
     ).to_parquet(processed / OUT / "vectors.parquet", index=False)
@@ -651,9 +900,11 @@ def run_greats(settings) -> Path:
         table=table,
         by_season=by_season,
         excluded=excluded,
+        skip=skip,
         season_cmp=season_cmp,
         identity=identity,
-        identity_all=identity_all,
+        verdict=verdict,
+        correction=correction,
         peer_bias=peer_bias,
         greats=greats,
         examples=examples,
@@ -666,63 +917,82 @@ def run_greats(settings) -> Path:
     return path
 
 
-def thin_peer_check(rows, own, excluded, ids, sb) -> dict:
+LEARN_SEASON = 2015  # La Liga 2015/16, complete in StatsBomb
+LEARN_CLUB = "Barcelona"
+
+
+def held_twice(sb: pd.DataFrame, rows: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """La Liga 2015/16 twice: every match (``rows`` of that season) and
+    Barcelona's matches only, as every other StatsBomb season is held."""
+    season = sb[(sb["league_key"] == "la_liga") & (sb["season"] == LEARN_SEASON)]
+    barca = season.loc[season["team_name"] == LEARN_CLUB, "fixture_id"].unique()
+    thin = season_rows(season[season["fixture_id"].isin(barca)])
+    full = rows[(rows["league_key"] == "la_liga") & (rows["season"] == LEARN_SEASON)]
+    return full.reset_index(drop=True), thin
+
+
+def correction_verdict(before: pd.DataFrame, after: pd.DataFrame) -> dict:
+    """The test of the correction: the cross source identity check on the
+    seasons after the one it was learned on (Barcelona's matches only, as
+    before 2015/16). It helps when the top five hit rate rises and the
+    median rank does not; ``better`` and ``worse`` count the players whose
+    rank moved."""
+    b = before[before["season"] > LEARN_SEASON]
+    a = after[after["season"] > LEARN_SEASON]
+    paired = b.set_index(["season", "player"])["rank"].to_frame("before")
+    paired = paired.join(a.set_index(["season", "player"])["rank"].rename("after"), how="inner")
+    out = {
+        "searches": len(a),
+        "before": float(b["hit"].mean()) if len(b) else np.nan,
+        "after": float(a["hit"].mean()) if len(a) else np.nan,
+        "rank_before": float(b["rank"].median()) if len(b) else np.nan,
+        "rank_after": float(a["rank"].median()) if len(a) else np.nan,
+        "better": int((paired["after"] < paired["before"]).sum()),
+        "worse": int((paired["after"] > paired["before"]).sum()),
+    }
+    out["helps"] = bool(out["after"] > out["before"] and out["rank_after"] <= out["rank_before"])
+    return out
+
+
+def thin_peer_check(full, thin, own, excluded, ids, correction=None) -> dict:
     """2015/16 is complete in StatsBomb: Barcelona's players standardised
     against the whole league and against Barcelona and its opponents only
-    (what every season before it has). The cosine between the two vectors
-    of the same player season, and the identity check on each."""
-    season = 2015
-    barca = sb[
-        (sb["league_key"] == "la_liga")
-        & (sb["season"] == season)
-        & (sb["team_name"] == "Barcelona")
+    (what every season before it has), and the second with the correction
+    (in sample: it was learned here). The cosine between the vectors of the
+    same player season, and the identity check on each."""
+    positions = own.vectors.drop_duplicates("source_player_id").set_index("source_player_id")[
+        "sub_position"
     ]
-    in_barca = sb["fixture_id"].isin(barca["fixture_id"].unique())
-    thin = season_rows(sb[(sb["league_key"] == "la_liga") & (sb["season"] == season) & in_barca])
-    full = rows[(rows["league_key"] == "la_liga") & (rows["season"] == season)].reset_index(
-        drop=True
+    fm, fe = statsbomb_vectors(
+        full, own, excluded, sub_position=full["source_player_id"].map(ids).map(positions)
     )
-    pos_full = (
-        full["source_player_id"]
-        .map(ids)
-        .map(
-            own.vectors.drop_duplicates("source_player_id").set_index("source_player_id")[
-                "sub_position"
-            ]
-        )
-    )
-    pos_thin = (
-        thin["source_player_id"]
-        .map(ids)
-        .map(
-            own.vectors.drop_duplicates("source_player_id").set_index("source_player_id")[
-                "sub_position"
-            ]
-        )
-    )
-    fm, fe = statsbomb_vectors(full, own, excluded, sub_position=pos_full)
-    tm, te = statsbomb_vectors(thin, own, excluded, sub_position=pos_thin)
-    team = barca["team_id"].iloc[0]
+    pos_thin = thin["source_player_id"].map(ids).map(positions)
+    team = focal_teams(thin).iloc[0]
     fb = fm.index[(fm["team_id"] == team) & fm["regular"].astype(bool)]
-    tb = tm.index[(tm["team_id"] == team) & tm["regular"].astype(bool)]
-    joined = pd.DataFrame({"pid": fm.loc[fb, "source_player_id"].to_numpy(), "f": fb}).merge(
-        pd.DataFrame({"pid": tm.loc[tb, "source_player_id"].to_numpy(), "t": tb}), on="pid"
-    )
-    cos = np.array([float(fe[f] @ te[t]) for f, t in zip(joined["f"], joined["t"], strict=True)])
     full_id = identity_ranks(fm.loc[fb].reset_index(drop=True), fe[fb], own.vectors, ids)
-    thin_id = identity_ranks(tm.loc[tb].reset_index(drop=True), te[tb], own.vectors, ids)
-    return {
-        "players": len(joined),
-        "cosine_median": float(np.median(cos)) if len(cos) else np.nan,
-        "cosine_min": float(cos.min()) if len(cos) else np.nan,
+    out = {
         "peers_full": int((full["minutes"] >= PEER_MINUTES).sum()),
         "peers_thin": int((thin["minutes"] >= PEER_MINUTES).sum()),
         "full_hit": float(full_id["hit"].mean()) if len(full_id) else np.nan,
-        "thin_hit": float(thin_id["hit"].mean()) if len(thin_id) else np.nan,
         "full_rank": float(full_id["rank"].median()) if len(full_id) else np.nan,
-        "thin_rank": float(thin_id["rank"].median()) if len(thin_id) else np.nan,
         "searched": len(full_id),
     }
+    for name, corr in (("thin", None), ("corrected", correction)):
+        tm, te = statsbomb_vectors(thin, own, excluded, sub_position=pos_thin, correction=corr)
+        tb = tm.index[(tm["team_id"] == team) & tm["regular"].astype(bool)]
+        joined = pd.DataFrame({"pid": fm.loc[fb, "source_player_id"].to_numpy(), "f": fb}).merge(
+            pd.DataFrame({"pid": tm.loc[tb, "source_player_id"].to_numpy(), "t": tb}), on="pid"
+        )
+        cos = np.array(
+            [float(fe[f] @ te[t]) for f, t in zip(joined["f"], joined["t"], strict=True)]
+        )
+        found = identity_ranks(tm.loc[tb].reset_index(drop=True), te[tb], own.vectors, ids)
+        out["players"] = len(joined)
+        out[f"{name}_cosine_median"] = float(np.median(cos)) if len(cos) else np.nan
+        out[f"{name}_cosine_min"] = float(cos.min()) if len(cos) else np.nan
+        out[f"{name}_hit"] = float(found["hit"].mean()) if len(found) else np.nan
+        out[f"{name}_rank"] = float(found["rank"].median()) if len(found) else np.nan
+    return out
 
 
 def download_summary(raw_dir: Path) -> dict:
@@ -767,13 +1037,13 @@ def write_report(reports_dir: Path, **k) -> Path:
     from scout.greats_check import MIN_CORRELATION, STYLE_COUNTS
     from scout.providers.statsbomb.adapter import MAPPING
 
-    sb, table, identity = k["sb"], k["table"], k["identity"]
+    sb, table = k["sb"], k["table"]
     names = k["names"]
     per = sb.groupby(["league_key", "season"]).agg(
         matches=("fixture_id", "nunique"), played=("minutes", lambda m: int((m > 0).sum()))
     )
     lines = [
-        "# The measured greats (prompt 18b)",
+        "# The measured greats (prompts 18b and 18c)",
         "",
         "Written by `scout greats` (`src/scout/greats.py`, `src/scout/greats_check.py`). "
         "StatsBomb open data (github.com/statsbomb/open-data), used for non commercial "
@@ -843,8 +1113,11 @@ def write_report(reports_dir: Path, **k) -> Path:
             f"{_r(r.completed_passes_r)} | {r.completed_passes_diff:+.1f} | {_r(r.tackles_r)} | "
             f"{_r(r.interceptions_r)} | {_r(r.blocks_r)} |"
         )
-    excluded = k["excluded"]
-    kept = [s for s in STYLE_COUNTS if s not in excluded]
+    excluded, skip = k["excluded"], k["skip"]
+    identity, verdict = k["identity"], k["verdict"]
+    kept_below = [s for s in excluded if s not in skip]
+    thin_before = identity["exclusions"][identity["exclusions"]["season"] > LEARN_SEASON]
+    thin_kept = identity["kept"][identity["kept"]["season"] > LEARN_SEASON]
     lines += [
         "",
         "Passes: API Football's pass count is the completed passes until 2019/20 (StatsBomb's "
@@ -855,13 +1128,29 @@ def write_report(reports_dir: Path, **k) -> Path:
         "Football's La Liga only from 2017/18; its 2017/18 tackles disagree with StatsBomb "
         "(see the table) while 2018/19 to 2020/21 agree at about 0.8.",
         "",
-        f"**Left out of the StatsBomb vectors** (counts below {MIN_CORRELATION}): "
+        f"**Below {MIN_CORRELATION}:** "
         + (
             "; ".join(f"`{s}` ({', '.join(c)})" for s, c in excluded.items())
             if excluded
             else "none"
         )
-        + f". They read as the position mean. Kept: {len(kept)} of {len(STYLE_COUNTS)}.",
+        + ". "
+        + (
+            f"**Kept by the owner (prompt 18c):** {', '.join(f'`{s}`' for s in kept_below)}. "
+            "The identity test, not the correlation, decided: with them the seasons held for "
+            f"Barcelona find the same player's API Football season in the top {HIT_AT} "
+            f"{_pct(thin_kept['hit'].mean())} of the time against "
+            f"{_pct(thin_before['hit'].mean())} without (table below). "
+            if kept_below
+            else ""
+        )
+        + (
+            f"Left out of the StatsBomb vectors (read as the position mean): "
+            f"{', '.join(f'`{s}`' for s in skip)}. "
+            if skip
+            else "Nothing is left out of the StatsBomb vectors. "
+        )
+        + f"In the vectors: {len(STYLE_COUNTS) - len(skip)} of {len(STYLE_COUNTS)} measures.",
         "",
         "Season level, the per 90 measures of the same player and season (450 minutes or more "
         "in both):",
@@ -881,70 +1170,129 @@ def write_report(reports_dir: Path, **k) -> Path:
         "group) and searched among every API Football player of that season and position "
         f"group: how often his own API Football season is among the {HIT_AT} nearest. The "
         "same player's next season was found 19.9% of the time within our own data "
-        "(reports/embeddings.md).",
+        "(reports/embeddings.md). 2015/16 is complete in StatsBomb (the whole league as "
+        "peers); from 2016/17 StatsBomb holds Barcelona's matches only, as before 2015/16, "
+        "so only Barcelona's players reach 450 minutes.",
         "",
-        "| Seasons | Peer group | Searches | Top 5 | Random | Median rank | Median pool |",
-        "|---|---|---|---|---|---|---|",
+        "| Vectors | Seasons | Peer group | Searches | Top 5 | Random | Median rank "
+        "| Median pool |",
+        "|---|---|---|---|---|---|---|---|",
     ]
-    for label, res in (("with the exclusions", identity), ("every measure", k["identity_all"])):
+    labels = {
+        "exclusions": "the 18b exclusions",
+        "kept": "every measure, uncorrected",
+        "corrected": "every measure, corrected",
+    }
+    for key, res in identity.items():
         for name, part in (
-            ("2015/16", res[res["season"] == 2015]),
-            ("2016/17 to 2020/21", res[res["season"] > 2015]),
-            ("all", res),
+            ("2015/16", res[res["season"] == LEARN_SEASON]),
+            ("2016/17 to 2020/21", res[res["season"] > LEARN_SEASON]),
         ):
             if part.empty:
                 continue
-            peers = (
-                "whole league"
-                if name == "2015/16"
-                else ("Barcelona and opponents" if name != "all" else "both")
-            )
+            peers = "whole league" if name == "2015/16" else "Barcelona and opponents"
             lines.append(
-                f"| {name}, {label} | {peers} | {len(part):,} | {_pct(part['hit'].mean())} | "
-                f"{_pct(part['random'].mean(), 2)} | {part['rank'].median():.0f} | "
-                f"{part['pool'].median():.0f} |"
+                f"| {labels[key]} | {name} | {peers} | {len(part):,} | "
+                f"{_pct(part['hit'].mean())} | {_pct(part['random'].mean(), 2)} | "
+                f"{part['rank'].median():.0f} | {part['pool'].median():.0f} |"
             )
-    if len(identity):
-        lines += [
-            "",
-            "By season (with the exclusions):",
-            "",
-            "| Season | Searches | Top 5 | Median rank |",
-            "|---|---|---|---|",
-        ]
-        for season, part in identity.groupby("season"):
-            lines.append(
-                f"| {_season(season)} | {len(part):,} | {_pct(part['hit'].mean())} | "
-                f"{part['rank'].median():.0f} |"
-            )
-        barca = identity[identity["team"] == "Barcelona"]
-        lines += [
-            "",
-            f"Barcelona's own players: {len(barca):,} searches, top 5 {_pct(barca['hit'].mean())}, "
-            f"median rank {barca['rank'].median():.0f}.",
-        ]
-    pb = k["peer_bias"]
+    final = identity["corrected" if verdict["helps"] else "kept"]
     lines += [
         "",
-        "## The peer group",
+        "By season (the vectors the panel uses):",
+        "",
+        "| Season | Searches | Top 5 | Median rank |",
+        "|---|---|---|---|",
+    ]
+    for season, part in final.groupby("season"):
+        lines.append(
+            f"| {_season(season)} | {len(part):,} | {_pct(part['hit'].mean())} | "
+            f"{part['rank'].median():.0f} |"
+        )
+    pb = k["peer_bias"]
+    corr = k["correction"]
+    lines += [
+        "",
+        "## The peer group and its correction",
         "",
         "Before 2015/16 a StatsBomb season holds Barcelona's league matches only (Arsenal's for "
         "the Premier League 2003/04), so the peer group a season is standardised against is "
         "**Barcelona and its opponents only**: thinner (opponents are seen in one or two "
         "matches) and biased (every opponent's numbers are those of a team playing "
-        "Barcelona: less of the ball, more defending). The ability percentile that takes the "
-        "level out is computed inside the same peer group. Cross era comparisons are rough: "
+        "Barcelona: less of the ball, more defending). Cross era comparisons stay rough: "
         "our league and team adjustment starts in 2010 and is not applied here at all.",
         "",
-        f"2015/16 is complete in StatsBomb, which measures the cost: Barcelona's "
-        f"{pb['players']} regulars standardised against the whole league "
+        "**The correction (prompt 18c).** Learned on La Liga 2015/16, where every Barcelona "
+        "player has a vector against the whole league and one against Barcelona and its "
+        "opponents only. Per position group and measure, two numbers: where the whole "
+        "league's mean sat, in spreads of the opponents' (the opponents' mean minus the "
+        "league's, over the opponents' spread: negative means the opponents of Barcelona "
+        "did less of it), and the opponents' spread over the league's. In a season held for "
+        "one club, the league's mean and spread are rebuilt from that season's opponents "
+        "with these two numbers and every player is standardised against the rebuilt "
+        "league; his ability percentile, which takes the level out, is placed in the "
+        "2015/16 league's distribution of the same score instead of ranked among the thin "
+        "peers. A measure or group without both numbers keeps the opponents' own. Spreads "
+        "are true spreads (method of moments), so a measure with a tiny true spread "
+        "(a centre back's share of passes) shows a large shift.",
+        "",
+        "In sample, 2015/16 (where it was learned, so not evidence; short of 1 because the "
+        "check puts each linked player in his API Football position group, as the test "
+        "does, while the correction was learned with StatsBomb's positions, as the greats "
+        f"are placed): Barcelona's {pb['players']} regulars against the whole league "
         f"({pb['peers_full']:,} players with {PEER_MINUTES}+ minutes) and against Barcelona "
-        f"and its opponents only ({pb['peers_thin']:,}). The median cosine between the two "
-        f"vectors of the same player season is {pb['cosine_median']:.2f} (lowest "
-        f"{pb['cosine_min']:.2f}); the identity check finds his API Football season in the "
-        f"top 5 {_pct(pb['full_hit'])} of the time with the whole league and "
-        f"{_pct(pb['thin_hit'])} with the thin peer group (median rank {pb['full_rank']:.0f} "
-        f"against {pb['thin_rank']:.0f}, {pb['searched']} searches).",
+        f"and its opponents only ({pb['peers_thin']:,}).",
+        "",
+        "| Vectors | Median cosine to the whole league's | Lowest | Top 5 | Median rank |",
+        "|---|---|---|---|---|",
+        f"| whole league | 1.00 | 1.00 | {_pct(pb['full_hit'])} | {pb['full_rank']:.0f} |",
+        f"| thin peer group | {pb['thin_cosine_median']:.2f} | {pb['thin_cosine_min']:.2f} | "
+        f"{_pct(pb['thin_hit'])} | {pb['thin_rank']:.0f} |",
+        f"| thin, corrected | {pb['corrected_cosine_median']:.2f} | "
+        f"{pb['corrected_cosine_min']:.2f} | {_pct(pb['corrected_hit'])} | "
+        f"{pb['corrected_rank']:.0f} |",
+        "",
+        f"**The test, 2016/17 to 2020/21** (Barcelona's matches only, after the season it "
+        f"was learned on; every measure kept): {verdict['searches']} searches, top "
+        f"{HIT_AT} {_pct(verdict['before'])} before the correction and "
+        f"{_pct(verdict['after'])} after, median rank {verdict['rank_before']:.0f} against "
+        f"{verdict['rank_after']:.0f}; {verdict['better']} players ranked better, "
+        f"{verdict['worse']} worse. Rule set before the test: applied when the hit rate "
+        "rises and the median rank does not. "
+        + (
+            "**It helps, so it is applied to every season held for Barcelona before 2015/16.** "
+            "Arsenal's Premier League 2003/04 stays uncorrected: the correction was learned "
+            "and tested on Barcelona's opponents in La Liga only, and the one look at that "
+            "season (Henry's, in the archetypes' calibration) found the La Liga shifts "
+            "misplacing a Premier League forward: Arsenal's opponents' forwards drew more fouls "
+            "than the thin group's mean, where Barcelona's drew fewer than the league's, so "
+            "Henry's fouls drawn read as the lowest of any forward."
+            if verdict["helps"]
+            else "**It does not help, so it is not applied.**"
+        ),
+        "",
+        "Shift and spread ratio by measure (rows) and position group (columns): "
+        "shift / ratio; blank where a group has no spread.",
+        "",
+    ]
+    table = corr.table()
+    groups = sorted(table["group"].unique())
+    measures = [c for c in STYLE_COUNTS if c in set(table["measure"])]
+    lines += [
+        "| Measure | " + " | ".join(g.replace("_", " ") for g in groups) + " |",
+        "|---|" + "---|" * len(groups),
+    ]
+    cells = table.set_index(["measure", "group"])
+    for m in measures:
+        row = []
+        for g in groups:
+            if (m, g) in cells.index:
+                r = cells.loc[(m, g)]
+                row.append(f"{r['shift']:+.2f} / {r['ratio']:.2f}")
+            else:
+                row.append("")
+        lines.append(f"| `{m}` | " + " | ".join(row) + " |")
+    lines += [
         "",
         "## The greats",
         "",
@@ -996,7 +1344,7 @@ def write_report(reports_dir: Path, **k) -> Path:
             f"{_season(int(query['season']))} at {query['team']} "
             f"({names.get(query['league_key'], query['league_key'])}), "
             f"{query['group'].replace('_', ' ')}, {int(query['minutes']):,} minutes, {source}; "
-            f"ability {query['ability_pct']:.0f} percentile within its peer group.{thin}",
+            f"ability {query['ability_pct']:.0f} percentile; peer group {query['peers']}.{thin}",
             "",
             f"Today's {query['group'].replace('_', ' ')}s aged {age} (in the middle of the "
             "season), nearest five; ability is the percentile of their own season:",

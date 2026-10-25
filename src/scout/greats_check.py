@@ -7,7 +7,7 @@ and side by shirt number with a name check. For the same player and match
 each measure is compared: Pearson correlation and the mean difference
 (StatsBomb minus API Football). A style measure whose counts correlate
 below ``MIN_CORRELATION`` is left out of the StatsBomb vectors (read as the
-position mean, as a missing measure is).
+position mean, as a missing measure is), unless the owner kept it (``KEPT``).
 """
 
 from __future__ import annotations
@@ -19,6 +19,10 @@ from rapidfuzz import fuzz
 from scout.matching import normalize_club, normalize_name
 
 MIN_CORRELATION = 0.7
+# Kept in the vectors although below the floor (owner, prompt 18c): tackles 0.625 and
+# interceptions 0.675 by match, but the thin seasons' identity check found the same
+# player twice as often with them (28.6% against 14.3%). The identity test decided.
+KEPT = ("tackles_total_per90", "interceptions_per90")
 CHECK_SEASONS = range(2015, 2021)  # 2015/16 to 2020/21
 MIN_TEAM_SCORE = 60.0  # mean name similarity of the two sides of a linked match
 MIN_NAME_SCORE = 60.0  # a shirt number match also needs a name this similar
@@ -303,6 +307,11 @@ def excluded_measures(table: pd.DataFrame) -> dict[str, list[str]]:
         if low:
             out[style] = low
     return out
+
+
+def left_out(excluded: dict[str, list[str]]) -> dict[str, list[str]]:
+    """The measures the StatsBomb vectors leave out: below the floor and not ``KEPT``."""
+    return {m: c for m, c in excluded.items() if m not in KEPT}
 
 
 def season_table(

@@ -8,6 +8,10 @@ carries the label "archetype from the record, not measured".
 `legends/` holds the players the page shows; `calibration/` holds six
 players drafted the same way whose seasons we can measure, to test how far
 a draft from the record lands from the measurement (`reports/archetypes.md`).
+The calibration files are a blind test: they were committed before their
+measured seasons were looked at. Edit the legends freely; a calibration
+file edited after reading the report stops being blind, so a new check
+needs a fresh draft by someone who has not seen the measured table.
 
 **Every file was drafted by a Claude Code session on 25 October 2026 from
 the historical record and awaits the owner's review.** The session did not

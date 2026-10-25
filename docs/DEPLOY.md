@@ -13,8 +13,9 @@ bucket. The data bucket stays private.
    4. scout features --current             the newest season only, earlier ones as stored
    5. scout score                          stored models (processed/models/stored/), no training
    6. scout embed                          stored embedding: vectors, today's ten nearest each
-   7. scout lists, scout site              the two tables, explanations, index.html, similar.json
-   8. scout publish                        processed/lists/ in the data bucket, the site bucket
+   7. scout archetypes                     archetypes/*/*.yaml reloaded and checked, their vectors
+   8. scout lists, scout site              the two tables, explanations, index.html, similar.json
+   9. scout publish                        processed/lists/ in the data bucket, the site bucket
                                                     │
  S3 football-scout-data-<owner> (private)            ▼
    processed/ ── read ──►  runner  ── write ──► processed/lists/
@@ -36,6 +37,10 @@ prompt 18b, the measured greats inside the same file (read from
 `scout greats` writes it by hand, the run never rebuilds it) with
 `statsbomb-logo.png`, the logo the StatsBomb data agreement asks every
 published analysis to carry (without the logo the greats are left out),
+and, since prompt 18c, the archetypes inside the same file (step 7 rebuilds
+them from the files under `archetypes/` in the repository, so the owner's
+edits reach the page at the next run; their calibration reads
+`processed/statsbomb/vectors.parquet` as `scout greats` last wrote it),
 nothing else: `scout publish` refuses any other file (`src/scout/publish.py`).
 
 ## One time setup
@@ -201,10 +206,11 @@ repository and an empty `data/` folder (4 cores, 15 GB):
 | `features --current` | 92 |
 | `score` | 56 |
 | `embed` (measured 24 October, 1.3 GB of memory) | 17 |
+| `archetypes` (measured 25 October) | 21 |
 | `lists` | 22 |
 | `site` | 2 |
 | `publish` (dry run) | 2 |
-| **total** | **254** (271 with `embed`) |
+| **total** | **254** (271 with `embed`, 292 with `archetypes`) |
 
 The tables it built were byte for byte those of the registered forecast.
 A GitHub runner has 2 cores, so expect about 6 to 8 minutes there, plus a
