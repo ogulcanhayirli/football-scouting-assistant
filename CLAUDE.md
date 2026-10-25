@@ -158,7 +158,7 @@ bucket named by `$SCOUT_S3_BUCKET` (eu-central-1).
 | Model outputs | `data/processed/models/*.parquet` | backtest predictions (`backtest_<model>.parquet`), `scouting.parquet`, `big_move_current.parquet`, labels |
 | Embeddings (prompt 18) | `data/processed/embeddings/` | `vectors.parquet` (93,474 regular player seasons from 2015 with match stats: keys, name, age, club, group, ability, `main`, 18 `style_*` and 48 `emb_*` columns), `neighbours.parquet` (today's 11,908 players, ten nearest each), `dictionary.csv`; written by `embed`; in S3 since 25 October (owner's yes) |
 | Stored models | `data/processed/models/stored/` | the boosters behind the newest season's scores (`fair_value_fold_2024`, `fair_value_fold_2025`, `big_move_24m`, `elite`, `step_up`, `riser`; LightGBM text plus a `.json` of columns and training rows) and `ability_v2.json` (the ability fit); written by `backtest`, `moves`, `scouting`, read by `score`. Trained 21 October 2026; in S3 since 23 October (owner's yes; only these 13 files went up, and a dry run of `sync up --only processed` then found nothing to copy). Plus `embedding.json` (prompt 18, 24 October: shrinkage priors and the encoder, written by `embed --train`, read by `embed`), in S3 since 25 October (owner's yes; with `processed/embeddings/` only these 4 files went up, and a dry run then found nothing left) |
-| StatsBomb raw cache (prompt 18b) | `data/raw/statsbomb/` | 1,829 files, 2.83 GB (2,825,097,646 bytes): `competitions.json`, `matches/`, `lineups/`, `events/` (904 matches, each with a `.meta.json`), `files/LICENSE.pdf` and `files/statsbomb-logo.png`; fetched 25 October 2026 from the repository's master branch; in S3 since 25 October (owner's sync) |
+| StatsBomb raw cache (prompt 18b) | `data/raw/statsbomb/` | 1,829 files, 2.83 GB (2,825,097,646 bytes): `competitions.json`, `matches/`, `lineups/`, `events/` (904 matches, each with a `.meta.json`), `files/LICENSE.pdf` and `files/statsbomb-logo.png`; fetched 25 October 2026 from the repository's master branch; in S3 since 25 October (owner's yes) |
 | StatsBomb tables (prompt 18b) | `data/processed/statsbomb/` | `player_match_stats/league=<key>/season=<year>.parquet` (30,714 rows, StatsBomb ids, never mixed with API Football rows) and `vectors.parquet` (every StatsBomb season with minutes, peer group standardised, Barcelona's seasons corrected since prompt 18c, the standardised measures as `z_*` and the embedding; the archetypes' calibration reads it); in S3 as of 18b, the 18c rebuild awaits the owner's sync |
 | The measured greats (prompts 18b, 18c) | `data/processed/greats/` | `greats.parquet` (239 seasons of 23 greats, one per age, 48 `emb_*`), `greats.json` (label, attribution, measures left out and kept, the correction's test), `correction.csv` (shift and spread ratio per position group and measure), `statsbomb-logo.png`; read by `scout site`; in S3 as of 18b, the 18c rebuild awaits the owner's sync |
 | Archetypes (prompt 18c) | `archetypes/` (committed) and `data/processed/archetypes/` | one YAML file per player (`legends/`: 8, `calibration/`: 6), drafted 25 October and awaiting the owner's review; `archetypes.parquet` (each archetype's `z_*`, ability, `style_*`, 48 `emb_*`), `archetypes.json` (traits, sources, label, calibration verdict), `neighbours.parquet` (today's ten nearest each), `calibration.parquet` (drafted against measured per trait); written by `scout archetypes`, read by `scout site`; not yet in S3 |
@@ -704,13 +704,22 @@ Settle them with the owner rather than guessing.
   nothing else (bar the tie order and float noise above). Feature rows of
   seasons before 2025 keep the old names until the next full `scout
   features` (the similar players history rows show them).
-* Prompt 18b's changes were synced up by the owner on 25 October (S3
-  timestamps 09:09 to 09:13 UTC; the 18c session's pull afterwards matched
-  S3 file for file). That session fetched `raw/statsbomb/` again from GitHub
-  (1,829 requests, the same 2,825.1 MB of bodies) before noticing the S3
-  copy, which a fresh container should pull instead; its local
-  `.meta.json` sidecars carry the new fetch time, so `raw/statsbomb/` need
-  not be synced up from it.
+* Prompt 18b went to S3 on 25 October with the owner's yes (`sync up
+  --only raw --only processed --only reports`): raw 3,658 files (all of
+  `raw/statsbomb/`, 2.83 GB; the 12 Transfermarkt files were already there),
+  processed 441 (311 `player_season_stats`, 15 `player_match_stats`, 15
+  `fixture_events`, 7 `match_lineups`, 2 `injuries`, 1 `transfers` and 29
+  under `current/` with repaired names; 30 rebuilt 2025 feature partitions;
+  `scouting.parquet`, `big_move_current.parquet`, `backtest_fair_value.parquet`;
+  2 embedding files; 4 list files; 19 under `statsbomb/`; 3 under
+  `greats/`), reports 2 (`greats.md`, `candidates.md`); a dry run after
+  found nothing left. The registered forecast folders are unchanged. The
+  live page shows the greats and the repaired names from the next publish.
+* The 18c session (25 October) fetched `raw/statsbomb/` again from GitHub
+  (1,829 requests, the same 2,825.1 MB of bodies) before noticing the
+  owner's upload of that morning, which a fresh container should pull
+  instead; its local `.meta.json` sidecars carry the new fetch time, so
+  `raw/statsbomb/` need not be synced up from it.
 * Prompt 18c local changes await the owner's `sync up` (none was made):
   `processed/greats/` (with `correction.csv`), `processed/statsbomb/vectors.parquet`
   (the `z_*` columns the archetypes' calibration reads),
