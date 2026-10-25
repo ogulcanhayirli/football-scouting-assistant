@@ -159,9 +159,9 @@ bucket named by `$SCOUT_S3_BUCKET` (eu-central-1).
 | Embeddings (prompt 18) | `data/processed/embeddings/` | `vectors.parquet` (93,474 regular player seasons from 2015 with match stats: keys, name, age, club, group, ability, `main`, 18 `style_*` and 48 `emb_*` columns), `neighbours.parquet` (today's 11,908 players, ten nearest each), `dictionary.csv`; written by `embed`; in S3 since 25 October (owner's yes) |
 | Stored models | `data/processed/models/stored/` | the boosters behind the newest season's scores (`fair_value_fold_2024`, `fair_value_fold_2025`, `big_move_24m`, `elite`, `step_up`, `riser`; LightGBM text plus a `.json` of columns and training rows) and `ability_v2.json` (the ability fit); written by `backtest`, `moves`, `scouting`, read by `score`. Trained 21 October 2026; in S3 since 23 October (owner's yes; only these 13 files went up, and a dry run of `sync up --only processed` then found nothing to copy). Plus `embedding.json` (prompt 18, 24 October: shrinkage priors and the encoder, written by `embed --train`, read by `embed`), in S3 since 25 October (owner's yes; with `processed/embeddings/` only these 4 files went up, and a dry run then found nothing left) |
 | StatsBomb raw cache (prompt 18b) | `data/raw/statsbomb/` | 1,829 files, 2.83 GB (2,825,097,646 bytes): `competitions.json`, `matches/`, `lineups/`, `events/` (904 matches, each with a `.meta.json`), `files/LICENSE.pdf` and `files/statsbomb-logo.png`; fetched 25 October 2026 from the repository's master branch; in S3 since 25 October (owner's yes) |
-| StatsBomb tables (prompt 18b) | `data/processed/statsbomb/` | `player_match_stats/league=<key>/season=<year>.parquet` (30,714 rows, StatsBomb ids, never mixed with API Football rows) and `vectors.parquet` (every StatsBomb season with minutes, peer group standardised, Barcelona's seasons corrected since prompt 18c, the standardised measures as `z_*` and the embedding; the archetypes' calibration reads it); in S3 as of 18b, the 18c rebuild awaits the owner's sync |
-| The measured greats (prompts 18b, 18c) | `data/processed/greats/` | `greats.parquet` (239 seasons of 23 greats, one per age, 48 `emb_*`), `greats.json` (label, attribution, measures left out and kept, the correction's test), `correction.csv` (shift and spread ratio per position group and measure), `statsbomb-logo.png`; read by `scout site`; in S3 as of 18b, the 18c rebuild awaits the owner's sync |
-| Archetypes (prompt 18c) | `archetypes/` (committed) and `data/processed/archetypes/` | one YAML file per player (`legends/`: 8, `calibration/`: 6), drafted 25 October and awaiting the owner's review; `archetypes.parquet` (each archetype's `z_*`, ability, `style_*`, 48 `emb_*`), `archetypes.json` (traits, sources, label, calibration verdict), `neighbours.parquet` (today's ten nearest each), `calibration.parquet` (drafted against measured per trait); written by `scout archetypes`, read by `scout site`; not yet in S3 |
+| StatsBomb tables (prompt 18b) | `data/processed/statsbomb/` | `player_match_stats/league=<key>/season=<year>.parquet` (30,714 rows, StatsBomb ids, never mixed with API Football rows) and `vectors.parquet` (every StatsBomb season with minutes, peer group standardised, Barcelona's seasons corrected since prompt 18c, the standardised measures as `z_*` and the embedding; the archetypes' calibration reads it); in S3 since 25 October (owner's yes; the 18c rebuild too) |
+| The measured greats (prompts 18b, 18c) | `data/processed/greats/` | `greats.parquet` (239 seasons of 23 greats, one per age, 48 `emb_*`), `greats.json` (label, attribution, measures left out and kept, the correction's test), `correction.csv` (shift and spread ratio per position group and measure), `statsbomb-logo.png`; read by `scout site`; in S3 since 25 October (owner's yes; the 18c rebuild too) |
+| Archetypes (prompt 18c) | `archetypes/` (committed) and `data/processed/archetypes/` | one YAML file per player (`legends/`: 8, `calibration/`: 6), drafted 25 October and awaiting the owner's review; `archetypes.parquet` (each archetype's `z_*`, ability, `style_*`, 48 `emb_*`), `archetypes.json` (traits, sources, label, calibration verdict), `neighbours.parquet` (today's ten nearest each), `calibration.parquet` (drafted against measured per trait); written by `scout archetypes`, read by `scout site`; in S3 since 25 October (owner's yes) |
 | The page | `data/site/` | `index.html` (both tables embedded, 1.8 MB, 0.3 MB gzip on 24 October) and `data/` (the two tables as CSV and Parquet, `dictionary.csv`, `similar.json`); published to `scout-site-<account>` |
 | User facing tables | `data/processed/lists/` | `candidates`, `bargains` (Parquet, CSV), `dictionary.csv` (see Outputs) |
 | Quota state, log | `data/state/` | |
@@ -720,15 +720,15 @@ Settle them with the owner rather than guessing.
   owner's upload of that morning, which a fresh container should pull
   instead; its local `.meta.json` sidecars carry the new fetch time, so
   `raw/statsbomb/` need not be synced up from it.
-* Prompt 18c local changes await the owner's `sync up` (none was made):
-  `processed/greats/` (with `correction.csv`), `processed/statsbomb/vectors.parquet`
-  (the `z_*` columns the archetypes' calibration reads),
-  `processed/archetypes/`, `reports/greats.md` and `reports/archetypes.md`.
-  The weekly run rebuilds the archetypes itself; until the new
-  `vectors.parquet` is in S3 its calibration skips Messi and Henry and the
-  page's verdict reads the four players in our own data (47% within 15
-  against 34%, still illustrative only). The registered forecast folders
-  are unchanged.
+* Prompt 18c went to S3 on 25 October with the owner's yes (`sync up
+  --only processed`, then `--only reports`): processed 8 files (the 4 under
+  `archetypes/`; `correction.csv`, `greats.json` and `greats.parquet` under
+  `greats/`; `statsbomb/vectors.parquet` with the `z_*` columns), 3,344
+  already there; reports 2 (`archetypes.md`, `greats.md`), 43 already
+  there; a dry run after found nothing left. The weekly run rebuilds the
+  archetypes itself and its calibration now reads the corrected StatsBomb
+  values, so the page's verdict is the six player one. The registered
+  forecast folders are unchanged.
 * The measured greats: the owner settled two of three calls in prompt 18c
   (tackles and interceptions kept; the correction built, tested and
   applied). Still open: register with StatsBomb
