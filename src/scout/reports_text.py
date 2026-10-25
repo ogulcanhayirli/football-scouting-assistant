@@ -11,17 +11,22 @@ tables (one report a player, also when he is in both):
   of today and, on the bargains, the list, the minutes and the contract. The
   sheet is the only variable part of the request; the system prompt and the
   shared instructions are a fixed prefix with prompt caching.
-* **Writer.** Claude Haiku 5.5 writes 120 to 150 words for a fan, through
+* **Writer.** Claude Haiku 5.5 writes about 130 words (never more than 150,
+  with an example report of that length in the prompt) for a fan, through
   the Message Batches API. A report is regenerated only when its fact sheet
   changed (``fact_hash``: the sheet, the prompt version and the model);
   otherwise the stored one is reused.
 * **Check, in code** (``check``). Every number of the report (with its percent
   sign or unit) must match a number of the fact sheet within the rounding the
   report wrote it with, and every proper noun must be a name of the fact
-  sheet; the length must be 120 to 150 words. A failing report goes back to
-  the writer with the violations, at most twice; after that the template
-  explanation of ``scout.explain`` is shown and the failure is logged
-  (``failures.jsonl``).
+  sheet; the length must be 90 to 170 words (prompt 19b: the first real run
+  held 120 to 150 and sent 94% of the players to the template, nearly all
+  for a few words over). A failing report goes back to the writer with the
+  violations, its word count and the cut needed, at most twice; after that
+  the template explanation of ``scout.explain`` is shown and the failure is
+  logged (``failures.jsonl``). A player whose report ended on the template
+  is asked for again on the next run, once (``template_runs``), then not
+  until the prompt version or the writer model changes.
 * **Judge.** Each run a sample of reports not judged before (``judge_sample``,
   50) goes to Claude Sonnet 5.5 with a structured output: faithful (with the
   offending span), hedging adequate, readability 1 to 5. The verdicts are
@@ -64,8 +69,10 @@ from scout.fsutil import atomic_write_text
 log = logging.getLogger(__name__)
 
 OUT = "reports_text"  # under data/processed
-PROMPT_VERSION = "19.1"  # part of every fact hash: a new prompt regenerates every report
+PROMPT_VERSION = "19.2"  # part of every fact hash: a new prompt regenerates every report
 SIMILAR_SHOWN = 3
+WORDS_TARGET = 130  # what the prompt asks for
+WORDS_ASKED = 150  # the most the prompt allows; the check allows ``words_max`` (170)
 OWNER_READS = 20  # judged reports laid out for the owner each run
 AGREEMENT = Path("judge") / "agreement.csv"  # committed; the owner's verdicts on the judge
 AGREEMENT_COLUMNS = [
@@ -815,8 +822,8 @@ class Check:
 def check(
     report: str,
     sheet: FactSheet,
-    words_min: int = 120,
-    words_max: int = 150,
+    words_min: int = 90,
+    words_max: int = 170,
     gazetteer: Iterable[str] = (),
 ) -> Check:
     """Every number of the report in the fact sheet within its rounding,
@@ -836,6 +843,24 @@ def check(
     if not words_min <= n <= words_max:
         violations.append(f"the report has {n} words; it must have {words_min} to {words_max}")
     return Check(not violations, violations, n, len(said), len(spans))
+
+
+def length_note(n: int, words_min: int = 90) -> str | None:
+    """The retry's word count and the cut (or addition) it needs, for any
+    report outside what the prompt asks, whatever else failed: the first
+    real run's retries were told the limit but not the count to cut, and
+    grew instead of shrinking."""
+    if n > WORDS_ASKED:
+        return (
+            f"your report has {n} words; the limit is {WORDS_ASKED}: cut at least "
+            f"{n - WORDS_ASKED} words, and aim for about {WORDS_TARGET} (cut about "
+            f"{n - WORDS_TARGET}) by dropping the least telling facts, not by squeezing sentences"
+        )
+    if n < words_min:
+        return (
+            f"your report has {n} words; write about {WORDS_TARGET} (add about {WORDS_TARGET - n})"
+        )
+    return None
 
 
 # The prompts (the fixed prefix: never put anything that changes in here)
@@ -868,8 +893,10 @@ WRITER_INSTRUCTIONS = _unwrap(
     """
 How to write the report
 
-1. Length and form. Write 120 to 150 words of plain prose in one or two paragraphs. No title,
-no headings, no bullet points, no bold, no emoji. Return only the report.
+1. Length and form. Write about 130 words, never more than 150, of plain prose in one or two
+paragraphs. A report over 150 words is rejected, so leave out the least telling facts rather
+than squeezing them all in: you do not have to use every line of the sheet. No title, no
+headings, no bullet points, no bold, no emoji. Return only the report.
 
 2. Use the fact sheet and nothing else. Every number you write must appear in the fact sheet.
 Copy numbers as the sheet writes them, as digits. You may round a number only correctly and
@@ -920,6 +947,18 @@ the younger one, the experienced list the older one.
 
 7. Tone. Measured and concrete. Prefer football words to statistical ones. No hype, no
 judgement of character, no advice to buy or sell.
+
+8. An example of the length and the shape: 137 words, about a made up player from a made up
+fact sheet. Never copy its names or its numbers; use only your own fact sheet.
+
+Marco Ferri is a 21-year-old central midfielder at Riverton in the Example League, where he
+still plays. His ability sits in the 84th percentile of the regular midfielders this season.
+The market values him at €8m, below the €12.4m our model calls fair, so he is priced cheaply.
+Of 156 past players in his elite band, 15% became one of the 100 most valuable players within
+2 seasons, and of 880 in his step up band, 20% saw their value rank become at least 3 times
+better. He raises one warning flag: he played 41% of his team's minutes. He wins 68% of his
+duels, top 5% of midfielders aged 21 to 23. J. Ortiz is the closest to him in playing style,
+not in level. So far this season he has 512 minutes in 7 matches.
 
 The fact sheet comes in the next message, one fact per line as "label: value".
 """
@@ -1191,6 +1230,7 @@ class Outcome:
     first_try: bool | None  # passed the check on the first try; None when never written
     violations: list[str]
     generated_at: str
+    words: list[int] = field(default_factory=list)  # each written attempt's word count
 
 
 def write_reports(
@@ -1207,7 +1247,9 @@ def write_reports(
     their violations, ``cfg.retries`` times at most."""
     gazetteer = set(gazetteer)
     by_id = {s.player_id: s for s in sheets}
-    state = {s.player_id: {"previous": "", "problems": [], "attempts": 0} for s in sheets}
+    state = {
+        s.player_id: {"previous": "", "problems": [], "attempts": 0, "words": []} for s in sheets
+    }
     done: dict[int, Outcome] = {}
     first: dict[int, bool] = {}
     todo = [s.player_id for s in sheets]
@@ -1218,7 +1260,7 @@ def write_reports(
             {
                 "custom_id": f"w{round_}-{pid}",
                 "params": writer_params(
-                    cfg, by_id[pid], state[pid]["previous"], state[pid]["problems"]
+                    cfg, by_id[pid], state[pid]["previous"], state[pid].get("feedback", [])
                 ),
             }
             for pid in todo
@@ -1240,17 +1282,24 @@ def write_reports(
                 done[pid] = _held(by_id[pid], st, first.get(pid), now, "the run's deadline")
                 continue
             st["attempts"] += 1
+            note = None
             if reply.status == "succeeded" and reply.text:
                 result = check(reply.text, by_id[pid], cfg.words_min, cfg.words_max, gazetteer)
                 problems = result.violations
+                st["words"].append(result.words)
+                note = length_note(result.words, cfg.words_min)
             else:
                 problems = [f"the request ended as {reply.status} {reply.error}".strip()]
             first.setdefault(pid, not problems)
             if not problems:
                 done[pid] = Outcome(pid, reply.text, "model", "passed", st["attempts"],
-                                    first[pid], [], now)  # fmt: skip
+                                    first[pid], [], now, st["words"])  # fmt: skip
                 continue
             st["previous"], st["problems"] = reply.text, problems
+            # What the writer is told: the violations, with the length one replaced
+            # by the count and the cut, which also comes when only a number failed.
+            feedback = [p for p in problems if not p.startswith("the report has ")]
+            st["feedback"] = feedback + ([note] if note else [])
             retry.append(pid)
         todo = retry
     for pid in todo:
@@ -1264,13 +1313,13 @@ def write_reports(
             "; ".join(st["problems"]),
         )
         done[pid] = Outcome(pid, sheet.template, "template", "failed", st["attempts"],
-                            first.get(pid), st["problems"], now)  # fmt: skip
+                            first.get(pid), st["problems"], now, st["words"])  # fmt: skip
     return done
 
 
 def _held(sheet: FactSheet, st: dict, first, now: str, why: str) -> Outcome:
     return Outcome(sheet.player_id, sheet.template, "template", "held", st["attempts"], first,
-                   [f"not written: {why}"], now)  # fmt: skip
+                   [f"not written: {why}"], now, st["words"])  # fmt: skip
 
 
 @dataclass
@@ -1346,8 +1395,12 @@ REPORT_COLUMNS = {
     "tried again next run).",
     "model": "The writer model's id.",
     "generated_at": "When the report was written (UTC).",
-    "attempts": "How many times the writer was asked for this sheet (one, plus at most two "
-    "retries with the check's findings).",
+    "attempts": "How many times the writer was asked for this sheet in its last run (one, plus "
+    "at most two retries with the check's findings).",
+    "prompt_version": "The version of the writer's instructions the report was written with.",
+    "template_runs": "Runs in a row this player's report ended on the template under this prompt "
+    "version (0 once one passes); after 2 the runs stop asking for it until the prompt or the "
+    "writer model changes.",
     "first_try": "True when the first report passed the check.",
     "violations": "What the check found on the last failed attempt: numbers not in the fact "
     "sheet or rounded wrongly, names not in it, the length; blank when it passed.",
@@ -1425,20 +1478,39 @@ def gazetteer(cand: pd.DataFrame, barg: pd.DataFrame, near, settings) -> set[str
     return {f for f in map(fold, values) if len(f) > 2 and f not in STARTERS}
 
 
-def plan(sheets: list[FactSheet], stored: pd.DataFrame, model: str) -> tuple[list, dict]:
-    """The sheets to write (new or changed since the last run, or held back
-    then) and the stored rows to keep, by player."""
+def _template_runs(old, model: str) -> int:
+    """Runs in a row the stored row ended on the template under this prompt
+    version and writer model; a row of the first run (prompt 19.1) had no
+    count and another prompt, so it starts over."""
+    if old is None or str(old.get("status")) != "failed":
+        return 0
+    if str(old.get("prompt_version")) != PROMPT_VERSION or str(old.get("model")) != model:
+        return 0
+    runs = old.get("template_runs")
+    return 1 if runs is None or pd.isna(runs) else int(runs)
+
+
+def plan(
+    sheets: list[FactSheet], stored: pd.DataFrame, model: str, template_runs: int = 2
+) -> tuple[list, dict]:
+    """The sheets to write and the stored rows to keep, by player. A passed
+    report is kept while its sheet is unchanged. A report that ended on the
+    template is asked for again on the next run, sheet changed or not, until
+    ``template_runs`` runs in a row ended so under this prompt version and
+    writer model; then it is kept (the page shows the explanation written by
+    rule) until the prompt or the model changes, not retried every week."""
     keep, todo = {}, []
     by_id = {}
     if not stored.empty:
         by_id = {int(r["player_id"]): r for _, r in stored.iterrows()}
     for sheet in sheets:
         old = by_id.get(sheet.player_id)
-        if (
-            old is not None
-            and str(old["fact_hash"]) == sheet.hash(model)
-            and str(old["status"]) in ("passed", "failed")
-        ):
+        if old is None:
+            todo.append(sheet)
+            continue
+        unchanged = str(old["status"]) == "passed" and str(old["fact_hash"]) == sheet.hash(model)
+        given_up = _template_runs(old, model) >= template_runs
+        if unchanged or given_up:
             keep[sheet.player_id] = old
         else:
             todo.append(sheet)
@@ -1459,7 +1531,9 @@ def estimate_run(settings) -> dict:
     cfg = settings.reports_text
     cand, barg, near, leagues = inputs(settings)
     sheets = fact_sheets(cand, barg, near, leagues)
-    todo, keep = plan(sheets, load_stored(settings.paths.processed_dir), cfg.writer_model)
+    todo, keep = plan(
+        sheets, load_stored(settings.paths.processed_dir), cfg.writer_model, cfg.template_runs
+    )
     prefix = len((WRITER_SYSTEM + WRITER_INSTRUCTIONS).encode()) / BYTES_PER_TOKEN
     judge_prefix = len((JUDGE_SYSTEM + JUDGE_INSTRUCTIONS).encode()) / BYTES_PER_TOKEN
 
@@ -1532,7 +1606,8 @@ def run_reports(settings, client=None, now: pd.Timestamp | None = None, sleep=ti
     sheets = fact_sheets(cand, barg, near, leagues)
     names = gazetteer(cand, barg, near, settings)
     stored = load_stored(processed)
-    todo, keep = plan(sheets, stored, cfg.writer_model)
+    todo, keep = plan(sheets, stored, cfg.writer_model, cfg.template_runs)
+    before = {int(r["player_id"]): r for _, r in stored.iterrows()} if not stored.empty else {}
     log.info("reports: %d fact sheets, %d to write, %d reused", len(sheets), len(todo), len(keep))
     budget = Budget(cfg.max_tokens_per_run)
     runner = Batches(client, cfg.poll_seconds, time.monotonic() + cfg.max_run_minutes * 60, sleep)
@@ -1559,6 +1634,12 @@ def run_reports(settings, client=None, now: pd.Timestamp | None = None, sleep=ti
                     "model": cfg.writer_model,
                     "generated_at": o.generated_at,
                     "attempts": o.attempts,
+                    "prompt_version": PROMPT_VERSION,
+                    "template_runs": {
+                        "passed": 0,
+                        "failed": _template_runs(before.get(pid), cfg.writer_model) + 1,
+                        "held": _template_runs(before.get(pid), cfg.writer_model),
+                    }[o.status],
                     "first_try": o.first_try,
                     "violations": "; ".join(o.violations),
                     **dict.fromkeys(JUDGE_COLUMNS),
@@ -1592,8 +1673,19 @@ def run_reports(settings, client=None, now: pd.Timestamp | None = None, sleep=ti
     return summary
 
 
+def word_spread(counts: list[int]) -> dict:
+    """Least, 10th percentile, median, 90th percentile and most."""
+    if not counts:
+        return {}
+    q = pd.Series(counts, dtype=float).quantile([0.1, 0.5, 0.9])
+    return {"n": len(counts), "min": min(counts), "p10": round(q[0.1]),
+            "median": round(q[0.5]), "p90": round(q[0.9]), "max": max(counts)}  # fmt: skip
+
+
 def summarize(outcomes, table, verdicts, writer_usage, judge_usage, budget, cfg, stamp) -> dict:
     written = [o for o in outcomes.values() if o.first_try is not None]
+    first_words = [o.words[0] for o in outcomes.values() if o.words]
+    passed_words = [o.words[-1] for o in outcomes.values() if o.status == "passed" and o.words]
     writer_cost = cost_usd(writer_usage, cfg.writer_model, cfg) if writer_usage else 0.0
     judge_cost = cost_usd(judge_usage, cfg.judge_model, cfg) if judge_usage else 0.0
     shown = table["source"].value_counts()
@@ -1607,6 +1699,12 @@ def summarize(outcomes, table, verdicts, writer_usage, judge_usage, budget, cfg,
         "passed_after_retries": sum(o.status == "passed" and not o.first_try for o in written),
         "failed_after_retries": sum(o.status == "failed" for o in outcomes.values()),
         "held": sum(o.status == "held" for o in outcomes.values()),
+        "words_first_try": word_spread(first_words),
+        "over_asked_first_try": sum(n > WORDS_ASKED for n in first_words),
+        "outside_check_first_try": sum(
+            not cfg.words_min <= n <= cfg.words_max for n in first_words
+        ),
+        "words_passed": word_spread(passed_words),
         "shown_model": int(shown.get("model", 0)),
         "shown_template": int(shown.get("template", 0)),
         "judged": len(verdicts),
@@ -1644,6 +1742,7 @@ def cost_line(summary: dict) -> str:
 TYPES = {
     "player_id": "Int64",
     "attempts": "Int64",
+    "template_runs": "Int64",
     "judge_readability": "Int64",
     "first_try": "boolean",
     "judge_faithful": "boolean",
@@ -1720,6 +1819,13 @@ def owner_order(table: pd.DataFrame, sample: list[int], verdicts: dict) -> list[
     return (faulted + [p for p in judged if p not in faulted])[:OWNER_READS]
 
 
+def _spread_text(spread: dict | None) -> str:
+    if not spread:
+        return "none"
+    return (f"median {spread['median']} (10th to 90th percentile {spread['p10']} to "
+            f"{spread['p90']}, {spread['min']} to {spread['max']})")  # fmt: skip
+
+
 def write_owner_report(
     reports_dir: Path, table: pd.DataFrame, sample: list[int], verdicts: dict, summary: dict
 ) -> Path:
@@ -1736,7 +1842,7 @@ def write_owner_report(
         "# Scout reports",
         "",
         f"Run of {when} (`scout reports`, `src/scout/reports_text.py`). Each player of the two",
-        "tables has a report of 120 to 150 words written by",
+        "tables has a report of about 130 words (90 to 170 pass the check) written by",
         f"{model_name(summary['writer_model'])} from his fact sheet, checked in code: every",
         "number must be a number of the sheet within its rounding and every name a name of",
         "the sheet. A failing report goes back with the findings at most twice; then the",
@@ -1750,6 +1856,10 @@ def write_owner_report(
         f"retry: {summary['passed_after_retries']:,}; still failing after the retries (template "
         f"shown): {summary['failed_after_retries']:,}; held back (token cap or deadline): "
         f"{summary['held']:,}.",
+        f"* Words on the first try: {_spread_text(summary.get('words_first_try'))}; over "
+        f"{WORDS_ASKED}: {summary.get('over_asked_first_try', 0):,}; outside the check's "
+        f"range: {summary.get('outside_check_first_try', 0):,}. Passed reports: "
+        f"{_spread_text(summary.get('words_passed'))}.",
         f"* On the page: {summary['shown_model']:,} written reports, "
         f"{summary['shown_template']:,} template explanations.",
         f"* {cost_line(summary)}",

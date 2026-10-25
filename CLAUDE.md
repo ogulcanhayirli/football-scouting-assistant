@@ -300,13 +300,13 @@ October 2026, from MODELS.md and `reports/`:
   half is not most, so **illustrative only**. Searched with the draft, the
   real season ranks 1st of 352 (Kanté), 16th of 1,264 (Van Dijk), 17th of
   431 (Iniesta), 121st of 725 (Modrić). MODELS.md.
-* Scout reports (prompt 19, MODELS.md): built and tested with a fake client
-  on the real 24 October tables (2,734 fact sheets, four batches, retries,
-  fallback, judge, storage, page); no real run yet, so no pass rate, verdict
-  or cost: the first weekly run with the `ANTHROPIC_API_KEY` secret gives
-  them. Estimated 0.70 to 1.10 USD per full regeneration with the judge,
-  about 0.30 USD a week while nothing changes (docs/DEPLOY.md). The check
-  cannot tell which fact a number of the sheet belongs to; the judge can.
+* Scout reports (prompt 19, MODELS.md): the first real run (25 October)
+  cost 1.41 USD against an estimate of 0.70 to 1.10, and 94% of the players
+  got the template, nearly all for reports over 150 words; prompt 19b fixed
+  the length handling (Open questions), and the next weekly run is its real
+  test (about 0.65 USD expected; about 0.10 USD a week after that while
+  nothing changes, once the reports are kept in S3). The check cannot tell
+  which fact a number of the sheet belongs to; the judge can.
 * Bargains (19 October, 37 leagues, seasons 2015 to 2023, experienced 30 to
   33): the top 50 gained value far more often than matched peers (prime
   63.2% against 43.3%, experienced 11.0% against 4.5%), but moved to a club
@@ -504,7 +504,7 @@ detail stays in `reports/scouting.md`, `reports/moves.md`,
 * Similar players, tested by finding the same player's other season among the nearest neighbours: **done 24 October (prompt 18, decision 10).**
 * The measured greats from StatsBomb open data, against today's players with the calibrated elite chance: **done 25 October (prompt 18b).**
 * The thin peer group's correction and archetypes for players without data, with a blind calibration: **done 25 October (prompt 18c); the archetypes await the owner's review.**
-* Generated scout reports with a faithfulness check and a weekly judge: **built 25 October (prompt 19); the first real run waits for the `ANTHROPIC_API_KEY` secret.**
+* Generated scout reports with a faithfulness check and a weekly judge: **built 25 October (prompt 19); first real run 25 October (94% template, on length); length handling fixed in prompt 19b, the next weekly run tests it.**
 * January window forecast, published mid December and scored in February.
 * A capped chat over the two tables.
 * A matchup report before any match model.
@@ -787,15 +787,25 @@ Settle them with the owner rather than guessing.
   test: edited after reading `reports/archetypes.md` they stop being one, so
   a new check needs a fresh draft by someone who has not seen the measured
   table.
-* Written reports (prompt 19, 25 October): built and tested with a fake
-  client only; the session had no Claude API key. The owner's part: the
-  `ANTHROPIC_API_KEY` secret (a key in its own Claude Console workspace with
-  a monthly spend limit) and the `KeepTheReports` statement in
-  `scout-weekly`'s policy (docs/DEPLOY.md). Without that statement every
-  weekly run finds no stored reports and writes all of them again (a full
-  regeneration, about 0.70 to 1.10 USD, instead of about 0.30 for the judge
-  alone). The length rule (120 to 150 words) is part of the check and may
-  send reports to the template; the first run's first try and retry counts
-  will tell. The check matches a number to the sheet, not to its fact; the
+* Written reports (prompt 19, 25 October). The first real run (weekly.yml
+  run 8, commit 6ef72a8) wrote 2,734 reports for 1.41 USD (writer 1.33,
+  judge 0.08; estimate was 0.70 to 1.10): 2,692 failed the check on the
+  first try and 2,568 (94%) still after two retries, nearly all on length
+  (151 to 283 words against 120 to 150, median 177); a few on a number or a
+  name ("27", "0.03", "Champions League"), 7 cut off at 2,000 output
+  tokens. The faithfulness rules worked. Prompt 19b (25 October): about 130
+  words asked, never more than 150, with a 137 word example in the prompt;
+  the retry states the count and the cut; the check passes 90 to 170 (839
+  of run 8's 2,502 length only failures would have passed); `max_tokens`
+  6,000; a templated player is retried on the next run once, then not until
+  the prompt or the model changes (`template_runs`, `prompt_version`
+  stored); prompt version 19.2, so the next run rewrites every report
+  (about 0.65 USD expected, at most about 1.45 if the fix does not hold). Tested
+  with the fake client only: the 19b session had no `ANTHROPIC_API_KEY`;
+  the next weekly run is the real test. The owner's part still open: the
+  `KeepTheReports` statement in `scout-weekly`'s policy (docs/DEPLOY.md);
+  run 8's publish got `AccessDenied` and kept no reports, so every run
+  rewrites all of them and the retry once rule cannot hold until it is
+  added. The check matches a number to the sheet, not to its fact; the
   judge reads meaning. Batches take no server side fallback, so a refused
-  verdict is left out. Nothing was uploaded to S3 by this session.
+  verdict is left out. Nothing was uploaded to S3 by these sessions.

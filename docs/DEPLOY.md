@@ -133,7 +133,11 @@ The last command prints `AccessKeyId` and `SecretAccessKey` once. Put them
 into GitHub (next step) and clear the CloudShell screen.
 
 If `scout-weekly` was created before prompt 19, run the `put-user-policy`
-line again with the file above to add `KeepTheReports`. Without it the run
+line again with the file above to add `KeepTheReports`. **Run 8 (25 October)
+had no such statement**: its publish logged `AccessDenied` on
+`processed/reports_text/` and kept 0 files, so the next run starts from
+nothing again, and the rule that retries a templated player only once
+(prompt 19b) cannot hold until the statement is there. Without it the run
 still publishes; `scout publish` logs a warning that `processed/reports_text/`
 was not kept, and the next run writes again every report it cannot reuse.
 
@@ -263,11 +267,17 @@ nothing). About 0.25 to 0.50 USD a month in all.
 Step 9 runs `scout reports` (`src/scout/reports_text.py`): for every player of
 the two tables (2,734 on the 24 October tables: 1,830 candidates and 1,602
 bargains, 698 in both) a fact sheet is built from the table columns, Claude
-Haiku 5.5 writes 120 to 150 words from it through the Message Batches API,
-code checks every number and proper noun against the sheet, a failing report
-goes back with the findings at most twice, and after that the explanation
-written by rule is shown. A report is written again only when its fact sheet
-changed (`fact_hash`); otherwise the stored one is reused. Each run, Claude
+Haiku 5.5 writes about 130 words from it (never more than 150 asked; 90 to
+170 pass the check, prompt 19b) through the Message Batches API, code checks
+every number and proper noun against the sheet, a failing report goes back
+with the findings, its word count and the cut needed, at most twice, and
+after that the explanation written by rule is shown. A passed report is
+written again only when its fact sheet changed (`fact_hash`); otherwise the
+stored one is reused. A player whose report ended on the template is asked
+for again on the next run, once; after two runs in a row on the template he
+is left to the explanation written by rule until the prompt version or the
+writer model changes (`template_runs`), so failures are not paid for every
+week. Each run, Claude
 Sonnet 5.5 judges 50 reports not judged before (structured output: faithful
 with the offending passage, hedging adequate, readability 1 to 5).
 
@@ -281,7 +291,14 @@ with the offending passage, hedging adequate, readability 1 to 5).
   is above any real count, plus its `max_tokens`) is added to what the run
   has used, and requests that could pass the cap are held back until the
   next run. The judge's worst case is kept free first. A full first round
-  is about 13.5 million tokens in the worst case.
+  is about 25.9 million tokens in the worst case since prompt 19b (the
+  writer's `max_tokens` went from 2,000 to 6,000: thinking counts toward it,
+  and 7 requests of run 8 were cut off at 2,000). If nearly every report
+  failed again as in run 8, the retry rounds would reach the cap and part
+  of them would be held back: those players show the explanation that week
+  and are written on the next run, so the cap also bounds what a failed fix
+  can cost (a fake client run on the 24 October tables held back 771 of
+  2,734 that way).
 * **Cost line.** The run's cost is computed from the usage fields of every
   reply (input, cache writes at 2 times for the one hour cache, cache reads at
   0.1 times, output; half price through the Message Batches API) and printed
@@ -290,27 +307,46 @@ with the offending passage, hedging adequate, readability 1 to 5).
   cost $<total> (writer $<x>, judge $<y>); <tokens> of 30,000,000 tokens.`
   Every run also appends its numbers to `processed/reports_text/runs.jsonl`.
 
-What it should cost. No real run exists yet (no key in the session that built
-it), so these are estimates from the sizes of the 24 October fact sheets
-(`scout reports --dry-run`): the fixed prefix about 1,240 tokens, a sheet
-about 490, a report about 220 plus about 230 of thinking at low effort, a
-judge verdict about 800 with its thinking. Rates: Claude Haiku 5.5 0.10 and
-0.50 USD per million input and output tokens, Claude Sonnet 5.5 2 and 10,
-both halved in a batch.
+What it costs. The estimates below were made before any real run, from the
+sizes of the 24 October fact sheets (`scout reports --dry-run`): the fixed
+prefix about 1,240 tokens (1,570 since prompt 19b, with the example report),
+a sheet about 490, a report about 220 plus about 230 of thinking at low
+effort, a judge verdict about 800 with its thinking. Rates: Claude Haiku 5.5
+0.10 and 0.50 USD per million input and output tokens, Claude Sonnet 5.5 2
+and 10, both halved in a batch. The first real run (weekly.yml run 8, 25
+October, commit 6ef72a8) stands next to them.
 
-| Run | Estimate |
-|---|---|
-| Full regeneration, writer (2,734 reports, prefix read from the cache) | about 0.40 USD |
-| The same with no cache hit at all (every request writes the prefix) | about 0.70 USD |
-| Retries (one report in five failing the check once) | about 0.10 USD more |
-| Judge, 50 reports | about 0.30 USD |
-| **Full regeneration with the judge** | **about 0.70 to 1.10 USD** |
-| **Weekly run, nothing changed** (today: the tables are rebuilt byte for byte until a `scout current` pull) | **about 0.30 USD** (the judge only) |
-| Weekly run after a pull that moves the season so far of most players | about a full regeneration |
+| Run | Estimate | Run 8 (real) |
+|---|---|---|
+| Full regeneration, writer, first tries (2,734 reports, prefix read from the cache) | about 0.40 USD | about 0.45 USD (the writer's 1.33 USD over 7,994 requests) |
+| The same with no cache hit at all (every request writes the prefix) | about 0.70 USD | |
+| Retries | about 0.10 USD (one report in five failing once) | about 0.90 USD: 2,692 failed the first try and 2,568 the second retry, so 5,260 retries |
+| Judge, 50 reports | about 0.30 USD | 0.08 USD |
+| **Full regeneration with the judge** | **about 0.70 to 1.10 USD** | **1.41 USD**, 21.2 million of the 30 million tokens |
+| **Weekly run, nothing changed** (today: the tables are rebuilt byte for byte until a `scout current` pull) | **about 0.30 USD** (the judge only) | about 0.10 USD (the judge's real cost) |
+| Weekly run after a pull that moves the season so far of most players | about a full regeneration | |
 
-So about 1.20 USD a month while nothing changes and at most about 4.50 USD
-a month if every week brought new data, billed by Anthropic, not AWS. The
-first real run's cost line replaces these estimates.
+Why run 8 cost more: 98% of the reports failed the length rule of 120 to
+150 words on the first try and 94% still after two retries, nearly all on
+length alone (the reports ran 151 to 283 words on
+their last try, median 177; a retry told "it must have 120 to 150" did not
+shorten them), so almost every report was asked for three times. The
+check's own word count is never above a plain whitespace count, so the
+reports were long, not miscounted. Prompt 19b asks for about 130 with an
+example of that length, tells a retry its count and the cut, passes 90 to
+170, and stops retrying a templated player after two runs. Of run 8's 2,502
+reports that failed on length alone, 839 (34%) would pass at 170; the rest
+depend on the new prompt.
+
+**Expected cost of the next run** (prompt 19b bumps the prompt version, so
+every report is written again): first tries about 0.45 USD as in run 8, the
+judge about 0.10, and retries in proportion to the failures, about 0.17 USD
+per thousand retries. If one report in five fails the first try and one in
+twenty the retry, about 0.65 USD; if the prompt fix does not hold and the
+reports fail as in run 8, at most about 1.45 USD (the cap holds part of the retries back) (and the run after that
+retries only the templated players, once). After that, about 0.10 USD a
+week while nothing changes, so well under 1 USD a month, billed by
+Anthropic, not AWS.
 
 For the owner, each run writes `reports/reports_text.md` (the run in numbers,
 the judge's verdicts, and 20 of the judged reports with their facts, the ones

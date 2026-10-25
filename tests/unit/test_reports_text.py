@@ -207,7 +207,7 @@ def test_a_faithful_report_passes(sheets):
     result = rt.check(GOOD, sheets[1], gazetteer={"barcelona"})
     assert result.violations == []
     assert result.passed
-    assert 120 <= result.words <= 150
+    assert 120 <= result.words <= rt.WORDS_ASKED
 
 
 def test_a_report_that_invents_a_club_fails(sheets):
@@ -256,12 +256,44 @@ def test_a_number_the_report_computed_fails(sheets):
     assert 'the number "€8.4m" is not in the fact sheet, or not rounded correctly' in found
 
 
-def test_the_length_is_checked(sheets):
-    found = rt.check(GOOD + " " + "He is quick." * 10, sheets[1]).violations
-    assert any(v.startswith("the report has") for v in found)
+def test_the_length_is_checked_between_90_and_170_words(sheets):
+    # A faithful report a few words over the 150 asked for passes (prompt 19b).
+    over = GOOD + " He is quick." * 7
+    assert rt.check(over, sheets[1]).words == 162
+    assert rt.check(over, sheets[1]).passed
+    found = rt.check(GOOD + " He is quick." * 10, sheets[1]).violations
+    assert found == ["the report has 171 words; it must have 90 to 170"]
     assert rt.check("Alex Moreno plays for Como.", sheets[1]).violations == [
-        "the report has 5 words; it must have 120 to 150"
+        "the report has 5 words; it must have 90 to 170"
     ]
+
+
+def test_the_word_count_is_never_above_a_plain_whitespace_count():
+    # Diagnosis of the first real run: the reports were long, not miscounted.
+    for text in [GOOD, "He is 20 — a winger at Como (€30m) - top 4%.", "Of 142, 30% did."]:
+        assert rt.words(text) <= len(text.split())
+    assert rt.words(GOOD) == len(GOOD.split())
+
+
+def test_the_prompt_asks_for_about_130_words_with_an_example_of_that_length():
+    text = rt.WRITER_INSTRUCTIONS
+    assert "about 130 words, never more than 150" in text
+    example = text.split("use only your own fact sheet.\n\n")[1].split("\n\nThe fact sheet")[0]
+    assert rt.WORDS_TARGET <= rt.words(example) <= 140
+    assert f"{rt.words(example)} words" in text
+
+
+def test_the_length_note_gives_the_count_and_the_cut():
+    assert rt.length_note(177) == (
+        "your report has 177 words; the limit is 150: cut at least 27 words, and aim for about "
+        "130 (cut about 47) by dropping the least telling facts, not by squeezing sentences"
+    )
+    assert rt.length_note(140) is None
+    assert rt.length_note(60) == "your report has 60 words; write about 130 (add about 70)"
+
+
+def test_the_writer_has_room_to_think_without_truncating():
+    assert CFG.writer_max_tokens >= 6000
 
 
 def test_ordinary_words_opening_a_sentence_are_not_names(sheets):
@@ -518,12 +550,55 @@ def test_the_run_writes_checks_judges_stores_and_reuses(tmp_path):
     assert list(sample.columns) == rt.AGREEMENT_COLUMNS
     assert len(sample) == 1
 
-    # Nothing changed: nothing is written or judged again.
+    assert (ben["prompt_version"], ben["template_runs"]) == (rt.PROMPT_VERSION, 1)
+    assert (alex["prompt_version"], alex["template_runs"]) == (rt.PROMPT_VERSION, 0)
+    # The retry was told its word count and what to add.
+    retry = batches.sent[1][0]["params"]["messages"][2]["content"]
+    assert "your report has 7 words; write about 130 (add about 123)" in retry
+    assert "it must have 90 to 170" not in retry
+    first = json.loads((folder / "summary.json").read_text())
+    assert first["words_first_try"]["max"] == 141
+    assert (first["over_asked_first_try"], first["outside_check_first_try"]) == (0, 1)
+
+    # A week on with the same facts: the passed report is reused; the one that
+    # ended on the template is asked for once more, and fails again.
     sent = len(batches.sent)
     again = rt.run_reports(settings, client=client, now=now + pd.Timedelta(days=7))
-    assert (again["written"], again["reused"], again["judged"]) == (0, 2, 0)
+    assert (again["written"], again["reused"], again["judged"]) == (1, 1, 0)
+    assert len(batches.sent) == sent + 3
+    ben = pd.read_parquet(folder / "reports.parquet").set_index("player_id").loc[2]
+    assert (ben["status"], ben["template_runs"]) == ("failed", 2)
+
+    # After two runs on the template it is not asked for again under this prompt.
+    sent = len(batches.sent)
+    third = rt.run_reports(settings, client=client, now=now + pd.Timedelta(days=14))
+    assert (third["written"], third["reused"], third["judged"]) == (0, 2, 0)
     assert len(batches.sent) == sent
-    assert again["cost_usd"] == 0
+    assert third["cost_usd"] == 0
+
+
+def _stored(status, runs, version=rt.PROMPT_VERSION, fact_hash="old"):
+    return pd.DataFrame([{"player_id": 1, "status": status, "template_runs": runs,
+                          "prompt_version": version, "model": CFG.writer_model,
+                          "fact_hash": fact_hash}])  # fmt: skip
+
+
+def test_the_reuse_rule(sheets):
+    sheet = sheets[1]
+    same = sheet.hash(CFG.writer_model)
+
+    def todo(stored):
+        return len(rt.plan([sheet], stored, CFG.writer_model, 2)[0])
+
+    assert todo(_stored("passed", 0, fact_hash=same)) == 0  # unchanged: reused
+    assert todo(_stored("passed", 0)) == 1  # facts changed: written again
+    assert todo(_stored("failed", 1, fact_hash=same)) == 1  # one more try, facts unchanged
+    assert todo(_stored("failed", 2)) == 0  # given up, even with changed facts
+    assert todo(_stored("failed", 2, version="19.1")) == 1  # a new prompt starts over
+    assert todo(_stored("failed", None, version=None)) == 1  # run 8's rows had no count
+    assert todo(_stored("held", 0, fact_hash=same)) == 1
+    other_model = _stored("failed", 2).assign(model="claude-sonnet-5-5")
+    assert todo(other_model) == 1  # a new writer model starts over too
 
 
 def test_without_the_key_one_line_is_logged_and_nothing_runs(tmp_path, monkeypatch, caplog):

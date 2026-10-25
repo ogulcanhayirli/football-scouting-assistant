@@ -1408,9 +1408,10 @@ model of football: nothing here changes a table, a chance or a flag.
   the three most similar players of today (`neighbours.parquet`), and on the
   bargains the list and rank, the minutes share, the contract and the tags.
   About 490 tokens; the fixed prefix (system prompt and instructions, cached
-  for an hour) about 1,240.
+  for an hour) about 1,240, about 1,570 since prompt 19b.
 * **Writer.** Claude Haiku 5.5 at low effort through the Message Batches API,
-  120 to 150 words, odds as historical rates ("of 142 past players in his
+  about 130 words and never more than 150 (prompt 19b; 120 to 150 before),
+  with an example report of 137 words in the prompt, odds as historical rates ("of 142 past players in his
   band, 30% became ..."), never as predictions. Rewritten only when the
   sheet's hash changes (the sheet, the prompt version and the model).
 * **The check, in code.** Every number of the report, read with its unit (%,
@@ -1422,9 +1423,12 @@ model of football: nothing here changes a table, a chance or a flag.
   euros. Every proper noun (a run of capitalised words inside a sentence, a
   name joined with its number such as Ligue 1, a known player, club or league
   opening a sentence) must be a name of the sheet; a surname alone is allowed
-  for a person, not a half of a club. The length must be 120 to 150 words. A
-  failing report goes back with its violations, at most twice; then the
-  explanation written by rule is shown and the failure is logged. Tests: a
+  for a person, not a half of a club. The length must be 90 to 170 words
+  (prompt 19b; 120 to 150 before). A failing report goes back with its
+  violations, its word count and the cut needed, at most twice; then the
+  explanation written by rule is shown and the failure is logged. A player
+  whose report ended on the template is asked for again on the next run,
+  once, then not until the prompt or the model changes. Tests: a
   report that invents a club (Juventus, Real Madrid, Barcelona opening a sentence),
   wrong roundings (€21.7m, 140% for 139%, 0.4 for 0.47, 91st for 92nd), a
   computed number (€8.4m more than fair), wrong units (€30 for 30%, 142
@@ -1447,13 +1451,52 @@ model of football: nothing here changes a table, a chance or a flag.
   billed token counted; each request's worst case is reserved before it is
   sent) and the cost from the usage fields, in the run's summary.
 
-Results: none yet. The session that built it had no Claude API key, so the
-pipeline ran end to end on the real 24 October tables with a fake client
-(four batches, the retries, the fallback, the judge, the storage and the
-page), and three reports drafted by hand for real sheets (Marc Bernal,
-Sabino, I. Zabarnyi) passed the check on numbers and names. The first
-weekly run with the key gives the pass rates on the first try and after the
-retries, the cost, and the judge's verdicts; they go here.
+Results. The session that built it had no Claude API key, so the pipeline
+first ran end to end on the real 24 October tables with a fake client (four
+batches, the retries, the fallback, the judge, the storage and the page),
+and three reports drafted by hand for real sheets (Marc Bernal, Sabino, I.
+Zabarnyi) passed the check on numbers and names.
+
+**The first real run** (weekly.yml run 8, 25 October 2026, commit 6ef72a8,
+prompt version 19.1):
+
+| | Run 8 | Estimate before it |
+|---|---|---|
+| Reports written | 2,734 | 2,734 |
+| Failed the check on the first try | 2,692 (98.5%) | about one in five |
+| Still failing after two retries (template shown) | 2,568 (93.9%) | |
+| Passed (first try or after a retry) | 166 (6.1%) | |
+| Failed on length on the last try | 2,561 of 2,568; 2,502 on length alone | |
+| Words on the last try of the failures | 151 to 283, median 177 (10th to 90th percentile 160 to 197) | 120 to 150 asked |
+| Other last try failures | a number not in the sheet 49 times ("27" 15, "29" 4, "23" 3, "21" 2, "28" once; "0.03" 5 and 15 other two decimal numbers once each; "two" twice and "Three" once as words), a name 12 times ("Champions League" 9, Köln, Anyang, Pablo Díaz) | |
+| Cut off at `max_tokens` (2,000, thinking included) | 7 | none expected |
+| Cost | 1.41 USD (writer 1.33, judge 0.08) | 0.70 to 1.10 USD |
+| Tokens | 21.2 million of the 30 million cap | |
+
+The faithfulness rules worked: they caught invented numbers and names. The
+length rule did not. Diagnosis: the check's word count is never above a
+plain whitespace count (a lone dash is not a word), so the reports really
+were long; the retry message gave the count and the range but not the cut,
+and the retries stayed long; 2,000 output tokens, thinking included, cut 7
+requests off.
+
+**Prompt 19b, the fix** (prompt version 19.2): the prompt asks for about
+130 words and never more than 150, says the least telling facts may be left
+out, and shows one example report of 137 words for a made up player; a
+retry is told "your report has 177 words; the limit is 150: cut at least 27
+words, and aim for about 130 (cut about 47)", also when only a number
+failed; the check passes 90 to 170 words, so a faithful report a few words
+over is kept (839 of run 8's 2,502 length only failures would have passed
+at 170 on their last try); the number and name rules are unchanged;
+`max_tokens` is 6,000 (worst case of a full first round 25.9 million
+tokens, under the 30 million cap with the judge's reserve); a templated
+player is retried on the next run once, then not until the prompt or the
+model changes (`template_runs`, stored). Every run's summary now holds the
+first try's word count spread. Tested with the fake client only (the 19b
+session had no Claude API key either), so the next weekly run is the real
+test of the first try and retry pass rates; its numbers go here. Expected
+cost of that full rerun: about 0.65 USD if one report in five fails the
+first try, at most about 1.45 USD if they fail as in run 8 (docs/DEPLOY.md).
 
 ## Next
 

@@ -146,14 +146,28 @@ class ReportsConfig(BaseModel):
 
     writer_model: str = "claude-haiku-5-5"
     writer_effort: Literal["low", "medium", "high"] = "low"
-    writer_max_tokens: int = Field(default=2000, gt=0, description="Thinking counts toward it.")
+    writer_max_tokens: int = Field(
+        default=6000,
+        gt=0,
+        description="Thinking counts toward it; 2,000 truncated 7 of about 8,000 requests "
+        "in the first real run (prompt 19b).",
+    )
     judge_model: str = "claude-sonnet-5-5"
     judge_effort: Literal["low", "medium", "high"] = "medium"
     judge_max_tokens: int = Field(default=4000, gt=0)
     judge_sample: int = Field(default=50, ge=0)
     retries: int = Field(default=2, ge=0, description="Regenerations after a failed check.")
-    words_min: int = 120
-    words_max: int = 150
+    # The hard check (prompt 19b): the prompt asks for about 130 and never more
+    # than 150 (``WORDS_TARGET``, ``WORDS_ASKED`` in ``scout.reports_text``); a
+    # faithful report a few words over is kept, not thrown away.
+    words_min: int = 90
+    words_max: int = 170
+    template_runs: int = Field(
+        default=2,
+        ge=1,
+        description="Runs in a row a player's report may end on the template under one "
+        "prompt version before the next runs stop asking for it until the prompt changes.",
+    )
     max_tokens_per_run: int = Field(
         default=30_000_000,
         gt=0,
