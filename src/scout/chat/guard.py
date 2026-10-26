@@ -11,12 +11,13 @@ key (``eval_token``), which only a holder of the key can make: its
 questions skip the per visitor limit and are counted against their own cap
 of 5 USD a day, so a run never eats the visitors' budget.
 
-Two Lambda instances may run at once (reserved concurrency 2), so every
-change is a read, modify and conditional write (``If-Match`` on the ETag),
-retried when the other instance wrote first. The budget is checked before
-each model call, not reserved ahead, so two turns running at the same time
-can pass a cap by at most what those two turns cost; the spend limit of the
-Claude Console workspace is the hard backstop (docs/DEPLOY.md).
+Several Lambda instances may run at once (up to the account's limit of 10
+while the function has no reserved concurrency; 2 once it is restored), so
+every change is a read, modify and conditional write (``If-Match`` on the
+ETag), retried when another instance wrote first. The budget is checked
+before each model call, not reserved ahead, so turns running at the same
+time can pass a cap by at most what those turns cost; the spend limit of
+the Claude Console workspace is the hard backstop (docs/DEPLOY.md).
 """
 
 from __future__ import annotations

@@ -8,7 +8,6 @@ from scout_infra import chat_bundle
 from scout_infra.chat_stack import (
     FUNCTION,
     KEY_PARAMETER,
-    RESERVED,
     ROLE,
     ScoutChatStack,
     chat_bucket_name,
@@ -63,10 +62,12 @@ def test_the_function(template):
             "Handler": "scout.chat.handler.handler",
             "MemorySize": 512,
             "Timeout": 180,
-            "ReservedConcurrentExecutions": RESERVED,
         },
     )
-    assert RESERVED == 2
+    # No reserved concurrency while the account's Lambda limit is 10 (the
+    # owner's call, 26 October): reserving 2 would leave fewer than 10 free.
+    fn = next(iter(template.find_resources("AWS::Lambda::Function").values()))
+    assert "ReservedConcurrentExecutions" not in fn["Properties"]
 
 
 def test_the_key_is_a_noecho_parameter_never_a_value(template):

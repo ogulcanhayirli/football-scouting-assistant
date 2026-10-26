@@ -386,7 +386,7 @@ from, which the page shows under it ("From the tables").
 ```
 
 The stack is `ScoutChat` (`infra/scout_infra/chat_stack.py`): the function
-`scout-chat` with reserved concurrency 2, its role `scout-chat-lambda` under
+`scout-chat` (no reserved concurrency for now, see below), its role `scout-chat-lambda` under
 `scout-boundary` (read `index.html` and `data/*` in the site bucket, read and
 write `state/*` in the chat bucket, write its own log group), the private
 bucket `scout-chat-<account>` (retained on delete) and the log group
@@ -406,13 +406,14 @@ is the runtime's own).
 | Per month | 5 USD, the same way | the same reply |
 | Message length | 500 characters | "Please keep your question under 500 characters." (the page stops longer ones first) |
 | Tool calls | 6 a turn, then the model must answer | |
-| Concurrency | 2 Lambdas at once | the Function URL answers 429; the page says the chat is busy |
+| Concurrency | the account's Lambda limit of 10 for now (reserved concurrency 2 once the quota is raised) | the Function URL answers 429; the page says the chat is busy |
 
 The prices are those of Claude Sonnet 5.5 (2 USD per million input tokens, 10
 per million output, cache writes 1.25 times and reads 0.1 times the input
 rate; `PRICES` in `src/scout/chat/agent.py`). The budget is checked before
-each model call, not reserved ahead, so two turns running at once can pass a
-cap by what those two turns cost (a few cents). **The hard backstop is the
+each model call, not reserved ahead, so turns running at once can pass a cap
+by what those turns cost (a few cents each; with up to 10 at once, a few tens
+of cents at worst). **The hard backstop is the
 spend limit of the Claude Console workspace the key belongs to**: give the
 chat its own key in its own workspace (Console, Workspaces, then Limits)
 with a monthly limit of 10 USD (the 5 USD of visitors plus room for an
@@ -477,8 +478,9 @@ add_statements scout-cfn-exec chat-cfn-exec.json
 add_statements scout-boundary chat-boundary.json
 
 # Reserved concurrency needs room in the account: a new account's limit can be 10,
-# with 10 kept unreserved. If ConcurrentExecutions is 10, ask for more in Service
-# Quotas (AWS Lambda, Concurrent executions) before deploying.
+# with 10 kept unreserved. This account's is 10 (26 October), so the stack has no
+# reserved concurrency until Service Quotas (AWS Lambda, Concurrent executions)
+# raises it; then restore reserved_concurrent_executions=2 (the TODO in chat_stack.py).
 aws lambda get-account-settings --query 'AccountLimit.[ConcurrentExecutions,UnreservedConcurrentExecutions]'
 ```
 
@@ -489,6 +491,18 @@ v1`). `lambda:*` is limited to functions named `scout-*`, whose roles must
 carry `scout-boundary` like every other project role; the CDK staging bucket
 is read because Lambda fetches the function's code from it with the
 deployer's rights.
+
+### Concurrency: the account limit of 10 is the cap for now
+
+The account's Lambda concurrency limit is 10, and AWS keeps 10 unreserved, so
+reserving 2 for `scout-chat` fails. Until the quota increase is granted the
+stack sets no reserved concurrency: the chat shares the account's 10, and
+that limit of 10 is its concurrency cap (the caps on visitors and money
+above are unchanged; a burst of 10 turns at once can pass the daily budget by
+a few tens of cents before the next check). Once Service Quotas raises the
+limit, restore `reserved_concurrent_executions=2` (the one line TODO in
+`infra/scout_infra/chat_stack.py` and the test in
+`infra/tests/test_chat_stack.py`) and redeploy.
 
 ### Deploying and redeploying (a session, with the owner's yes)
 

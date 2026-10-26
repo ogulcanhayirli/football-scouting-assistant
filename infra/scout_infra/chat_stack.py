@@ -3,11 +3,12 @@
 Decision 9 is revised narrowly: one Lambda for the chat and nothing else;
 the page stays static and the weekly run is unchanged.
 
-* ``scout-chat``: Python 3.12 on arm64, 512 MB, 180 seconds, at most two
-  running at once (reserved concurrency 2), behind a public Function URL
+* ``scout-chat``: Python 3.12 on arm64, 512 MB, 180 seconds, behind a public Function URL
   (no API Gateway) whose CORS allows only the site's origin. The code is
   ``src/scout/chat`` with its pinned dependencies
-  (``scout_infra.chat_bundle``).
+  (``scout_infra.chat_bundle``). No reserved concurrency for now: the
+  account's Lambda limit is 10 (10 must stay unreserved), so the function
+  shares those 10 and they are its cap until the quota increase is granted.
 * Its role, ``scout-chat-lambda`` under ``scout-boundary``, may read the
   page and ``data/*`` in the site bucket, read and write ``state/*`` in the
   chat bucket, and write its own log group. Nothing else.
@@ -32,7 +33,6 @@ from scout_infra.site_stack import site_bucket_name
 
 FUNCTION = "scout-chat"
 ROLE = "scout-chat-lambda"
-RESERVED = 2
 KEY_PARAMETER = "AnthropicApiKey"
 
 
@@ -112,7 +112,7 @@ class ScoutChatStack(Stack):
             code=code,
             memory_size=512,
             timeout=Duration.seconds(180),
-            reserved_concurrent_executions=RESERVED,
+            # TODO(owner): reserved_concurrent_executions=2 once the Lambda quota passes 10.
             role=role,
             log_group=log_group,
             environment={

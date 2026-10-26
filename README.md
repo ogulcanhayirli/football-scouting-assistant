@@ -517,7 +517,8 @@ an unanswerable question with "The tables on this page do not answer that."
 and refuses anything off topic with one fixed sentence; code replaces an
 answer that repeats ten words of the rules. Caps: 20 messages an hour per
 IP (hashed), 1 USD a day and 5 USD a month from the usage fields, 500
-characters, reserved concurrency 2, and the Claude Console workspace's
+characters, reserved concurrency 2 (held back while the account's Lambda
+limit is 10, which caps it meanwhile), and the Claude Console workspace's
 spend limit as the hard backstop. Decision 9 is revised for the chat only:
 the page stays static and the weekly run is unchanged. *Would change if*
 the evaluation's pass rates fell short (the chat then stays off the page),
