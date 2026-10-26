@@ -1341,3 +1341,15 @@ def test_an_api_error_keeps_the_cost_of_earlier_calls(tables):
     assert turn.answer == prompt.CAPPED["error"]
     assert turn.cost_usd > 0
     assert turn.calls == 1
+
+
+def test_eval_reads_the_key_under_either_name(monkeypatch):
+    from scout.chat_eval import claude_key
+
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("SCOUT_CHAT_CLAUDE_KEY", raising=False)
+    assert claude_key() == ""
+    monkeypatch.setenv("SCOUT_CHAT_CLAUDE_KEY", "sk-cloud")
+    assert claude_key() == "sk-cloud"
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-local")
+    assert claude_key() == "sk-local"

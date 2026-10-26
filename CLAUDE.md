@@ -51,8 +51,12 @@ fix this file.
    gitignored; `.env.example` lists the names only. Never ask the owner to
    paste a key into chat. The chat Lambda's Claude key (prompt 20) reaches it
    only as the NoEcho stack parameter `AnthropicApiKey`, given at deploy time
-   from the deploying shell's `ANTHROPIC_API_KEY`: never in a file, the
-   template or `cdk.out`, never printed or logged.
+   from the deploying shell: never in a file, the template or `cdk.out`,
+   never printed or logged. A cloud session never receives
+   `ANTHROPIC_API_KEY` (the name is reserved for its own sign in), so the
+   owner adds the key as `SCOUT_CHAT_CLAUDE_KEY` in the environment's
+   variables for the deploy and `scout chat-eval`, then deletes the line
+   (the box is readable by anyone using the environment).
 6. **Data never goes to git.** `data/` and `reports/` are gitignored; only the
    synthetic sample under `tests/fixtures` is committed (D7). The one
    exception is `forecasts/<date>/`: registered forecasts (the two tables as
@@ -129,13 +133,13 @@ uv run python scripts/repair_names.py [--dry-run]  # the adapter's name repair o
 $C statsbomb download                        # StatsBomb open data, once: La Liga 2004/05 to 2020/21, Premier League 2003/04
 $C statsbomb build                           # data/processed/statsbomb/player_match_stats/, checked by the contract
 $C greats                                    # mapping check against API Football, the peer group correction and its test, peer group vectors, the greats' table, reports/greats.md (after embed and lists)
-$C chat-eval [--dry-run | --local] [--url URL] [--site URL_OR_DIR] [--only computed unanswerable adversarial]  # prompt 20: the chat's 50 questions against chat.url (needs ANTHROPIC_API_KEY; the evaluation token skips the visitor caps, own cap 5 USD a day), reports/chat_eval.md; --dry-run builds the set from the published files and checks the tools, no model called
+$C chat-eval [--dry-run | --local] [--url URL] [--site URL_OR_DIR] [--only computed unanswerable adversarial]  # prompt 20: the chat's 50 questions against chat.url (needs SCOUT_CHAT_CLAUDE_KEY or ANTHROPIC_API_KEY; the evaluation token skips the visitor caps, own cap 5 USD a day), reports/chat_eval.md; --dry-run builds the set from the published files and checks the tools, no model called
 $C archetypes                                # reload and check archetypes/*/*.yaml, their vectors and today's nearest, the calibration, reports/archetypes.md (after embed and greats, before site; the weekly run calls it)
 ```
 
 The chat's stack (prompt 20, docs/DEPLOY.md, the owner's yes first):
 `cd infra && CDK_DEFAULT_ACCOUNT=<account id> npx aws-cdk@2 deploy ScoutChat
---require-approval never --parameters ScoutChat:AnthropicApiKey="$ANTHROPIC_API_KEY"`
+--require-approval never --parameters ScoutChat:AnthropicApiKey="${SCOUT_CHAT_CLAUDE_KEY:-$ANTHROPIC_API_KEY}"`
 (later deploys may leave out `--parameters`: CDK keeps the previous value).
 
 Also `athena "SQL"`, `featurestore ingest | pit --as-of DATE`,
@@ -672,10 +676,12 @@ Settle them with the owner rather than guessing.
 * The chat (prompt 20) is built and tested but **not deployed**. Three
   things wait: the owner's two IAM policy updates (docs/DEPLOY.md, The chat:
   `scout-cfn-exec` and `scout-boundary` allow no Lambda functions, Function
-  URLs or Lambda log groups yet), a session that holds `ANTHROPIC_API_KEY`
-  (the 26 October session's environment had none, so nothing was tested
-  against the real API; a variable added in the environment's settings
-  reaches new sessions only), and the owner's yes to deploy. Then: deploy,
+  URLs or Lambda log groups yet), a session that holds the key, and the
+  owner's yes to deploy. The owner said yes and added the policy updates on
+  26 October; the key did not arrive, because a cloud session never receives
+  `ANTHROPIC_API_KEY` (reserved for its own sign in). The owner is adding it
+  as `SCOUT_CHAT_CLAUDE_KEY`, which reaches new sessions only; delete that
+  line from the environment's variables after the deploy and the eval. Then: deploy,
   put the `ChatUrl` output into `chat.url`, run `scout chat-eval`, record
   its three pass rates and cost here, in README.md (Limits) and MODELS.md,
   and let the weekly run (or one started by hand) publish the Ask tab. A

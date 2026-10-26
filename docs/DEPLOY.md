@@ -507,16 +507,22 @@ limit, restore `reserved_concurrent_executions=2` (the one line TODO in
 ### Deploying and redeploying (a session, with the owner's yes)
 
 The Claude key is passed as the NoEcho stack parameter `AnthropicApiKey` from
-the deploying shell's `ANTHROPIC_API_KEY`: it is never written to a file,
-never in the synthesized template or `cdk.out`, and CloudFormation shows it
-masked. In a cloud session the variable comes from the environment's
-settings (never pasted into a chat).
+the deploying shell: it is never written to a file, never in the synthesized
+template or `cdk.out`, and CloudFormation shows it masked. In a Claude Code
+cloud session the name `ANTHROPIC_API_KEY` is reserved for the session's own
+sign in and never reaches the shell, so the owner adds the key to the
+environment's variables as `SCOUT_CHAT_CLAUDE_KEY` (a dedicated key in its
+own Console workspace with a 10 USD monthly limit), starts a new session for
+the deploy and the evaluation, and **deletes that line afterwards**: the box
+is readable by anyone who uses the environment, and the deployed function
+keeps its own copy (later deploys reuse it without the key). Never paste a
+key into a chat. On a machine of your own, `ANTHROPIC_API_KEY` works too.
 
 ```bash
 cd infra && CDK_DEFAULT_ACCOUNT=$(uv run python -c \
   "import boto3; print(boto3.client('sts').get_caller_identity()['Account'])") \
   npx aws-cdk@2 deploy ScoutChat --require-approval never \
-  --parameters ScoutChat:AnthropicApiKey="$ANTHROPIC_API_KEY"
+  --parameters ScoutChat:AnthropicApiKey="${SCOUT_CHAT_CLAUDE_KEY:-$ANTHROPIC_API_KEY}"
 ```
 
 The output `ScoutChat.ChatUrl` is the Function URL. Put it into
@@ -524,7 +530,7 @@ The output `ScoutChat.ChatUrl` is the Function URL. Put it into
 (or a run started by hand) publishes the page with the Ask tab switched on.
 Later deploys (a code change) need no `--parameters`: CDK keeps the previous
 value. To rotate the key, deploy again with the new key in
-`ANTHROPIC_API_KEY`. `cd infra && uv run pytest` checks the stack (one
+`SCOUT_CHAT_CLAUDE_KEY` (or `ANTHROPIC_API_KEY`). `cd infra && uv run pytest` checks the stack (one
 function, the NoEcho key, CORS for the site only, the role's five actions,
 a private retained bucket).
 
@@ -540,7 +546,7 @@ tier at this scale.
 
 ```bash
 uv run scout --config configs/backfill.ultra.yaml chat-eval --dry-run   # build the set, check the tools
-uv run scout --config configs/backfill.ultra.yaml chat-eval             # against chat.url (ANTHROPIC_API_KEY)
+uv run scout --config configs/backfill.ultra.yaml chat-eval             # against chat.url (SCOUT_CHAT_CLAUDE_KEY or ANTHROPIC_API_KEY)
 uv run scout --config configs/backfill.ultra.yaml chat-eval --local     # the same chat in this process
 ```
 

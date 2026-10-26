@@ -32,12 +32,14 @@ A failed computed question is put down to:
 
 ``--dry-run`` builds the set and runs every ideal call locally, which checks
 the tools against the independent answers without calling the model.
-``--local`` runs the chat in this process against the API (needs
-``ANTHROPIC_API_KEY``), otherwise each question is posted to the deployed
+``--local`` runs the chat in this process against the API, otherwise each
+question is posted to the deployed
 URL with the evaluation token (``scout.chat.guard.eval_token``), which skips
 the per visitor limit and counts against the evaluation's own cap. The
 report goes to ``reports/chat_eval.md`` with every answer in
-``reports/chat_eval.json``.
+``reports/chat_eval.json``. Both need the Claude key: ``ANTHROPIC_API_KEY``,
+or in a cloud session, where that name is reserved for the session's own
+sign in and never reaches it, ``SCOUT_CHAT_CLAUDE_KEY`` (``KEY_NAMES``).
 """
 
 from __future__ import annotations
@@ -1009,10 +1011,18 @@ def post(url: str, token: str, question: str, tries: int = 4) -> dict:
     return {"http_error": "gave up"}
 
 
+KEY_NAMES = ("ANTHROPIC_API_KEY", "SCOUT_CHAT_CLAUDE_KEY")
+
+
+def claude_key() -> str:
+    """The Claude key from the first of ``KEY_NAMES`` that is set, else ""."""
+    return next((os.environ[n] for n in KEY_NAMES if os.environ.get(n)), "")
+
+
 def local_runner(tables: data.Tables):
     import anthropic
 
-    bot = Assistant(tables, anthropic.Anthropic())
+    bot = Assistant(tables, anthropic.Anthropic(api_key=claude_key() or None))
 
     def ask(question: str) -> dict:
         turn = bot.answer([], question, lambda spent: True)
@@ -1093,9 +1103,12 @@ def run(
         ask = local_runner(tables)
     else:
         url = url or settings.chat.url
-        key = os.environ.get("ANTHROPIC_API_KEY", "")
+        key = claude_key()
         if not url or not key:
-            raise ValueError("the run needs the chat URL (chat.url or --url) and ANTHROPIC_API_KEY")
+            raise ValueError(
+                "the run needs the chat URL (chat.url or --url) and the Claude key "
+                f"({' or '.join(KEY_NAMES)})"
+            )
         token = eval_token(key)
 
         def ask(question: str) -> dict:
