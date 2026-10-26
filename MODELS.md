@@ -1524,10 +1524,49 @@ assistant that always gives the fixed refusal (0 of 30, 0 of 10, 10 of 10).
 
 On the tables of 25 October the dry run builds all 50 and every one of the
 30 ideal tool calls returns the expected names and numbers: the tools agree
-with the independent computation. **The model's pass rates are not
-measured yet**: the chat is not deployed (CLAUDE.md, Open questions), and
-the session that built it had no `ANTHROPIC_API_KEY`, so the agent loop is
-tested with a fake client only.
+with the independent computation.
+
+**First run (26 October 2026, tables of 26 October).** The stack was
+deployed the same day, but the cloud session's network policy refuses the
+Function URL's host, so the run against the URL ended with 50 connection
+failures (0 USD) and the evaluation ran in process (`chat-eval --local`:
+the same agent, tools, prompt and published files, without the Lambda's
+handler, caps and S3 reads):
+
+| Group | Passed | Always the fixed refusal | Ideal tool calls alone |
+|---|---|---|---|
+| Computed | 28 of 30 (93%) | 0 of 30 | 30 of 30 |
+| Not in the data | 10 of 10 | 0 of 10 | not applicable |
+| Refused | 10 of 10 | 10 of 10 | not applicable |
+
+Cost 0.34 USD (43 tool calls; 284 uncached input tokens, 55,239 written to
+the cache, 408,632 read from it, 12,357 output), median 3 s a question;
+49 answered, 1 blocked by the leak guard. The two failures, each rerun to
+find its cause:
+
+* C06, the most valuable La Liga candidate aged 20 or under (Franco
+  Mastantuono, €45m). The eval puts it down to the model's tool use; the
+  cause is the tool's schema. Strict decoding keeps the declared property
+  order, `age_max` is declared before `league`, and the model writes the
+  league first, so none of its six calls could carry the age; after the
+  sixth it wrote tool call markup as text. Rerun as deployed: six calls,
+  no age, the answer "2". With `league` declared before the ages: one call,
+  the right answer, 0.008 USD instead of 0.05.
+* C11, how many elite pool candidates moved since the forecast (115). The
+  eval puts it down to the model's answer; the tool returned 115, and the
+  leak guard replaced the answer with the refusal. The rerun answers 115
+  and explains the 30% as "the share of 142 past players in the same
+  band", which is rule 3's sentence with one number added; without the
+  number it is a ten word run of the rules, which the guard blocks. Rule 3
+  tells the model to say it that way, so the guard should leave that
+  sentence out, as it already does for the two fixed sentences.
+
+Nine passing answers hold a number found in no tool result: the season,
+the valuation and pull dates, 37 leagues, 1,830 candidates and "29 and
+under", all from the system prompt's facts, none invented. Both fixes
+change the deployed code, so they wait for the owner's yes to redeploy;
+the run through the URL (handler, caps, S3 reads) is still to do
+(CLAUDE.md, Open questions).
 
 ## Next
 

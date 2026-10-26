@@ -184,8 +184,8 @@ bucket named by `$SCOUT_S3_BUCKET` (eu-central-1).
 | Archetypes (prompt 18c) | `archetypes/` (committed) and `data/processed/archetypes/` | one YAML file per player (`legends/`: 8, `calibration/`: 6), drafted 25 October and awaiting the owner's review; `archetypes.parquet` (each archetype's `z_*`, ability, `style_*`, 48 `emb_*`), `archetypes.json` (traits, sources, label, calibration verdict), `neighbours.parquet` (today's ten nearest each), `calibration.parquet` (drafted against measured per trait); written by `scout archetypes`, read by `scout site`; in S3 since 25 October (owner's yes) |
 | The page | `data/site/` | `index.html` (both tables embedded, 1.8 MB, 0.3 MB gzip on 24 October) and `data/` (the two tables as CSV and Parquet, `dictionary.csv`, `similar.json`); published to `scout-site-<account>` |
 | Written reports (prompt 19) | `data/processed/reports_text/` | `reports.parquet` (one row a player: fact sheet, its hash, the report or the template, source, status, attempts, the check's violations, the judge's verdict), `runs.jsonl` (each run's counts, tokens and cost), `verdicts.jsonl`, `failures.jsonl`, `summary.json`, `dictionary.csv`; written by `scout reports`, read by `scout site`, kept in S3 by `scout publish` (best effort). None yet: no run with a key so far |
-| Chat state (prompt 20) | S3 `scout-chat-<account>` (private, retained), `state/chat.json` | the caps' counters: a salt, the hour's visitors as salted IP hashes with their message counts, USD today and this month (visitors and the evaluation apart), token totals; written by the chat Lambda with conditional writes; not deployed yet |
-| Chat evaluation (prompt 20) | `reports/chat_eval_set.json`, `reports/chat_eval.md`, `reports/chat_eval.json` | the 50 questions with their expected names and numbers and ideal tool calls; each run's answers, scores and causes. Built from the published files (`chat.site_url`) |
+| Chat state (prompt 20) | S3 `scout-chat-<account>` (private, retained), `state/chat.json` | the caps' counters: a salt, the hour's visitors as salted IP hashes with their message counts, USD today and this month (visitors and the evaluation apart), token totals; written by the chat Lambda with conditional writes; deployed 26 October 2026 |
+| Chat evaluation (prompt 20) | `reports/chat_eval_set.json`, `reports/chat_eval.md`, `reports/chat_eval.json` | the 50 questions with their expected names and numbers and ideal tool calls; each run's answers, scores and causes. Built from the published files (`chat.site_url`). First run 26 October, in process (`--local`): the URL is unreachable from a cloud session (Open questions) |
 | User facing tables | `data/processed/lists/` | `candidates`, `bargains` (Parquet, CSV), `dictionary.csv` (see Outputs) |
 | Quota state, log | `data/state/` | |
 
@@ -325,9 +325,20 @@ October 2026, from MODELS.md and `reports/`:
   test (about 0.65 USD expected; about 0.10 USD a week after that while
   nothing changes, once the reports are kept in S3). The check cannot tell
   which fact a number of the sheet belongs to; the judge can.
-* The chat (prompt 20): not deployed yet, so no pass rates; the dry run on
-  the tables of 25 October builds all 50 questions and every ideal tool call
-  returns the expected names and numbers. The first run follows the deploy.
+* The chat (prompt 20, deployed 26 October): the first evaluation, on the
+  tables of 26 October, run in process (`chat-eval --local`, the same code,
+  tools and published files; the Function URL is unreachable from a cloud
+  session): computed 28 of 30 (93%), not in the data 10 of 10, refused 10
+  of 10, for 0.34 USD (43 tool calls, median 3 s a question). Both failures
+  are ours, not the model's facts: C06 (the youngest, most valuable La Liga
+  candidate) because strict decoding keeps the schema's property order and
+  `age_max` is declared before `league`, so once the model wrote `league`
+  it could not add the age (six calls, then a junk answer; with `league`
+  declared first it answers in one call); C11 (how many moved) because the
+  leak guard blocked a right answer that explained the chance in rule 3's
+  own words. The eval's causes read "model, tool use" and "model, answer";
+  the reruns show the schema and the guard. 9 passing answers hold a number
+  found in no tool result: dates and counts of the system prompt's facts.
 * Bargains (19 October, 37 leagues, seasons 2015 to 2023, experienced 30 to
   33): the top 50 gained value far more often than matched peers (prime
   63.2% against 43.3%, experienced 11.0% against 4.5%), but moved to a club
@@ -552,7 +563,7 @@ detail stays in `reports/scouting.md`, `reports/moves.md`,
 * The thin peer group's correction and archetypes for players without data, with a blind calibration: **done 25 October (prompt 18c); the archetypes await the owner's review.**
 * Generated scout reports with a faithfulness check and a weekly judge: **built 25 October (prompt 19); first real run 25 October (94% template, on length); length handling fixed in prompt 19b, the next weekly run tests it.**
 * January window forecast, published mid December and scored in February.
-* A capped chat over the two tables: **built 26 October (prompt 20)**; the deploy and its evaluation wait for the owner (Open questions).
+* A capped chat over the two tables: **built and deployed 26 October (prompt 20)**; evaluated in process (28 of 30, 10 of 10, 10 of 10); the run against the URL and two fixes wait for the owner (Open questions).
 * A matchup report before any match model.
 
 ## AWS
@@ -582,7 +593,8 @@ Decision 9 is revised narrowly by decision 11 (prompt 20): one Lambda for
 the chat only; the page stays static and the weekly run is unchanged.
 
 CDK app in `infra/` with its own uv environment: two stacks. `ScoutChat`
-(prompt 20, `infra/scout_infra/chat_stack.py`, not deployed yet): the
+(prompt 20, `infra/scout_infra/chat_stack.py`, deployed 26 October 2026;
+Function URL in `chat.url`): the
 function `scout-chat` (Python 3.12, arm64, 512 MB, 180 s; no reserved
 concurrency for now: the account's Lambda limit of 10 is its cap until the
 quota increase is granted, then restore 2 (the TODO in `chat_stack.py`); code from `chat_bundle.build()`: `src/scout/chat/` and the
@@ -666,33 +678,44 @@ Owner decisions of 2026-10-16. Each one line; details in the code and docs once 
 8. Ability score version 2 is built from per 90 stats with minutes shrinkage, without the match rating, and replaces version 1 only if it is more stable year to year and predicts the targets at least as well. Rule set on 19 October: more stable, and elite and step up AUC within 0.005 of version 1 or better; else the most stable version that passes. **Outcome (19 October): adopted.** Stability 0.858 against 0.503, elite AUC 0.881 against 0.880, step up 0.927 against 0.925; `--strength v2` is the default (MODELS.md, `reports/ability.md`).
 9. Serving stack (revised narrowly by decision 11: one Lambda for the chat only): no Lambda, API Gateway, DynamoDB or Bedrock agent; a weekly GitHub Actions run publishes Parquet, CSV and one static HTML page to S3 static hosting. **Built 21 October (prompt 15):** see AWS above and docs/DEPLOY.md; the page is live and the stored models are in S3 (23 October); the weekly run waits for the owner's setup (IAM user, secrets and variables).
 10. Embeddings and similar players (prompt 18, 24 October 2026). Style vectors: the version 2 per 90 inputs and the on pitch shares of the team's shots, dribbles, passes and duels, shrunk by minutes (empirical Bayes per measure and position group, one season), standardised within position group and season, with the level taken out (both ability percentiles regressed out of each measure's mean and spread within position group and season); cosine on them is the baseline. Learned: one hidden layer of 128 to 48 dimensions, InfoNCE with the same player in consecutive seasons as the positive pair and the other players of the same position group and season as negatives, settings chosen on 2021 to 2022, tested on 2023 to 2025 after training to 2022, refit on 2015 to 2025 for `stored/embedding.json`. **Outcome: adopted** (identity retrieval 19.9% against 13.2%, every position group). The replacement check is weak support only (1.52% against 0.65% at random). No vector database: a numpy search over all vectors takes 0.5 ms. MODELS.md, `reports/embeddings.md`.
-11. The chat (prompt 20, 26 October 2026, the owner's prompt). A prototype Ask tab: one AWS Lambda in Python with a Function URL (no API Gateway) in its own stack `ScoutChat`, reading the published files from the site bucket and keeping them in memory; the Claude key as an environment variable set at deploy time from the deploying environment (a NoEcho parameter), never written to a file; reserved concurrency 2, held back on 26 October because the account's Lambda limit is 10 (that limit is the cap until the quota increase is granted; a TODO in `chat_stack.py` restores it). Claude Sonnet 5.5, effort medium, prompt caching on the system prompt and the tool definitions, four strict tools (search_players, player_card, similar_players, how_to_read), at most six tool calls a turn, no streaming. Every number from a tool result; the data's dates in the system prompt; a plain "not in the data" answer when the tables cannot answer. Caps: 20 messages an hour per IP, 1 USD a day and 5 USD a month from the usage fields in a small S3 object, 500 characters, a fixed polite refusal on any cap; the system prompt is never revealed; the Console spend limit is the hard backstop. The page stays static; decision 9 is revised for this Lambda only. An evaluation of 50 questions decides whether the prototype works (`scout chat-eval`). **Built 26 October; deploy and evaluation pending (Open questions).**
+11. The chat (prompt 20, 26 October 2026, the owner's prompt). A prototype Ask tab: one AWS Lambda in Python with a Function URL (no API Gateway) in its own stack `ScoutChat`, reading the published files from the site bucket and keeping them in memory; the Claude key as an environment variable set at deploy time from the deploying environment (a NoEcho parameter), never written to a file; reserved concurrency 2, held back on 26 October because the account's Lambda limit is 10 (that limit is the cap until the quota increase is granted; a TODO in `chat_stack.py` restores it). Claude Sonnet 5.5, effort medium, prompt caching on the system prompt and the tool definitions, four strict tools (search_players, player_card, similar_players, how_to_read), at most six tool calls a turn, no streaming. Every number from a tool result; the data's dates in the system prompt; a plain "not in the data" answer when the tables cannot answer. Caps: 20 messages an hour per IP, 1 USD a day and 5 USD a month from the usage fields in a small S3 object, 500 characters, a fixed polite refusal on any cap; the system prompt is never revealed; the Console spend limit is the hard backstop. The page stays static; decision 9 is revised for this Lambda only. An evaluation of 50 questions decides whether the prototype works (`scout chat-eval`). **Built and deployed 26 October; evaluated in process: computed 28 of 30, not in the data 10 of 10, refused 10 of 10, 0.34 USD (Open questions).**
 
 ## Open questions
 
 These are unresolved or inconsistent in the repository as of 2026-10-21.
 Settle them with the owner rather than guessing.
 
-* The chat (prompt 20) is built and tested but **not deployed**. Three
-  things wait: the owner's two IAM policy updates (docs/DEPLOY.md, The chat:
-  `scout-cfn-exec` and `scout-boundary` allow no Lambda functions, Function
-  URLs or Lambda log groups yet), a session that holds the key, and the
-  owner's yes to deploy. The owner said yes and added the policy updates on
-  26 October; the key did not arrive, because a cloud session never receives
-  `ANTHROPIC_API_KEY` (reserved for its own sign in). The owner is adding it
-  as `SCOUT_CHAT_CLAUDE_KEY`, which reaches new sessions only; delete that
-  line from the environment's variables after the deploy and the eval. Then: deploy,
-  put the `ChatUrl` output into `chat.url`, run `scout chat-eval`, record
-  its three pass rates and cost here, in README.md (Limits) and MODELS.md,
-  and let the weekly run (or one started by hand) publish the Ask tab. A
-  separate key in its own Console workspace with a 10 USD monthly limit is
-  recommended (docs/DEPLOY.md). The account's Lambda concurrency limit is
-  10 (the owner, 26 October), so reserving 2 would fail: the stack sets no
-  reserved concurrency and the account limit of 10 is the chat's cap until
-  the quota increase is granted; then restore it (the one line TODO in
-  `infra/scout_infra/chat_stack.py`) and redeploy. The owner added the
-  Lambda rights to `scout-cfn-exec` (v4) and `scout-boundary` (v2) on 26
-  October.
+* The chat (prompt 20) was **deployed on 26 October 2026** with the
+  owner's yes (`ScoutChat`; the key as the NoEcho parameter from
+  `SCOUT_CHAT_CLAUDE_KEY`, checked by length only and found in no file of
+  `cdk.out`); its Function URL is in `chat.url`, and weekly run 11, started
+  by hand, publishes the Ask tab. Still open:
+  * **The run against the URL.** The cloud environment's network policy
+    refuses the host `j4qelz4n2krm774v77b5qee23m0dcexb.lambda-url.eu-central-1.on.aws`
+    (the proxy answers 403 to CONNECT), and `scout-session-sync` may not
+    invoke the function or read its logs, so the first `scout chat-eval`
+    against the URL ended with 50 connection failures (0 USD) and the
+    evaluation ran in process instead (Models). The deployed function was
+    not exercised from the session. To run it: add that host (or
+    `*.lambda-url.eu-central-1.on.aws`) to the environment's Allowed
+    domains, start a new session and run `scout chat-eval`; or ask one
+    question on the page.
+  * **Two fixes, each needing a redeploy (the owner's yes).** Declare
+    `league` (and `club`) before `position`, `position_group`, `age_min` and
+    `age_max` in `search_players`, or state the order in the description,
+    since strict decoding keeps the declared order (C06); and keep rule 3's
+    own explanation of a chance out of the leak guard's shingles, as the
+    two fixed sentences already are, or move it to the facts (C11). After
+    the six tool calls, C06's answer was tool call markup in plain text, which a
+    visitor would see.
+  * Delete `SCOUT_CHAT_CLAUDE_KEY` from the environment's variables once the
+    URL run is done (the deployed function keeps its own copy).
+  * Reserved concurrency: the account's Lambda limit is 10, so the stack
+    reserves none and that limit is the chat's cap until the quota increase
+    is granted; then restore 2 (the one line TODO in
+    `infra/scout_infra/chat_stack.py`) and redeploy. The owner added the
+    Lambda rights to `scout-cfn-exec` (v4) and `scout-boundary` (v2) on 26
+    October.
 * The page published by weekly run 9 (25 October, started by hand after
   prompt 19b; seen on 26 October) says 2,726 written reports and 8 by rule,
   and 26 of the 50 judged faithful: the 19b fix let nearly every report pass

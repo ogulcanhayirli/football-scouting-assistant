@@ -62,7 +62,7 @@ chances shown as the rates that past forecasts actually achieved.
 | Measured greats (`scout greats`, prompts 18b and 18c) | Done 25 October 2026: StatsBomb open data (La Liga 2004/05 to 2020/21, Premier League 2003/04, 2.83 GB) mapped to our match table and checked against API Football (tackles and interceptions agree at 0.63 and 0.68 per match and are kept, the owner's call on the identity test); Barcelona's old seasons corrected for the thin peer group (the same player found 55.1% of the time on 2016/17 to 2020/21 against 28.6% uncorrected); 23 greats by age against today's players, with the calibrated elite chance, in a page tab at the next publish |
 | Archetypes (`scout archetypes`, prompt 18c) | Drafted 25 October 2026, awaiting the owner's review: eight legends from the historical record (Cruyff, Gullit, Rio Ferdinand, Maldini, Zidane, Ronaldo Nazário, Baresi, Pirlo) searched among today's players; a calibration on six players we can measure lands within 15 points on half the traits (28% for a draft of 50 everywhere), so they are labelled illustrative only |
 | Scout reports (`scout reports`, prompt 19) | Built 25 October 2026: Claude Haiku 5.5 writes about 130 words per player from a fact sheet of the table columns (Message Batches API, cached prefix, rewritten only when the facts change), code checks every number and name against the sheet (two retries, then the explanation written by rule; a templated player is retried on the next run once), Claude Sonnet 5.5 judges 50 a week. The first real run (25 October) cost 1.41 USD and sent 94% of the players to the template, nearly all for running over 150 words; prompt 19b fixed the length handling (90 to 170 words pass, an example report, the cut stated on a retry), and the next weekly run is its real test (about 0.65 USD expected) |
-| Chat over the tables (Ask tab, `ScoutChat`, prompt 20) | Built 26 October 2026: one Lambda behind a Function URL, Claude Sonnet 5.5 with four strict tools over the published files, the caps in a small S3 object, an Ask tab on the page. Not deployed yet: the deploy waits for the owner's yes, two IAM policy updates (docs/DEPLOY.md) and a session that holds `ANTHROPIC_API_KEY`; the evaluation (50 questions) runs right after it |
+| Chat over the tables (Ask tab, `ScoutChat`, prompt 20) | Built 26 October 2026: one Lambda behind a Function URL, Claude Sonnet 5.5 with four strict tools over the published files, the caps in a small S3 object, an Ask tab on the page. Deployed 26 October 2026; the evaluation (50 questions, run in process because a cloud session cannot reach the Function URL) passed 28 of 30 computed, 10 of 10 not in the data and 10 of 10 refusals for 0.34 USD |
 | Free tier update of the current season | Not started: prompt 4, from 6 November; the weekly run skips it until its config exists |
 | Glue and Athena, Feature Store, SageMaker training stacks | Retired by decision 9, code in `infra/archive/`; still deployed until the owner removes them |
 
@@ -266,8 +266,13 @@ exception.
   an answer must come from a tool result; code blocks an answer that repeats
   its rules. The evaluation that decides whether it works (30 questions with
   answers computed from the tables, 10 the tables cannot answer, 10 attempts
-  to pull the prompt or go off topic) runs right after the first deploy;
-  its pass rates go here.
+  to pull the prompt or go off topic) first ran on 26 October, in process
+  with the deployed code: 28 of 30 computed (93%), 10 of 10 not in the
+  data, 10 of 10 refused, for 0.34 USD. One failure came from the order
+  of the search tool's fields (an age filter could not follow a league),
+  the other from the guard blocking a right answer that explained a chance
+  in the rules' own words; both fixes need a redeploy (CLAUDE.md, Open
+  questions). The run through the Function URL itself is still to do.
 * **The page is plain HTTP.** S3 website hosting has no HTTPS, and
   CloudFront is left out on purpose; the page holds public tables only.
 

@@ -557,7 +557,15 @@ pull the system prompt or go off topic. It scores exact names and numbers,
 the fixed "not in the data" sentence and the fixed refusal, and puts each
 failure down to the model's answer, the model's tool use, or the tools (by
 running the ideal tool call itself). Results: `reports/chat_eval.md` and
-`reports/chat_eval.json`. A run costs about 1 to 2 USD.
+`reports/chat_eval.json`. A run costs about 1 to 2 USD (the first, in
+process on 26 October, cost 0.34 USD).
+
+From a Claude Code cloud session the run against the URL needs the Function
+URL's host in the environment's Allowed domains (Network access): the
+default policy refuses `*.lambda-url.eu-central-1.on.aws`, and
+`scout-session-sync` may not invoke the function directly. Without it, use
+`--local` (the same code and files, not the deployed function) and run the
+URL check from elsewhere.
 
 ## Retraining (manual, never in the weekly run)
 
