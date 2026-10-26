@@ -681,11 +681,11 @@ Settle them with the owner rather than guessing.
   separate key in its own Console workspace with a 10 USD monthly limit is
   recommended (docs/DEPLOY.md). If the account's Lambda concurrency limit is
   10, reserved concurrency 2 fails until Service Quotas raises it.
-* The page published on 25 October (built 25 October; seen on 26 October)
-  says 2,726 written reports and 8 by rule, and 26 of the 50 judged
-  faithful: a run after prompt 19b passed the check for nearly every player,
-  and the judge's 26 of 50 is the owner's to read (`judge/agreement.csv`).
-  Not checked against that run's log.
+* The page published by weekly run 9 (25 October, started by hand after
+  prompt 19b; seen on 26 October) says 2,726 written reports and 8 by rule,
+  and 26 of the 50 judged faithful: the 19b fix let nearly every report pass
+  the check, and the judge's 26 of 50 is the owner's to read
+  (`judge/agreement.csv`). Its cost and its log were not read here.
 
 * `SCOUTING.md` does not exist; the scouting decisions are in the docstring of
   `src/scout/scouting.py` and the numbers in MODELS.md.

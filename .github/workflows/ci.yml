@@ -52,7 +52,7 @@ jobs:
       - run: uv run pytest -m contract
 
   infra-tests:
-    # The CDK app (the ScoutSite stack) has its own environment
+    # The CDK app (the ScoutSite and ScoutChat stacks) has its own environment
     # (infra/pyproject.toml), so its dependencies never change the versions
     # the data code runs on. The retired stacks in infra/archive are not tested.
     runs-on: ubuntu-latest
