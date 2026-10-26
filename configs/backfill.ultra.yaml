@@ -169,8 +169,8 @@ reports_text:
     claude-sonnet-5-5: {input: 2.00, output: 10.00}
 
 # The Ask tab (prompt 20, decision 11): the Function URL of the ScoutChat
-# stack (its ChatUrl output, docs/DEPLOY.md). Empty until the stack is
-# deployed; the tab then says the chat is not switched on.
+# stack (its ChatUrl output, docs/DEPLOY.md), deployed 26 October 2026.
+# Without it the tab says the chat is not switched on.
 chat:
-  url: null
+  url: https://j4qelz4n2krm774v77b5qee23m0dcexb.lambda-url.eu-central-1.on.aws/
   site_url: http://scout-site-098499087060.s3-website.eu-central-1.amazonaws.com/
