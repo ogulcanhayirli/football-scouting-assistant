@@ -278,3 +278,31 @@ def test_publish_keeps_the_reports_best_effort(tmp_path):
     assert not [k for b, k in s3.objects if k.startswith(REPORTS_PREFIX)]
     (reports / "secrets.txt").write_bytes(b"x")  # only the known files are ever kept
     assert keep_reports(FakeS3(), "data-bucket", reports) == []
+
+
+def test_the_ask_tab_is_off_without_a_chat_url():
+    data = _data()
+    assert data["chat"] == {"url": None}
+    html = render(data)
+    assert 'id="tab-ask"' in html
+    assert "Answers are built only from the tables shown on this page." in html
+    assert "The chat is not switched on yet." in html
+
+
+def test_the_ask_tab_gets_the_url_and_the_caps_from_the_config():
+    from types import SimpleNamespace
+
+    from scout.config import ChatConfig
+    from scout.site import chat_block
+
+    url = "https://abc.lambda-url.eu-central-1.on.aws/"
+    block = chat_block(SimpleNamespace(chat=ChatConfig(url=url)))
+    assert block == {"url": url, "model": "Claude Sonnet 5.5", "max_chars": 500, "per_hour": 20}
+    html = render({**_data(), "chat": block})
+    payload = json.loads(
+        re.search(r'id="data">(.*?)</script>', html, re.S).group(1).replace("<\\/", "</")
+    )
+    assert payload["chat"]["url"] == url
+    # The page posts the question with the last few turns and shows the tool results.
+    assert "fetch(D.chat.url" in html
+    assert "From the tables (" in html

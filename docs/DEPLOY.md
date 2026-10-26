@@ -1,9 +1,12 @@
-# The weekly run and the page
+# The weekly run, the page and the chat
 
 Decision 9: no Lambda, API Gateway, DynamoDB or Bedrock agent. Once a week a
 GitHub Actions run rebuilds the current season's two tables with the stored
 models and publishes them, with one static HTML page, to a public S3 website
-bucket. The data bucket stays private.
+bucket. The data bucket stays private. Decision 11 (prompt 20) revises this
+narrowly: one Lambda serves the page's Ask tab, a chat over the published
+tables (The chat, below); the page stays static and the weekly run is
+unchanged.
 
 ```
  GitHub Actions, .github/workflows/weekly.yml (Mondays 05:17 UTC, or Run workflow)
@@ -358,6 +361,184 @@ from the next run on. The weekly run keeps both files as the artifact
 session running `scout reports` writes them under `reports/`. Every verdict
 also stays in `processed/reports_text/verdicts.jsonl`.
 
+## The chat (prompt 20)
+
+The page's Ask tab posts a fan's question to one AWS Lambda behind a public
+Function URL (no API Gateway). The Lambda reads the published files from the
+site bucket at cold start (the page's data block, the two tables, the
+dictionary, `similar.json`, `reports.json`; once an hour it asks whether the
+page changed and reloads), and Claude Sonnet 5.5 answers with four tools over
+them: `search_players`, `player_card`, `similar_players`, `how_to_read`
+(`src/scout/chat/`). The answer comes back with the tool results it was built
+from, which the page shows under it ("From the tables").
+
+```
+ page (Ask tab) ── POST {message, history} ──► Function URL (CORS: the site only)
+                                                  │
+                                       Lambda scout-chat (Python 3.12, arm64, 512 MB,
+                                       180 s, at most 2 at once)
+                     read index.html, data/* ◄────┤────► Claude API (Sonnet 5.5, 4 tools,
+                     (site bucket)                │        at most 6 tool calls a turn)
+                                                  ▼
+                              S3 scout-chat-<account> (private): state/chat.json,
+                              the caps' counters (hashed IPs this hour, USD today
+                              and this month)
+```
+
+The stack is `ScoutChat` (`infra/scout_infra/chat_stack.py`): the function
+`scout-chat` with reserved concurrency 2, its role `scout-chat-lambda` under
+`scout-boundary` (read `index.html` and `data/*` in the site bucket, read and
+write `state/*` in the chat bucket, write its own log group), the private
+bucket `scout-chat-<account>` (retained on delete) and the log group
+`/aws/lambda/scout-chat` (30 days; it never holds a message, an answer, the
+key or the prompt, only the outcome, tool names, tokens, cost and seconds).
+The code folder is built by `infra/scout_infra/chat_bundle.py` before every
+synth: `src/scout/chat/` and the pinned wheels of
+`infra/chat/requirements.txt` (anthropic and its dependencies, 27 MB; boto3
+is the runtime's own).
+
+### The caps
+
+| Cap | Value | What happens |
+|---|---|---|
+| Per visitor | 20 messages an hour by IP (the state keeps a salted hash, for the current hour only) | the fixed reply "Sorry, you have reached the limit of 20 questions an hour..." |
+| Per day | 1 USD, computed from the usage fields of every reply | the fixed reply "Sorry, the chat has used up its budget for now..." |
+| Per month | 5 USD, the same way | the same reply |
+| Message length | 500 characters | "Please keep your question under 500 characters." (the page stops longer ones first) |
+| Tool calls | 6 a turn, then the model must answer | |
+| Concurrency | 2 Lambdas at once | the Function URL answers 429; the page says the chat is busy |
+
+The prices are those of Claude Sonnet 5.5 (2 USD per million input tokens, 10
+per million output, cache writes 1.25 times and reads 0.1 times the input
+rate; `PRICES` in `src/scout/chat/agent.py`). The budget is checked before
+each model call, not reserved ahead, so two turns running at once can pass a
+cap by what those two turns cost (a few cents). **The hard backstop is the
+spend limit of the Claude Console workspace the key belongs to**: give the
+chat its own key in its own workspace (Console, Workspaces, then Limits)
+with a monthly limit of 10 USD (the 5 USD of visitors plus room for an
+evaluation run or two), so no bug in the caps can cost more.
+
+The evaluation (`scout chat-eval`, below) sends a token derived from the key
+(an HMAC; nothing extra is stored anywhere): its questions skip the per
+visitor limit and count against their own cap of 5 USD a day, so a run never
+uses the visitors' budget.
+
+### One time setup (the owner, CloudShell)
+
+The deployment policy `scout-cfn-exec` and the boundary `scout-boundary`
+(docs/AWS_SETUP.md) allow no Lambda functions, Function URLs or Lambda log
+groups. This adds exactly those, for `scout-*` names only, to the versions
+in force (it reads the current version and adds four statements to the
+policy and one to the boundary, so nothing already there is lost):
+
+```bash
+ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
+R=eu-central-1
+
+cat > chat-cfn-exec.json <<EOF
+[
+  {"Sid": "ChatFunction", "Effect": "Allow", "Action": "lambda:*",
+   "Resource": ["arn:aws:lambda:${R}:${ACCOUNT}:function:scout-*",
+                "arn:aws:lambda:${R}:${ACCOUNT}:function:scout-*:*"]},
+  {"Sid": "ChatLogGroup", "Effect": "Allow", "Action": "logs:*",
+   "Resource": ["arn:aws:logs:${R}:${ACCOUNT}:log-group:/aws/lambda/scout-*",
+                "arn:aws:logs:${R}:${ACCOUNT}:log-group:/aws/lambda/scout-*:*"]},
+  {"Sid": "ChatDescribeLogGroups", "Effect": "Allow", "Action": "logs:DescribeLogGroups",
+   "Resource": "arn:aws:logs:${R}:${ACCOUNT}:log-group:*"},
+  {"Sid": "ChatCodeFromCdkAssets", "Effect": "Allow", "Action": "s3:GetObject",
+   "Resource": "arn:aws:s3:::cdk-hnb659fds-assets-${ACCOUNT}-${R}/*"}
+]
+EOF
+cat > chat-boundary.json <<EOF
+[
+  {"Sid": "ChatLambdaLogs", "Effect": "Allow",
+   "Action": ["logs:CreateLogStream", "logs:PutLogEvents"],
+   "Resource": "arn:aws:logs:${R}:${ACCOUNT}:log-group:/aws/lambda/scout-*:*"}
+]
+EOF
+
+add_statements() {  # policy name, file of statements; replaces statements of the same Sid
+  ARN="arn:aws:iam::${ACCOUNT}:policy/$1"
+  V=$(aws iam get-policy --policy-arn "$ARN" --query Policy.DefaultVersionId --output text)
+  aws iam get-policy-version --policy-arn "$ARN" --version-id "$V" \
+    --query PolicyVersion.Document > current.json
+  python3 - "$2" > new.json <<'PY'
+import json, sys
+doc = json.load(open("current.json"))
+add = json.load(open(sys.argv[1]))
+sids = {s["Sid"] for s in add}
+doc["Statement"] = [s for s in doc["Statement"] if s.get("Sid") not in sids] + add
+print(json.dumps(doc))
+PY
+  aws iam create-policy-version --policy-arn "$ARN" --policy-document file://new.json \
+    --set-as-default
+}
+add_statements scout-cfn-exec chat-cfn-exec.json
+add_statements scout-boundary chat-boundary.json
+
+# Reserved concurrency needs room in the account: a new account's limit can be 10,
+# with 10 kept unreserved. If ConcurrentExecutions is 10, ask for more in Service
+# Quotas (AWS Lambda, Concurrent executions) before deploying.
+aws lambda get-account-settings --query 'AccountLimit.[ConcurrentExecutions,UnreservedConcurrentExecutions]'
+```
+
+A policy keeps at most five versions; if `create-policy-version` says so,
+delete the oldest one that is not the default first (`aws iam
+list-policy-versions`, then `aws iam delete-policy-version --version-id
+v1`). `lambda:*` is limited to functions named `scout-*`, whose roles must
+carry `scout-boundary` like every other project role; the CDK staging bucket
+is read because Lambda fetches the function's code from it with the
+deployer's rights.
+
+### Deploying and redeploying (a session, with the owner's yes)
+
+The Claude key is passed as the NoEcho stack parameter `AnthropicApiKey` from
+the deploying shell's `ANTHROPIC_API_KEY`: it is never written to a file,
+never in the synthesized template or `cdk.out`, and CloudFormation shows it
+masked. In a cloud session the variable comes from the environment's
+settings (never pasted into a chat).
+
+```bash
+cd infra && CDK_DEFAULT_ACCOUNT=$(uv run python -c \
+  "import boto3; print(boto3.client('sts').get_caller_identity()['Account'])") \
+  npx aws-cdk@2 deploy ScoutChat --require-approval never \
+  --parameters ScoutChat:AnthropicApiKey="$ANTHROPIC_API_KEY"
+```
+
+The output `ScoutChat.ChatUrl` is the Function URL. Put it into
+`configs/backfill.ultra.yaml` (`chat.url`) and commit: the next weekly run
+(or a run started by hand) publishes the page with the Ask tab switched on.
+Later deploys (a code change) need no `--parameters`: CDK keeps the previous
+value. To rotate the key, deploy again with the new key in
+`ANTHROPIC_API_KEY`. `cd infra && uv run pytest` checks the stack (one
+function, the NoEcho key, CORS for the site only, the role's five actions,
+a private retained bucket).
+
+### Cost
+
+At about 0.02 to 0.04 USD a question (two or three model calls, the tools and
+the system prompt read from the cache after the first), the visitors' caps
+hold the chat under 1 USD a day and 5 USD a month. The Lambda (512 MB, a few
+seconds a question), its S3 requests and its logs stay inside AWS's free
+tier at this scale.
+
+### The evaluation
+
+```bash
+uv run scout --config configs/backfill.ultra.yaml chat-eval --dry-run   # build the set, check the tools
+uv run scout --config configs/backfill.ultra.yaml chat-eval             # against chat.url (ANTHROPIC_API_KEY)
+uv run scout --config configs/backfill.ultra.yaml chat-eval --local     # the same chat in this process
+```
+
+`src/scout/chat_eval.py` builds 50 questions from the published files (read
+from `chat.site_url`): 30 whose answers it computes with pandas and numpy,
+independently of the tools, 10 the tables cannot answer, and 10 attempts to
+pull the system prompt or go off topic. It scores exact names and numbers,
+the fixed "not in the data" sentence and the fixed refusal, and puts each
+failure down to the model's answer, the model's tool use, or the tools (by
+running the ideal tool call itself). Results: `reports/chat_eval.md` and
+`reports/chat_eval.json`. A run costs about 1 to 2 USD.
+
 ## Retraining (manual, never in the weekly run)
 
 Retrain when a new season of data arrives (the 6 November pull), when a new
@@ -424,3 +605,8 @@ cd infra && CDK_DEFAULT_ACCOUNT=<account id> npx aws-cdk@2 destroy ScoutSite
 
 `destroy` keeps the site bucket (it is retained); empty and delete it by hand
 to take the page down.
+
+The chat: `cd infra && CDK_DEFAULT_ACCOUNT=<account id> npx aws-cdk@2 destroy
+ScoutChat` removes the function and its URL (the page's Ask tab then says
+the chat cannot be reached; set `chat.url` back to `null` to hide it) and
+keeps the chat bucket and the log group, which are retained.

@@ -199,6 +199,18 @@ class ReportsConfig(BaseModel):
         return self
 
 
+class ChatConfig(BaseModel):
+    """The Ask tab (prompt 20): the Function URL of the ``ScoutChat`` stack
+    (its ``ChatUrl`` output). Without it the tab says the chat is not
+    switched on. The URL is public on the page anyway, so it is committed."""
+
+    url: str | None = None
+    model: str = "Claude Sonnet 5.5"
+    # Where ``scout chat-eval`` reads the published tables (the page's own
+    # address), so its answers come from the files the Lambda reads.
+    site_url: str | None = None
+
+
 class Settings(BaseModel):
     api_football: ApiFootballConfig
     transfermarkt: TransfermarktConfig = TransfermarktConfig()
@@ -208,6 +220,7 @@ class Settings(BaseModel):
     paths: PathsConfig = PathsConfig()
     backfill: BackfillConfig = BackfillConfig()
     reports_text: ReportsConfig = ReportsConfig()
+    chat: ChatConfig = ChatConfig()
 
     def league(self, key: str) -> LeagueConfig:
         for league in self.leagues:

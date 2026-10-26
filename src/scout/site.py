@@ -24,6 +24,10 @@
 * ``statsbomb-logo.png``: the logo the StatsBomb user agreement asks every
   published analysis of its data to carry, written only with the greats
   (no greats are shown without it);
+* the Ask tab (prompt 20): the chat's Function URL (``chat.url`` of the
+  config) and its caps, for the page to call; without a URL the tab says the
+  chat is not switched on. The chat Lambda reads this page's data block and
+  the downloads, never anything else (``scout.chat.data``);
 * ``data/reports.json`` (prompt 19): each player's written report when the
   stored one (``scout reports``) still matches today's fact sheet, else his
   template explanation, with the label the panel shows under it; loaded
@@ -212,6 +216,7 @@ def page_data(
     tracked: int,
     greats: bool = False,
     reports: dict | None = None,
+    chat: dict | None = None,
 ) -> dict:
     """Everything the page shows, as plain JSON values."""
     season = int(cand["season"].max())
@@ -241,6 +246,7 @@ def page_data(
         "tracked": tracked,
         "greats": greats,
         "reports": {k: v for k, v in (reports or {"available": False}).items() if k != "rows"},
+        "chat": chat or {"url": None},
         "candidates": _records(cand, [*CANDIDATE_COLUMNS, "flag_keys"]),
         "bargains": _records(barg, [*BARGAIN_COLUMNS, "flag_keys"]),
         "dictionary": _records(words, ["table", "column", "meaning"]),
@@ -439,6 +445,18 @@ def similar_data(
     }
 
 
+def chat_block(settings) -> dict:
+    """What the Ask tab needs: the URL, the model's name and the caps it shows."""
+    from scout.chat.guard import CAPS
+
+    return {
+        "url": settings.chat.url,
+        "model": settings.chat.model,
+        "max_chars": CAPS.max_chars,
+        "per_hour": CAPS.messages_per_hour,
+    }
+
+
 def render(data: dict, template: Path = TEMPLATE) -> str:
     """The page: the template with the data as a JSON script block. ``</`` is
     escaped so no text in the tables can end the block."""
@@ -491,6 +509,7 @@ def build_site(
         tracked=len(settings.leagues),
         greats=greats_ready,
         reports=reports,
+        chat=chat_block(settings),
     )
     out_dir.mkdir(parents=True, exist_ok=True)
     page = out_dir / "index.html"

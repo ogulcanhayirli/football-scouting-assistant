@@ -365,6 +365,24 @@ def cmd_reports(settings: Settings, args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_chat_eval(settings: Settings, args: argparse.Namespace) -> int:
+    import json
+
+    from scout.chat_eval import run
+
+    summary = run(
+        settings,
+        url=args.url,
+        site=args.site,
+        local=args.local,
+        dry_run=args.dry_run,
+        workers=args.workers,
+        only=args.only,
+    )
+    print(json.dumps(summary, indent=1, ensure_ascii=False))
+    return 0
+
+
 def cmd_forecast(settings: Settings, args: argparse.Namespace) -> int:
     from scout import forecast
 
@@ -814,6 +832,29 @@ def main(argv: list[str] | None = None) -> int:
         help="Build the fact sheets and estimate the run's tokens and cost; no request is sent",
     )
     rep.set_defaults(func=cmd_reports)
+
+    ce = sub.add_parser(
+        "chat-eval",
+        help="The chat's evaluation (prompt 20): 30 questions computed from the published "
+        "tables, 10 the tables cannot answer, 10 attempts to pull the prompt or go off topic; "
+        "posted to the chat URL with the evaluation token (needs ANTHROPIC_API_KEY); "
+        "reports/chat_eval.md",
+    )
+    ce.add_argument("--url", help="the chat's Function URL (default: chat.url of the config)")
+    ce.add_argument("--site", help="the published page, a URL or a folder (default: chat.site_url)")
+    ce.add_argument(
+        "--local", action="store_true", help="run the chat in this process instead of the URL"
+    )
+    ce.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="build the set and check the ideal tool calls locally; no model is called",
+    )
+    ce.add_argument("--workers", type=int, default=2, help="questions in flight (default 2)")
+    ce.add_argument(
+        "--only", nargs="+", choices=["computed", "unanswerable", "adversarial"], default=None
+    )
+    ce.set_defaults(func=cmd_chat_eval)
 
     fc = sub.add_parser(
         "forecast",

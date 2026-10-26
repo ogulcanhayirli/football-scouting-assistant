@@ -29,6 +29,14 @@ filters on age, league and ability) and "looks like he did at an age"
 (Rodri at 21 against today's players aged 20 to 22). Similar means the
 same way of playing with the level taken out, not the same level.
 
+An **Ask** tab (prompt 20, a prototype) answers questions in plain words
+("who is the youngest centre back with an elite chance of 30%?", "who plays
+like Lionel Messi at 21?"): Claude Sonnet 5.5 looks the answer up in the
+published tables with four tools, and every answer shows the tool results it
+was built from. It answers only from the tables on the page, says so plainly
+when they cannot answer, and is capped at 20 questions an hour per visitor,
+1 USD a day and 5 USD a month.
+
 The emphasis is on honest evaluation: strict point in time features, season
 by season backtests, a simple baseline reported next to every model, and
 chances shown as the rates that past forecasts actually achieved.
@@ -54,6 +62,7 @@ chances shown as the rates that past forecasts actually achieved.
 | Measured greats (`scout greats`, prompts 18b and 18c) | Done 25 October 2026: StatsBomb open data (La Liga 2004/05 to 2020/21, Premier League 2003/04, 2.83 GB) mapped to our match table and checked against API Football (tackles and interceptions agree at 0.63 and 0.68 per match and are kept, the owner's call on the identity test); Barcelona's old seasons corrected for the thin peer group (the same player found 55.1% of the time on 2016/17 to 2020/21 against 28.6% uncorrected); 23 greats by age against today's players, with the calibrated elite chance, in a page tab at the next publish |
 | Archetypes (`scout archetypes`, prompt 18c) | Drafted 25 October 2026, awaiting the owner's review: eight legends from the historical record (Cruyff, Gullit, Rio Ferdinand, Maldini, Zidane, Ronaldo Nazário, Baresi, Pirlo) searched among today's players; a calibration on six players we can measure lands within 15 points on half the traits (28% for a draft of 50 everywhere), so they are labelled illustrative only |
 | Scout reports (`scout reports`, prompt 19) | Built 25 October 2026: Claude Haiku 5.5 writes about 130 words per player from a fact sheet of the table columns (Message Batches API, cached prefix, rewritten only when the facts change), code checks every number and name against the sheet (two retries, then the explanation written by rule; a templated player is retried on the next run once), Claude Sonnet 5.5 judges 50 a week. The first real run (25 October) cost 1.41 USD and sent 94% of the players to the template, nearly all for running over 150 words; prompt 19b fixed the length handling (90 to 170 words pass, an example report, the cut stated on a retry), and the next weekly run is its real test (about 0.65 USD expected) |
+| Chat over the tables (Ask tab, `ScoutChat`, prompt 20) | Built 26 October 2026: one Lambda behind a Function URL, Claude Sonnet 5.5 with four strict tools over the published files, the caps in a small S3 object, an Ask tab on the page. Not deployed yet: the deploy waits for the owner's yes, two IAM policy updates (docs/DEPLOY.md) and a session that holds `ANTHROPIC_API_KEY`; the evaluation (50 questions) runs right after it |
 | Free tier update of the current season | Not started: prompt 4, from 6 November; the weekly run skips it until its config exists |
 | Glue and Athena, Feature Store, SageMaker training stacks | Retired by decision 9, code in `infra/archive/`; still deployed until the owner removes them |
 
@@ -78,15 +87,22 @@ chances shown as the rates that past forecasts actually achieved.
                          data/similar.json (the similar players panel, the measured
                          greats and the archetypes, loaded on demand),
                          statsbomb-logo.png (with the greats)
+                                   │ read at cold start
+                                   ▼
+ Ask tab ── POST ──► Lambda scout-chat (Function URL, 2 at once) ──► Claude API
+                     caps in S3 scout-chat-<account> (private)       (Sonnet 5.5, 4 tools)
 ```
 
-Deliberately small: one scheduled job and one static page, no servers. The
-site bucket is the only public resource; it holds the two tables, the
+Deliberately small: one scheduled job and one static page, plus one Lambda
+for the Ask tab (decision 11, prompt 20, which revises decision 9 for the
+chat only). The site bucket and the chat's Function URL are the only public
+resources; the site bucket holds the two tables, the
 dictionary, the similar players file and, with the measured greats, the
 StatsBomb logo its data agreement asks for, and nothing else (`scout publish`
 refuses any other file). The
-only infrastructure code is the `ScoutSite` CDK stack in `infra/`, which
-creates that bucket; the earlier analysis stacks are archived in
+infrastructure code is two CDK stacks in `infra/`: `ScoutSite`, which
+creates that bucket, and `ScoutChat`, the chat's function, its role, its
+private state bucket and log group; the earlier analysis stacks are archived in
 `infra/archive/` with a note on why. Setup, secrets, the IAM policy and the
 cost: [docs/DEPLOY.md](docs/DEPLOY.md).
 
@@ -120,13 +136,16 @@ src/scout/
   greats.py, greats_check.py  the measured greats from StatsBomb open data; the check against API Football
   archetypes.py             archetypes from the record: files checked, level free vectors, calibration
   site.py, site_template.html   the static page
+  chat/                     the Ask tab's chat: data, tools, prompt, guard (caps), agent, handler
+  chat_eval.py              the chat's evaluation (scout chat-eval)
   publish.py, sync.py       the weekly upload; copying data to and from S3
   cli.py                    `scout <command>`
 archetypes/                 legends/ and calibration/: one YAML file per player, drafted, for the owner to edit
 configs/                    backfill.ultra.yaml (current), free, pro, expansion
 forecasts/<date>/           registered forecasts (committed)
-infra/                      ScoutSite CDK stack (own uv environment); archive/ holds the retired stacks
-docs/DEPLOY.md              the weekly run: setup, secrets, IAM policy, cost, retraining
+infra/                      ScoutSite and ScoutChat CDK stacks (own uv environment); chat/requirements.txt
+                            the chat Lambda's pinned wheels; archive/ holds the retired stacks
+docs/DEPLOY.md              the weekly run and the chat: setup, secrets, IAM policy, caps, cost, retraining
 docs/AWS_SETUP.md           one time account setup that lets a session deploy, narrowly
 FEATURES.md, MODELS.md, FEASIBILITY.md   data dictionary, models and results, feasibility check
 tests/unit, tests/contracts, tests/fixtures (synthetic sample)
@@ -183,6 +202,10 @@ $C greats                 # mapping check, the peer group correction and its tes
 # Registered forecasts
 $C forecast freeze        # copy today's lists into forecasts/<date>; never overwrites
 $C forecast score forecasts/2026-10-21 --as-of 2027-06-30
+
+# The chat (prompt 20; deploying it is in docs/DEPLOY.md)
+$C chat-eval --dry-run    # the 50 questions from the published tables, the tools checked against them
+$C chat-eval              # the questions against chat.url (needs ANTHROPIC_API_KEY), reports/chat_eval.md
 ```
 
 Uploading to S3 (`sync up`) and deploying a stack need the owner's yes
@@ -238,6 +261,13 @@ exception.
   passes, and so does an ordinary word that opens a sentence. The weekly
   judge (Claude Sonnet 5.5, 50 reports) reads the meaning; the owner checks
   the judge on 20 of them (MODELS.md, docs/DEPLOY.md).
+* **The chat is a prototype, measured on 50 questions.** Its answers come
+  only from the published tables, through four tools, and every number in
+  an answer must come from a tool result; code blocks an answer that repeats
+  its rules. The evaluation that decides whether it works (30 questions with
+  answers computed from the tables, 10 the tables cannot answer, 10 attempts
+  to pull the prompt or go off topic) runs right after the first deploy;
+  its pass rates go here.
 * **The page is plain HTTP.** S3 website hosting has no HTTPS, and
   CloudFront is left out on purpose; the page holds public tables only.
 
@@ -412,7 +442,8 @@ Nothing runs between the weekly runs, so nothing costs anything then. Its
 IAM user may read the processed tables and write only `processed/lists/`
 and the site bucket. *Would change if* the tables needed answers between
 runs (a chat over the tables is a version 2 direction) or HTTPS became a
-requirement (CloudFront in front of the same bucket).
+requirement (CloudFront in front of the same bucket). Revised narrowly by
+D25: one Lambda for the chat.
 
 **D21. Score with stored models; retrain by hand.** The models that score
 the newest season are saved when they are trained (LightGBM's text format
@@ -473,3 +504,21 @@ archetypes illustrative only and labels every result "archetype from the
 record, not measured". *Would change if* a second blind draft of the
 calibration players (by someone who has not seen the measured table)
 landed within 15 points on most traits.
+
+**D25. A capped chat over the published tables, one Lambda (decision 11,
+prompt 20).** The Ask tab sends a question to one AWS Lambda behind a
+Function URL; Claude Sonnet 5.5 (effort medium) answers with four strict
+tools over the very files the page publishes (search, one player's card with
+his written report, similar players with the "like him at an age" form,
+what a column means and cannot tell), at most six tool calls a turn, and
+the answer carries the tool results it was built from. The system prompt
+gives the data's dates, makes every number come from a tool result, opens
+an unanswerable question with "The tables on this page do not answer that."
+and refuses anything off topic with one fixed sentence; code replaces an
+answer that repeats ten words of the rules. Caps: 20 messages an hour per
+IP (hashed), 1 USD a day and 5 USD a month from the usage fields, 500
+characters, reserved concurrency 2, and the Claude Console workspace's
+spend limit as the hard backstop. Decision 9 is revised for the chat only:
+the page stays static and the weekly run is unchanged. *Would change if*
+the evaluation's pass rates fell short (the chat then stays off the page),
+or the visitors' use outgrew the caps.

@@ -213,6 +213,29 @@ tr.sim td { padding: 0 10px 12px; }
 #ar-card .query { color: var(--muted); font-size: 13px; margin: 0 0 8px; }
 #ar-card .sources { margin: 8px 0 0; padding-left: 18px; color: var(--muted); font-size: 13px; }
 .credit img, footer img.logo { height: 26px; vertical-align: middle; background: #fff; padding: 3px 6px; border-radius: 6px; margin-right: 8px; }
+.ask-line { color: var(--muted); font-size: 13.5px; margin: 0 0 12px; max-width: 100ch; }
+#ask-log { display: grid; gap: 10px; margin: 0 0 12px; }
+.msg { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; box-shadow: var(--shadow); max-width: 100ch; }
+.msg.you { background: var(--accent-soft); border-color: transparent; justify-self: end; }
+.msg .who { font-size: 11.5px; color: var(--faint); margin-bottom: 3px; }
+.msg p { margin: 0 0 8px; }
+.msg p:last-child { margin-bottom: 0; }
+.msg.capped { background: var(--warn-soft); color: var(--warn); border-color: transparent; }
+details.from { margin-top: 8px; border-top: 1px solid var(--line); padding-top: 6px; font-size: 13px; }
+details.from summary { cursor: pointer; color: var(--muted); }
+details.from h4 { font-size: 12.5px; margin: 10px 0 2px; }
+details.from .args { color: var(--faint); margin: 0 0 4px; }
+details.from ol { margin: 4px 0; padding-left: 20px; }
+details.from li { margin: 3px 0; }
+dl.kv { margin: 0; display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 2px 10px; }
+dl.kv dt { color: var(--faint); }
+dl.kv dd { margin: 0; }
+.kv .k { color: var(--faint); }
+#ask-form { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: end; }
+#ask-form textarea { font: inherit; width: 100%; min-height: 3.2em; resize: vertical; border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; background: var(--panel); color: var(--ink); }
+#ask-form button { font: inherit; border: 1px solid var(--accent); background: var(--accent); color: var(--panel); border-radius: 8px; padding: 8px 16px; cursor: pointer; }
+#ask-form button:disabled { opacity: .55; cursor: wait; }
+#ask-count { font-size: 12px; color: var(--faint); grid-column: 1 / -1; }
 footer { margin-top: 28px; color: var(--muted); font-size: 13px; border-top: 1px solid var(--line); padding-top: 14px; }
 footer p { margin: 6px 0; max-width: 100ch; }
 @media (max-width: 760px) {
@@ -261,6 +284,7 @@ footer p { margin: 6px 0; max-width: 100ch; }
     <button class="tab" role="tab" id="tab-similar" data-tab="similar">Similar players</button>
     <button class="tab" role="tab" id="tab-greats" data-tab="greats">Measured greats</button>
     <button class="tab" role="tab" id="tab-archetypes" data-tab="archetypes">Archetypes</button>
+    <button class="tab" role="tab" id="tab-ask" data-tab="ask">Ask</button>
   </div>
 
   <div id="tables">
@@ -361,6 +385,18 @@ footer p { margin: 6px 0; max-width: 100ch; }
     <div id="ar-out"></div>
     <div id="ar-card"></div>
     <p class="note" id="ar-note"></p>
+  </section>
+
+  <section id="ask" hidden>
+    <p class="label">Answers are built only from the tables shown on this page.</p>
+    <p class="ask-line" id="ask-line"></p>
+    <div id="ask-log" aria-live="polite"></div>
+    <p class="status" id="ask-status" aria-live="polite"></p>
+    <form id="ask-form">
+      <textarea id="ask-q" maxlength="500" placeholder="for example: who is the youngest centre back with an elite chance of 30%?" aria-label="Your question"></textarea>
+      <button type="submit" id="ask-send">Ask</button>
+      <span id="ask-count">0 / 500</span>
+    </form>
   </section>
 
   <footer id="footer"></footer>
@@ -492,6 +528,7 @@ footer p { margin: 6px 0; max-width: 100ch; }
     similar: location.hash === "#similar",
     greats: location.hash === "#greats",
     archetypes: location.hash === "#archetypes",
+    ask: location.hash === "#ask",
     list: "prime",
     shown: PAGE,
     sort: { candidates: { key: "order", dir: 1 }, bargains: { key: "rank", dir: 1 } }
@@ -623,14 +660,15 @@ footer p { margin: 6px 0; max-width: 100ch; }
   function refresh() { state.shown = PAGE; draw(); }
 
   function tabs() {
-    var on = state.archetypes ? "archetypes" : state.greats ? "greats" : state.similar ? "similar" : state.tab;
+    var on = state.ask ? "ask" : state.archetypes ? "archetypes" : state.greats ? "greats" : state.similar ? "similar" : state.tab;
     document.querySelectorAll(".tab").forEach(function (t) {
       t.setAttribute("aria-selected", String(t.dataset.tab === on));
     });
-    $("tables").hidden = state.similar || state.greats || state.archetypes;
+    $("tables").hidden = state.similar || state.greats || state.archetypes || state.ask;
     $("similar").hidden = !state.similar;
     $("greats").hidden = !state.greats;
     $("archetypes").hidden = !state.archetypes;
+    $("ask").hidden = !state.ask;
   }
 
   // Similar players (prompt 18): data/similar.json, loaded on first use
@@ -828,6 +866,7 @@ footer p { margin: 6px 0; max-width: 100ch; }
     state.similar = true;
     state.greats = false;
     state.archetypes = false;
+    state.ask = false;
     history.replaceState(null, "", "#similar");
     tabs();
     simDraw();
@@ -925,6 +964,7 @@ footer p { margin: 6px 0; max-width: 100ch; }
     state.greats = true;
     state.similar = false;
     state.archetypes = false;
+    state.ask = false;
     history.replaceState(null, "", "#greats");
     tabs();
     $("gr-status").textContent = SIM ? "" : "Loading the measured greats.";
@@ -993,6 +1033,7 @@ footer p { margin: 6px 0; max-width: 100ch; }
     state.archetypes = true;
     state.greats = false;
     state.similar = false;
+    state.ask = false;
     history.replaceState(null, "", "#archetypes");
     tabs();
     $("ar-status").textContent = SIM ? "" : "Loading the archetypes.";
@@ -1005,6 +1046,96 @@ footer p { margin: 6px 0; max-width: 100ch; }
     $("dict-list").innerHTML = words.concat(report).map(function (r) {
       return "<dt>" + esc((r[0] === "reports" ? "report: " : "") + r[1]) + "</dt><dd>" + esc(r[2]) + "</dd>";
     }).join("");
+  }
+
+  // Ask (prompt 20): the chat over these tables, through the Function URL in D.chat
+
+  var chat = { history: [], busy: false };
+  var TURNS = 6;  // earlier messages sent with a question
+
+  function openAsk() {
+    state.ask = true;
+    state.similar = false;
+    state.greats = false;
+    state.archetypes = false;
+    history.replaceState(null, "", "#ask");
+    tabs();
+    var on = D.chat && D.chat.url;
+    $("ask-form").hidden = !on;
+    $("ask-line").textContent = on
+      ? D.chat.model + " looks the answer up in the candidates, bargains, similar players and the written reports with four tools; every number it gives must come from what it looked up, shown under each answer (From the tables). A prototype: at most " + D.chat.max_chars + " characters a question and " + D.chat.per_hour + " questions an hour."
+      : "";
+    if (!on) $("ask-status").textContent = "The chat is not switched on yet.";
+    else $("ask-q").focus();
+  }
+  function paragraphs(text) {
+    return String(text).split(/\n{2,}/).map(function (p) {
+      return "<p>" + esc(p).replace(/\n/g, "<br>") + "</p>";
+    }).join("");
+  }
+  function plain(v) {
+    if (v == null) return "none";
+    if (Array.isArray(v)) return v.map(plain).join("; ");
+    if (typeof v === "object") return Object.keys(v).map(function (k) { return k.replace(/_/g, " ") + " " + plain(v[k]); }).join(", ");
+    return String(v);
+  }
+  function compact(o) {
+    return Object.keys(o).filter(function (k) { return k !== "player_id"; }).map(function (k) {
+      return '<span class="k">' + esc(k.replace(/_/g, " ")) + "</span> " + esc(plain(o[k]));
+    }).join(" · ");
+  }
+  function result(o) {
+    var html = Object.keys(o).filter(function (k) { return k !== "player_id"; }).map(function (k) {
+      var v = o[k];
+      if (Array.isArray(v) && v.length && v[0] && typeof v[0] === "object") {
+        return "<dt>" + esc(k.replace(/_/g, " ")) + "</dt><dd><ol>" + v.map(function (r) { return "<li>" + compact(r) + "</li>"; }).join("") + "</ol></dd>";
+      }
+      if (v && typeof v === "object" && !Array.isArray(v)) return "<dt>" + esc(k.replace(/_/g, " ")) + "</dt><dd>" + compact(v) + "</dd>";
+      return "<dt>" + esc(k.replace(/_/g, " ")) + "</dt><dd>" + esc(plain(v)) + "</dd>";
+    }).join("");
+    return '<dl class="kv">' + html + "</dl>";
+  }
+  function fromTables(results) {
+    if (!results || !results.length) return "";
+    return '<details class="from"><summary>From the tables (' + results.length + " look up" + (results.length > 1 ? "s" : "") + ")</summary>" +
+      results.map(function (r) {
+        return "<h4>" + esc(r.tool.replace(/_/g, " ")) + '</h4><p class="args">' + esc(plain(r.input)) + "</p>" + result(r.result);
+      }).join("") + "</details>";
+  }
+  function say(who, html, cls) {
+    $("ask-log").insertAdjacentHTML("beforeend", '<div class="msg ' + (cls || "") + '"><div class="who">' + esc(who) + "</div>" + html + "</div>");
+  }
+  function sendQuestion(e) {
+    e.preventDefault();
+    var q = $("ask-q").value.trim();
+    if (!q || chat.busy) return;
+    if (q.length > D.chat.max_chars) { $("ask-status").textContent = "Please keep your question under " + D.chat.max_chars + " characters."; return; }
+    chat.busy = true;
+    $("ask-send").disabled = true;
+    $("ask-status").textContent = "Looking it up in the tables.";
+    say("You", paragraphs(q), "you");
+    $("ask-q").value = "";
+    $("ask-count").textContent = "0 / " + D.chat.max_chars;
+    var past = chat.history.slice(-TURNS);
+    fetch(D.chat.url, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ message: q, history: past })
+    }).then(function (r) {
+      if (r.status === 429) throw new Error("busy");
+      return r.json();
+    }).then(function (b) {
+      var answered = b.outcome === "answered";
+      say("Answer", paragraphs(b.answer || "Sorry, no answer came back.") + fromTables(b.tool_results), answered ? "" : "capped");
+      if (answered) chat.history.push({ role: "user", content: q }, { role: "assistant", content: b.answer });
+      $("ask-status").textContent = "";
+    }).catch(function (err) {
+      say("Answer", paragraphs(err && err.message === "busy" ? "The chat is busy with other questions; please try again in a minute." : "The chat could not be reached; please try again in a minute."), "capped");
+      $("ask-status").textContent = "";
+    }).then(function () {
+      chat.busy = false;
+      $("ask-send").disabled = false;
+    });
   }
 
   // The fixed text
@@ -1064,6 +1195,8 @@ footer p { margin: 6px 0; max-width: 100ch; }
       if (t.dataset.tab === "similar") { openSimilar(); return; }
       if (t.dataset.tab === "greats") { openGreats(); return; }
       if (t.dataset.tab === "archetypes") { openArchetypes(); return; }
+      if (t.dataset.tab === "ask") { openAsk(); return; }
+      state.ask = false;
       state.similar = false;
       state.greats = false;
       state.archetypes = false;
@@ -1121,6 +1254,11 @@ footer p { margin: 6px 0; max-width: 100ch; }
   $("ar-name").addEventListener("change", function () { ar.key = $("ar-name").value; arDraw(); });
   ["ar-age-min", "ar-age-max"].forEach(function (id) { $(id).addEventListener("input", arDraw); });
   $("ar-pool").addEventListener("change", arDraw);
+  $("ask-form").addEventListener("submit", sendQuestion);
+  $("ask-q").addEventListener("input", function () { $("ask-count").textContent = $("ask-q").value.length + " / " + ((D.chat && D.chat.max_chars) || 500); });
+  $("ask-q").addEventListener("keydown", function (e) {
+    if (e.key === "Enter" && !e.shiftKey) sendQuestion(e);
+  });
 
   header();
   howto();
@@ -1132,6 +1270,7 @@ footer p { margin: 6px 0; max-width: 100ch; }
   if (state.similar) openSimilar();
   if (state.greats) openGreats();
   if (state.archetypes) openArchetypes();
+  if (state.ask) openAsk();
 })();
 </script>
 </body>
