@@ -465,13 +465,16 @@ What prompt 20b changed (deployed 27 October 2026):
   time the question is typed, and while a question has been out for more
   than 5 seconds the status line says "The first answer can take up to 30
   seconds."
-* **The warm ping, built but not deployed.** `ScoutChat` adds the
+* **The warm ping, deployed 27 October 2026.** `ScoutChat` adds the
   EventBridge rule `scout-chat-warm` (every 5 minutes, `{"warm": true}`, no
   retries; EventBridge invokes through the function's own permission, so no
-  role) when the context value `chatWarmPing` in `infra/cdk.json` is true.
-  It is false: `scout-cfn-exec`, in the versions documented here and in
-  docs/AWS_SETUP.md, allows no EventBridge rules, and the session user may
-  not read the policy to check. The owner's part, in CloudShell:
+  role) when the context value `chatWarmPing` in `infra/cdk.json` is true,
+  as it is since the owner ran the block below (`scout-cfn-exec`, in the
+  versions documented before, allowed no EventBridge rules). Read back after
+  the deploy through the CDK lookup role (the session user may not describe
+  rules itself): `ENABLED`, `rate(5 minutes)`, target `scout-chat`, input
+  `{"warm":true}`, no retries. The owner's part, in CloudShell, kept for a
+  rebuilt account:
 
 ```bash
 ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
@@ -510,10 +513,11 @@ permission for EventBridge falls under the `lambda:*` statement of the chat
 setup below, and the boundary needs nothing (no role). This is the policy's
 fifth version if it was at v4; should `create-policy-version` refuse because
 five exist, delete the oldest that is not the default first (`aws iam
-delete-policy-version --version-id v1`). Then a session sets
-`"chatWarmPing": true` in `infra/cdk.json`, checks that `cdk diff ScoutChat`
-adds only the rule and one Lambda permission, and deploys with the owner's
-yes. Cost: 8,640 pings a month, a few milliseconds each on a warm instance
+delete-policy-version --version-id v1`). Then `"chatWarmPing": true` in
+`infra/cdk.json` (set on 27 October), `cdk diff ScoutChat` shows only the
+rule and one Lambda permission, and the deploy goes ahead with the owner's
+yes. To stop the ping, set it to false and redeploy (the rule is removed;
+`scout-session-sync` deletes nothing itself). Cost: 8,640 pings a month, a few milliseconds each on a warm instance
 (plus a load of 2 or 3 seconds when Lambda recycles it), inside the free
 tier's million requests; EventBridge does not bill a schedule rule's
 events. A ping every 5 minutes keeps one instance warm in practice (AWS

@@ -20,7 +20,8 @@ the page stays static and the weekly run is unchanged.
   EventBridge rule ``scout-chat-warm`` invokes the function every 5 minutes
   with ``{"warm": true}``: it loads the tables and calls no model, so a
   visitor rarely meets a cold start. It needs EventBridge rights in
-  ``scout-cfn-exec`` (docs/DEPLOY.md), so it is off until they are added.
+  ``scout-cfn-exec`` (docs/DEPLOY.md); the owner added them and the app
+  switched it on on 27 October.
 * The Claude key is a NoEcho stack parameter, given at deploy time
   (``--parameters ScoutChat:AnthropicApiKey=...`` from the environment), so
   it is never in the synthesized template, ``cdk.out`` or any other file;

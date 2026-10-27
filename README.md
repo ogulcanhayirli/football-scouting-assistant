@@ -274,10 +274,11 @@ exception.
   in the rules' own words. Both were fixed and redeployed on 27 October
   (prompt 20b), and the same run then passed 30 of 30, 10 of 10 and 10 of
   10 for 0.28 USD (median 3.3 s a question, slowest 6.3 s). The run through
-  the Function URL itself is still to do (CLAUDE.md, Open questions), and
-  so is the 5 minute warm ping, which waits for an EventBridge right in the
-  deploy policy; until then the first question after a quiet spell can take
-  up to about 30 seconds, and the page says so.
+  the Function URL itself is still to do (CLAUDE.md, Open questions). A 5
+  minute warm ping (an EventBridge rule, live since 27 October) and a warm
+  request when the Ask tab opens keep the function loaded, so a visitor
+  rarely waits for a cold start; when one does, the page says the first
+  answer can take up to 30 seconds.
 * **The page is plain HTTP.** S3 website hosting has no HTTPS, and
   CloudFront is left out on purpose; the page holds public tables only.
 

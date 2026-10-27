@@ -3,6 +3,6 @@
   "context": {
     "region": "eu-central-1",
     "sessionUser": "scout-session-sync",
-    "chatWarmPing": false
+    "chatWarmPing": true
   }
 }

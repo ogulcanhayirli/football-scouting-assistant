@@ -80,10 +80,10 @@ def test_the_function(template):
     assert "ReservedConcurrentExecutions" not in fn["Properties"]
 
 
-def test_no_warm_ping_until_the_deploy_policy_allows_it(template):
-    template.resource_count_is("AWS::Events::Rule", 0)
+def test_the_warm_ping_is_switched_on_in_the_app(template):
+    template.resource_count_is("AWS::Events::Rule", 0)  # off unless asked for
     context = json.loads((Path(__file__).parents[1] / "cdk.json").read_text())["context"]
-    assert context["chatWarmPing"] is False  # docs/DEPLOY.md: add the rights, then true
+    assert context["chatWarmPing"] is True  # the owner added the EventBridge rights, 27 October
 
 
 def test_the_warm_ping_invokes_the_function_every_five_minutes(warm_template):

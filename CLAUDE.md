@@ -582,7 +582,7 @@ detail stays in `reports/scouting.md`, `reports/moves.md`,
 * The thin peer group's correction and archetypes for players without data, with a blind calibration: **done 25 October (prompt 18c); the archetypes await the owner's review.**
 * Generated scout reports with a faithfulness check and a weekly judge: **built 25 October (prompt 19); first real run 25 October (94% template, on length); length handling fixed in prompt 19b, the next weekly run tests it.**
 * January window forecast, published mid December and scored in February.
-* A capped chat over the two tables: **built and deployed 26 October (prompt 20)**; evaluated in process (28 of 30, 10 of 10, 10 of 10); the two fixes and a faster cold start redeployed 27 October (prompt 20b: 30 of 30, 10 of 10, 10 of 10); the run against the URL and the warm ping wait for the owner (Open questions).
+* A capped chat over the two tables: **built and deployed 26 October (prompt 20)**; evaluated in process (28 of 30, 10 of 10, 10 of 10); the two fixes, a faster cold start and the 5 minute warm ping deployed 27 October (prompt 20b: 30 of 30, 10 of 10, 10 of 10); the run against the URL waits for the owner (Open questions).
 * A matchup report before any match model.
 
 ## AWS
@@ -627,10 +627,12 @@ parameter `AnthropicApiKey`. Deploying it first needs the owner's two policy
 updates of docs/DEPLOY.md (Lambda, Function URL and Lambda log rights for
 `scout-*` names in `scout-cfn-exec`, Lambda logs in `scout-boundary`).
 Prompt 20b added the EventBridge rule `scout-chat-warm` (every 5 minutes,
-`{"warm": true}`), built but off: `chatWarmPing` in `infra/cdk.json` stays
-false until the owner adds `events:*` on `rule/scout-*` to `scout-cfn-exec`
-(the CloudShell block in docs/DEPLOY.md). Redeployed 27 October 2026 (prompt
-20b) without `--parameters`, so the stored key was kept.
+`{"warm": true}`, no retries), switched on by `chatWarmPing` in
+`infra/cdk.json` once the owner added `events:*` on `rule/scout-*` to
+`scout-cfn-exec` (the CloudShell block in docs/DEPLOY.md). Redeployed three
+times on 27 October 2026 (prompt 20b), always without `--parameters`, so the
+stored key was kept; the rule was read back through the CDK lookup role
+(the session user may not describe rules or stacks itself).
 `ScoutSite`
 (deployed 21 October): the bucket `scout-site-098499087060` with static
 website hosting and public read of objects (not listing), retained on
@@ -702,7 +704,7 @@ Owner decisions of 2026-10-16. Each one line; details in the code and docs once 
 8. Ability score version 2 is built from per 90 stats with minutes shrinkage, without the match rating, and replaces version 1 only if it is more stable year to year and predicts the targets at least as well. Rule set on 19 October: more stable, and elite and step up AUC within 0.005 of version 1 or better; else the most stable version that passes. **Outcome (19 October): adopted.** Stability 0.858 against 0.503, elite AUC 0.881 against 0.880, step up 0.927 against 0.925; `--strength v2` is the default (MODELS.md, `reports/ability.md`).
 9. Serving stack (revised narrowly by decision 11: one Lambda for the chat only): no Lambda, API Gateway, DynamoDB or Bedrock agent; a weekly GitHub Actions run publishes Parquet, CSV and one static HTML page to S3 static hosting. **Built 21 October (prompt 15):** see AWS above and docs/DEPLOY.md; the page is live and the stored models are in S3 (23 October); the weekly run waits for the owner's setup (IAM user, secrets and variables).
 10. Embeddings and similar players (prompt 18, 24 October 2026). Style vectors: the version 2 per 90 inputs and the on pitch shares of the team's shots, dribbles, passes and duels, shrunk by minutes (empirical Bayes per measure and position group, one season), standardised within position group and season, with the level taken out (both ability percentiles regressed out of each measure's mean and spread within position group and season); cosine on them is the baseline. Learned: one hidden layer of 128 to 48 dimensions, InfoNCE with the same player in consecutive seasons as the positive pair and the other players of the same position group and season as negatives, settings chosen on 2021 to 2022, tested on 2023 to 2025 after training to 2022, refit on 2015 to 2025 for `stored/embedding.json`. **Outcome: adopted** (identity retrieval 19.9% against 13.2%, every position group). The replacement check is weak support only (1.52% against 0.65% at random). No vector database: a numpy search over all vectors takes 0.5 ms. MODELS.md, `reports/embeddings.md`.
-11. The chat (prompt 20, 26 October 2026, the owner's prompt). A prototype Ask tab: one AWS Lambda in Python with a Function URL (no API Gateway) in its own stack `ScoutChat`, reading the published files from the site bucket and keeping them in memory; the Claude key as an environment variable set at deploy time from the deploying environment (a NoEcho parameter), never written to a file; reserved concurrency 2, held back on 26 October because the account's Lambda limit is 10 (that limit is the cap until the quota increase is granted; a TODO in `chat_stack.py` restores it). Claude Sonnet 5.5, effort medium, prompt caching on the system prompt and the tool definitions, four strict tools (search_players, player_card, similar_players, how_to_read), at most six tool calls a turn, no streaming. Every number from a tool result; the data's dates in the system prompt; a plain "not in the data" answer when the tables cannot answer. Caps: 20 messages an hour per IP, 1 USD a day and 5 USD a month from the usage fields in a small S3 object, 500 characters, a fixed polite refusal on any cap; the system prompt is never revealed; the Console spend limit is the hard backstop. The page stays static; decision 9 is revised for this Lambda only. An evaluation of 50 questions decides whether the prototype works (`scout chat-eval`). **Built and deployed 26 October; evaluated in process: computed 28 of 30, not in the data 10 of 10, refused 10 of 10, 0.34 USD (Open questions).** **Prompt 20b (27 October, the owner's yes to redeploy):** the filters declared in the order the model writes them, rule 3's sentence out of the leak guard, tool markup never shown, 1,024 MB, the reads during the SDK import, a warm request from the page, and the 5 minute warm ping built but off until `scout-cfn-exec` allows EventBridge rules; in process again: 30 of 30, 10 of 10, 10 of 10, 0.28 USD.
+11. The chat (prompt 20, 26 October 2026, the owner's prompt). A prototype Ask tab: one AWS Lambda in Python with a Function URL (no API Gateway) in its own stack `ScoutChat`, reading the published files from the site bucket and keeping them in memory; the Claude key as an environment variable set at deploy time from the deploying environment (a NoEcho parameter), never written to a file; reserved concurrency 2, held back on 26 October because the account's Lambda limit is 10 (that limit is the cap until the quota increase is granted; a TODO in `chat_stack.py` restores it). Claude Sonnet 5.5, effort medium, prompt caching on the system prompt and the tool definitions, four strict tools (search_players, player_card, similar_players, how_to_read), at most six tool calls a turn, no streaming. Every number from a tool result; the data's dates in the system prompt; a plain "not in the data" answer when the tables cannot answer. Caps: 20 messages an hour per IP, 1 USD a day and 5 USD a month from the usage fields in a small S3 object, 500 characters, a fixed polite refusal on any cap; the system prompt is never revealed; the Console spend limit is the hard backstop. The page stays static; decision 9 is revised for this Lambda only. An evaluation of 50 questions decides whether the prototype works (`scout chat-eval`). **Built and deployed 26 October; evaluated in process: computed 28 of 30, not in the data 10 of 10, refused 10 of 10, 0.34 USD (Open questions).** **Prompt 20b (27 October, the owner's yes to redeploy):** the filters declared in the order the model writes them, rule 3's sentence out of the leak guard, tool markup never shown, 1,024 MB, the reads during the SDK import, a warm request from the page, and the 5 minute EventBridge warm ping (deployed once the owner added the rights to `scout-cfn-exec`); in process again: 30 of 30, 10 of 10, 10 of 10, 0.28 USD.
 
 ## Open questions
 
@@ -714,10 +716,10 @@ Settle them with the owner rather than guessing.
   `SCOUT_CHAT_CLAUDE_KEY`, checked by length only and found in no file of
   `cdk.out`); its Function URL is in `chat.url`, and weekly run 11, started
   by hand, publishes the Ask tab. Prompt 20b (27 October) redeployed it
-  twice with the owner's yes, without `--parameters` (the stored key kept):
-  the two fixes (C06, C11), tool markup never shown, 1,024 MB and the warm
-  request; weekly run 12, started by hand, publishes the page's part. Still
-  open:
+  three times with the owner's yes, always without `--parameters` (the
+  stored key kept): the two fixes (C06, C11), 1,024 MB and the warm request;
+  then tool markup never shown; then the warm ping. Weekly run 12, started
+  by hand, publishes the page's part. Still open:
   * **The run against the URL.** The cloud environment's network policy
     refuses the host `j4qelz4n2krm774v77b5qee23m0dcexb.lambda-url.eu-central-1.on.aws`
     (the proxy answers 403 to CONNECT; still so on 27 October), and
@@ -728,10 +730,11 @@ Settle them with the owner rather than guessing.
     `*.lambda-url.eu-central-1.on.aws`) to the environment's Allowed
     domains, start a new session (the change reaches only new ones) and run
     `scout chat-eval`; or ask one question on the page.
-  * **The warm ping** (prompt 20b): built in `ScoutChat`, off until the owner
-    adds `events:*` on `rule/scout-*` to `scout-cfn-exec` (the CloudShell
-    block in docs/DEPLOY.md); then a session sets `chatWarmPing` to true in
-    `infra/cdk.json` and redeploys with the owner's yes.
+  * **The warm ping** (prompt 20b) is live since 27 October (the owner
+    added the EventBridge rights; the rule read back as enabled every 5
+    minutes). Whether it keeps cold starts away is not measured from a
+    session: the function's logs (`{"outcome": "warm", "cold": ...}`, the
+    `REPORT` lines' `Init Duration`) are the owner's to read.
   * Delete `SCOUT_CHAT_CLAUDE_KEY` from the environment's variables once the
     URL run is done (the deployed function keeps its own copy).
   * Reserved concurrency: the account's Lambda limit is 10, so the stack
