@@ -29,6 +29,7 @@ import io
 import json
 import re
 from array import array
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -216,10 +217,14 @@ class Tables:
 
 
 def load(source: Source) -> Tables:
-    """Read and parse every published file the chat uses."""
+    """Read and parse every published file the chat uses; the six reads run
+    at once (from S3 each is mostly waiting)."""
     version = source.version()
-    meta = page_meta(unpack(source.read(PAGE)).decode("utf-8"))
-    text = {k: unpack(source.read(path)).decode("utf-8") for k, path in FILES.items()}
+    keys = {"page": PAGE, **FILES}
+    with ThreadPoolExecutor(max_workers=len(keys)) as pool:
+        bodies = dict(zip(keys, pool.map(source.read, keys.values()), strict=True))
+    text = {k: unpack(body).decode("utf-8") for k, body in bodies.items()}
+    meta = page_meta(text.pop("page"))
     bargains = parse_csv(text["bargains"])
     rising = _rising_bargains(meta)
     for row in bargains:

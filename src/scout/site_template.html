@@ -1050,8 +1050,21 @@ footer p { margin: 6px 0; max-width: 100ch; }
 
   // Ask (prompt 20): the chat over these tables, through the Function URL in D.chat
 
-  var chat = { history: [], busy: false };
+  var chat = { history: [], busy: false, warmed: false };
   var TURNS = 6;  // earlier messages sent with a question
+  var SLOW_MS = 5000;  // then the status says a first answer can be slow
+
+  // Wakes the chat while the visitor types (prompt 20b): the Lambda loads the
+  // tables and calls no model, so the first question rarely meets a cold start.
+  function warmChat() {
+    if (chat.warmed || !(D.chat && D.chat.url)) return;
+    chat.warmed = true;
+    fetch(D.chat.url, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ warm: true })
+    }).catch(function () {});
+  }
 
   function openAsk() {
     state.ask = true;
@@ -1066,7 +1079,7 @@ footer p { margin: 6px 0; max-width: 100ch; }
       ? D.chat.model + " looks the answer up in the candidates, bargains, similar players and the written reports with four tools; every number it gives must come from what it looked up, shown under each answer (From the tables). A prototype: at most " + D.chat.max_chars + " characters a question and " + D.chat.per_hour + " questions an hour."
       : "";
     if (!on) $("ask-status").textContent = "The chat is not switched on yet.";
-    else $("ask-q").focus();
+    else { warmChat(); $("ask-q").focus(); }
   }
   function paragraphs(text) {
     return String(text).split(/\n{2,}/).map(function (p) {
@@ -1113,6 +1126,9 @@ footer p { margin: 6px 0; max-width: 100ch; }
     chat.busy = true;
     $("ask-send").disabled = true;
     $("ask-status").textContent = "Looking it up in the tables.";
+    var slow = setTimeout(function () {
+      $("ask-status").textContent = "Looking it up in the tables. The first answer can take up to 30 seconds.";
+    }, SLOW_MS);
     say("You", paragraphs(q), "you");
     $("ask-q").value = "";
     $("ask-count").textContent = "0 / " + D.chat.max_chars;
@@ -1125,11 +1141,13 @@ footer p { margin: 6px 0; max-width: 100ch; }
       if (r.status === 429) throw new Error("busy");
       return r.json();
     }).then(function (b) {
+      clearTimeout(slow);
       var answered = b.outcome === "answered";
       say("Answer", paragraphs(b.answer || "Sorry, no answer came back.") + fromTables(b.tool_results), answered ? "" : "capped");
       if (answered) chat.history.push({ role: "user", content: q }, { role: "assistant", content: b.answer });
       $("ask-status").textContent = "";
     }).catch(function (err) {
+      clearTimeout(slow);
       say("Answer", paragraphs(err && err.message === "busy" ? "The chat is busy with other questions; please try again in a minute." : "The chat could not be reached; please try again in a minute."), "capped");
       $("ask-status").textContent = "";
     }).then(function () {

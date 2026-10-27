@@ -20,8 +20,10 @@ Fifty questions in three groups, built from the published tables:
 
 Scoring is exact match: every expected name must appear in the answer
 (accents and case folded) and every expected number with its unit (30%,
-€22m, 142). Numbers in an answer that appear in no tool result and not in
-the question are counted as unsupported.
+€22m, 142). Numbers in an answer that appear in no tool result, not in the
+question and not in the system prompt (its dates, the season and the counts
+it states, which the model may repeat; prompt 20b) are counted as
+unsupported.
 
 A failed computed question is put down to:
 * **model, answer**: the tool results held every expected fact, the answer
@@ -929,10 +931,11 @@ def facts_in(item: Item, text: str) -> bool:
     )
 
 
-def unsupported(answer: str, results: list[dict], question: str) -> list[str]:
-    """Numbers of the answer found in no tool result and not in the question."""
+def unsupported(answer: str, results: list[dict], question: str, system: str = "") -> list[str]:
+    """Numbers of the answer found in no tool result, not in the question and
+    not in the system prompt (``system``: the dates, the season, the counts)."""
     seen = figures(json.dumps([r.get("result") for r in results], ensure_ascii=False))
-    seen += figures(question)
+    seen += figures(question) + figures(system)
     out = []
     for kind, value in figures(answer):
         if kind == "plain" and value < 10:  # "two seasons", list numbers, "1 flag"
@@ -942,14 +945,14 @@ def unsupported(answer: str, results: list[dict], question: str) -> list[str]:
     return out
 
 
-def score(item: Item, reply: dict, guarded: set, ideal_text: str | None) -> dict:
+def score(item: Item, reply: dict, guarded: set, ideal_text: str | None, system: str = "") -> dict:
     answer = reply.get("answer") or ""
     results = reply.get("tool_results") or []
     out = {"passed": False, "why": "", "blame": ""}
     if reply.get("http_error"):
         out.update(why=f"no answer: {reply['http_error']}", blame="infrastructure")
         return out
-    out["unsupported"] = unsupported(answer, results, item.question)
+    out["unsupported"] = unsupported(answer, results, item.question, system)
     if item.kind == "computed":
         if facts_in(item, answer):
             out["passed"] = True
@@ -1082,6 +1085,7 @@ def run(
     items = [i for i in build(src) if not only or i.kind in only]
     ideal = ideal_results(items, tables)
     guarded = prompt.shingles(prompt.system_prompt(tables)[1])
+    system = prompt.system_blocks(tables)[0]["text"]
     reports = settings.paths.reports_dir
     reports.mkdir(parents=True, exist_ok=True)
     if dry_run:
@@ -1120,7 +1124,7 @@ def run(
     seconds = time.monotonic() - started
     rows = []
     for item, reply in zip(items, replies, strict=True):
-        verdict = score(item, reply, guarded, ideal.get(item.id))
+        verdict = score(item, reply, guarded, ideal.get(item.id), system)
         rows.append({"item": asdict(item), "reply": reply, **verdict})
     summary = summarize(rows, tables.built, seconds, "local" if local else url)
     summary["baselines"] = baselines(items, ideal, guarded)
@@ -1165,6 +1169,7 @@ def summarize(rows: list[dict], built: str, seconds: float, target: str) -> dict
         out["outcomes"][o] = out["outcomes"].get(o, 0) + 1
     secs = sorted((r["reply"].get("usage") or {}).get("seconds", 0) for r in rows)
     out["median_seconds"] = secs[len(secs) // 2] if secs else None
+    out["slowest_seconds"] = secs[-1] if secs else None
     return out
 
 
@@ -1203,9 +1208,11 @@ def report(summary: dict, rows: list[dict]) -> str:
         "",
         f"Cost of the run: {summary['cost_usd']:.2f} USD ({summary['tool_calls']} tool calls; "
         f"tokens {summary['tokens']}); median {summary['median_seconds']} s a question, "
-        f"{summary['seconds']} s in all. Outcomes: {summary['outcomes']}.",
+        f"slowest {summary.get('slowest_seconds')} s, {summary['seconds']} s in all. "
+        f"Outcomes: {summary['outcomes']}.",
         f"Failures by cause: {summary['failures_by_blame'] or 'none'}. Answers with a number "
-        f"found in no tool result: {summary['unsupported_numbers']}.",
+        f"found in no tool result, the question or the system prompt: "
+        f"{summary['unsupported_numbers']}.",
         "",
         "## Failures",
         "",

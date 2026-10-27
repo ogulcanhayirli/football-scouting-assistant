@@ -11,6 +11,13 @@ in memory; once an hour the handler asks S3 whether the page changed
 (``HEAD index.html``) and reloads if it did. CORS is the Function URL's own
 setting (the site's origin only), so the handler adds no CORS headers.
 
+A warm request loads the clients and the tables and calls no model and no
+caps (prompt 20b): ``{"warm": true}`` as the event itself (the EventBridge
+ping every 5 minutes, ``chat_stack.py``) or as the body of a POST without a
+message (the page sends one when the Ask tab opens). A cold start costs
+about 3 seconds of CPU at 1,024 MB (6 at 512 MB), most of it importing the
+Claude SDK; the six S3 reads run while it imports.
+
 Environment: ``SITE_BUCKET``, ``STATE_BUCKET``, ``ANTHROPIC_API_KEY`` (set
 at deploy time from a NoEcho stack parameter, never written to a file).
 The logs carry the outcome, the tool names, tokens, cost and seconds, never
@@ -24,9 +31,10 @@ import json
 import logging
 import os
 import time
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
-from scout.chat import data, prompt
+from scout.chat import data, prompt, tools
 from scout.chat.agent import Assistant, Turn
 from scout.chat.guard import Guard, S3Store, is_eval
 
@@ -41,28 +49,38 @@ EVAL_HEADER = "x-scout-eval"
 _state: dict[str, Any] = {}
 
 
-def _clients() -> tuple[Any, Any]:
+def _s3() -> Any:
     if "s3" not in _state:
-        import anthropic
         import boto3
 
         _state["s3"] = boto3.client("s3")
+    return _state["s3"]
+
+
+def _claude() -> Any:
+    """One client per instance, reused by every turn (its connections too)."""
+    if "claude" not in _state:
+        import anthropic
+
         _state["claude"] = anthropic.Anthropic(max_retries=1, timeout=40.0)
-    return _state["s3"], _state["claude"]
+    return _state["claude"]
 
 
 def assistant() -> Assistant:
     """The assistant over the current tables, reloaded when the page changed."""
-    s3, claude = _clients()
     now = time.monotonic()
     current = _state.get("assistant")
     if current is not None and now - _state["checked"] < RELOAD_SECONDS:
         return current
-    source = data.S3Source(s3, os.environ["SITE_BUCKET"])
+    source = data.S3Source(_s3(), os.environ["SITE_BUCKET"])
     if current is not None and source.version() == current.tables.version:
         _state["checked"] = now
         return current
-    tables = data.load(source)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        loading = pool.submit(data.load, source)  # the S3 reads wait while the SDK imports
+        claude = _claude()
+        tables = loading.result()
+    tools.people(tables)  # the name index player_card needs, built now rather than in a turn
     _state["assistant"], _state["checked"] = Assistant(tables, claude), now
     log.info("chat: tables of %s loaded", tables.built)
     return _state["assistant"]
@@ -70,9 +88,34 @@ def assistant() -> Assistant:
 
 def guard() -> Guard:
     if "guard" not in _state:
-        s3, _ = _clients()
-        _state["guard"] = Guard(S3Store(s3, os.environ["STATE_BUCKET"]))
+        _state["guard"] = Guard(S3Store(_s3(), os.environ["STATE_BUCKET"]))
     return _state["guard"]
+
+
+def is_warm(event: dict) -> bool:
+    """The EventBridge ping (``{"warm": true}`` as the event) or the page's
+    POST of ``{"warm": true}`` without a message."""
+    if "requestContext" not in event:
+        return event.get("warm") is True
+    try:
+        payload = json.loads(_body(event))
+    except (ValueError, TypeError):
+        return False
+    return isinstance(payload, dict) and payload.get("warm") is True and "message" not in payload
+
+
+def warm() -> dict:
+    """Load what a turn needs, call no model and touch no caps."""
+    start = time.monotonic()
+    cold = "assistant" not in _state
+    try:
+        bot = assistant()
+    except Exception as exc:
+        log.error("chat: warm load failed: %s", type(exc).__name__)
+        return _reply(503, {"warm": False})
+    seconds = round(time.monotonic() - start, 2)
+    log.info(json.dumps({"outcome": "warm", "cold": cold, "seconds": seconds}))
+    return _reply(200, {"warm": True, "data_built": bot.tables.built, "seconds": seconds})
 
 
 def _reply(status: int, body: dict) -> dict:
@@ -87,12 +130,16 @@ def _fixed(reason: str, status: int = 200) -> dict:
     return _reply(status, {"answer": prompt.CAPPED[reason], "outcome": reason, "tool_results": []})
 
 
-def parse(event: dict) -> tuple[str, list[dict]]:
-    """The message and the cleaned history; raises ValueError on a bad body."""
+def _body(event: dict) -> str:
     body = event.get("body") or ""
     if event.get("isBase64Encoded"):
         body = base64.b64decode(body).decode("utf-8")
-    payload = json.loads(body)
+    return body
+
+
+def parse(event: dict) -> tuple[str, list[dict]]:
+    """The message and the cleaned history; raises ValueError on a bad body."""
+    payload = json.loads(_body(event))
     message = payload.get("message")
     if not isinstance(message, str) or not message.strip():
         raise ValueError("message must be a non empty string")
@@ -118,6 +165,8 @@ def handler(event: dict, context: Any = None) -> dict:
     http = (event.get("requestContext") or {}).get("http") or {}
     if http.get("method", "POST") != "POST":
         return _reply(405, {"error": "POST a JSON body"})
+    if is_warm(event):
+        return warm()
     try:
         message, history = parse(event)
     except (ValueError, AttributeError, TypeError):

@@ -21,6 +21,10 @@ REFUSAL = (
     "this page."
 )
 NOT_IN_DATA = "The tables on this page do not answer that."
+# Rule 3 tells the model to explain every chance in these words, so the leak
+# guard leaves them out as it does the two fixed sentences (C11 of the first
+# evaluation: a right answer saying it this way was blocked).
+CHANCE_MEANING = "the share of past players in the same band who did it within two seasons"
 # The polite fixed replies when a cap is hit (scout.chat.guard).
 CAPPED = {
     "rate": "Sorry, you have reached the limit of 20 questions an hour. Please try again later; "
@@ -31,6 +35,8 @@ CAPPED = {
     "safety": "Sorry, I cannot help with that. "
     "I can answer questions about the players and numbers in the scouting tables on this page.",
     "error": "Sorry, something went wrong on our side. Please try again in a minute.",
+    "unfinished": "Sorry, I could not finish looking that up. Please ask again, perhaps in "
+    "other words.",
 }
 SHINGLE = 10  # words in a row of the rules that count as a leak
 
@@ -108,9 +114,8 @@ asked earlier in the conversation. Never answer from memory or from general foot
 knowledge.
 2. Copy numbers exactly as the tools write them. Do not work out new numbers, except counting
 the rows a tool returned or reading its matched count.
-3. Every chance is a historical rate: the share of past players in the same band who did it
-within two seasons. Say it that way, with the number of past players, never as a promise or a
-prediction about him.
+3. Every chance is a historical rate: {CHANCE_MEANING}. Say it that way, with the number of
+past players, never as a promise or a prediction about him.
 4. When the tables cannot answer, for example news, injuries today, fixtures, results, line
 ups, wages, transfer fees or rumours, anything after {d["so_far"]}, or a player, club or league
 the tools do not find, start the answer with exactly: "{NOT_IN_DATA}" Then say in one sentence
@@ -145,9 +150,9 @@ def _words(text: str) -> list[str]:
 
 
 def shingles(rules: str) -> set[tuple[str, ...]]:
-    """Ten word runs of the rules, leaving out the two sentences an answer is
-    told to say."""
-    for allowed in (REFUSAL, NOT_IN_DATA):
+    """Ten word runs of the rules, leaving out the sentences an answer is told
+    to say: the two fixed replies and rule 3's meaning of a chance."""
+    for allowed in (REFUSAL, NOT_IN_DATA, CHANCE_MEANING):
         rules = rules.replace(allowed, " | ")
     out = set()
     for part in rules.split("|"):

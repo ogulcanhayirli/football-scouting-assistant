@@ -306,3 +306,7 @@ def test_the_ask_tab_gets_the_url_and_the_caps_from_the_config():
     # The page posts the question with the last few turns and shows the tool results.
     assert "fetch(D.chat.url" in html
     assert "From the tables (" in html
+    # Prompt 20b: the tab wakes the chat when it opens, and a slow answer says why.
+    assert "JSON.stringify({ warm: true })" in html
+    assert "The first answer can take up to 30 seconds." in html
+    assert "var SLOW_MS = 5000;" in html

@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 import aws_cdk as cdk
 import pytest
@@ -9,6 +10,7 @@ from scout_infra.chat_stack import (
     FUNCTION,
     KEY_PARAMETER,
     ROLE,
+    WARM_RULE,
     ScoutChatStack,
     chat_bucket_name,
     site_origin,
@@ -19,18 +21,26 @@ ACCOUNT = "123456789012"
 REGION = "eu-central-1"
 
 
-@pytest.fixture(scope="module")
-def template(tmp_path_factory) -> Template:
-    code = tmp_path_factory.mktemp("code")
-    (code / "index.py").write_text("def handler(event, context):\n    return {}\n")
-    app = cdk.App()
+def synth(code_dir, **kwargs) -> Template:
+    (code_dir / "index.py").write_text("def handler(event, context):\n    return {}\n")
     stack = ScoutChatStack(
-        app,
+        cdk.App(),
         "ScoutChat",
-        code=lambda_.Code.from_asset(str(code)),
+        code=lambda_.Code.from_asset(str(code_dir)),
         env=cdk.Environment(account=ACCOUNT, region=REGION),
+        **kwargs,
     )
     return Template.from_stack(stack)
+
+
+@pytest.fixture(scope="module")
+def template(tmp_path_factory) -> Template:
+    return synth(tmp_path_factory.mktemp("code"))
+
+
+@pytest.fixture(scope="module")
+def warm_template(tmp_path_factory) -> Template:
+    return synth(tmp_path_factory.mktemp("code"), warm_ping=True)
 
 
 def test_one_function_its_url_role_logs_and_the_state_bucket(template):
@@ -60,7 +70,7 @@ def test_the_function(template):
             "Runtime": "python3.12",
             "Architectures": ["arm64"],
             "Handler": "scout.chat.handler.handler",
-            "MemorySize": 512,
+            "MemorySize": 1024,
             "Timeout": 180,
         },
     )
@@ -68,6 +78,40 @@ def test_the_function(template):
     # owner's call, 26 October): reserving 2 would leave fewer than 10 free.
     fn = next(iter(template.find_resources("AWS::Lambda::Function").values()))
     assert "ReservedConcurrentExecutions" not in fn["Properties"]
+
+
+def test_no_warm_ping_until_the_deploy_policy_allows_it(template):
+    template.resource_count_is("AWS::Events::Rule", 0)
+    context = json.loads((Path(__file__).parents[1] / "cdk.json").read_text())["context"]
+    assert context["chatWarmPing"] is False  # docs/DEPLOY.md: add the rights, then true
+
+
+def test_the_warm_ping_invokes_the_function_every_five_minutes(warm_template):
+    warm_template.resource_count_is("AWS::Events::Rule", 1)
+    warm_template.resource_count_is("AWS::Lambda::Function", 1)  # still one function
+    warm_template.has_resource_properties(
+        "AWS::Events::Rule",
+        {
+            "Name": WARM_RULE,
+            "ScheduleExpression": "rate(5 minutes)",
+            "State": "ENABLED",
+            "Targets": [
+                Match.object_like(
+                    {
+                        "Arn": {"Fn::GetAtt": [Match.string_like_regexp("Chat"), "Arn"]},
+                        "Input": json.dumps({"warm": True}, separators=(",", ":")),
+                        "RetryPolicy": {"MaximumRetryAttempts": 0},
+                    }
+                )
+            ],
+        },
+    )
+    warm_template.has_resource_properties(
+        "AWS::Lambda::Permission",
+        {"Action": "lambda:InvokeFunction", "Principal": "events.amazonaws.com"},
+    )
+    # The rule needs no role: EventBridge invokes through the function's own policy.
+    warm_template.resource_count_is("AWS::IAM::Role", 1)
 
 
 def test_the_key_is_a_noecho_parameter_never_a_value(template):

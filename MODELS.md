@@ -1568,6 +1568,45 @@ change the deployed code, so they wait for the owner's yes to redeploy;
 the run through the URL (handler, caps, S3 reads) is still to do
 (CLAUDE.md, Open questions).
 
+**Prompt 20b (27 October 2026): the fixes, then the same evaluation.** The
+order of the filters was settled by experiment, not by the wording of the
+questions. With strict decoding off, the model wrote `search_players`'
+arguments as table, sort_by, limit, then league, position, flags (or
+rising, or moved since the forecast), the ages and the minimums, in 8
+questions of 8 whatever order the question stated them in (C06 names the
+age before the league; the model still wrote the league first). Declared
+in the question's order (position group, age, league) with sort and limit
+last, the first call of every run carried no filter at all: the model
+writes sort_by straight after table, and the grammar then shuts out every
+filter declared before it. Declared in the model's order, with the
+description naming that order, 15 of 15 test calls kept every filter in
+one call (9 of 15 without the sentence). `similar_players` follows the
+question's wording instead (age first or league first), so it got the same
+league before the ages order and its own sentence: 9 of 9 then, 3 of 6 as
+deployed. The experiments cost about 1.6 USD.
+
+Also changed: rule 3's own sentence for a chance is left out of the leak
+guard (as the two fixed sentences are), an answer that holds tool call
+markup gets a fixed reply instead (seen three times in the experiments
+under the old order, after six stuck calls), and the scorer counts the
+system prompt's numbers (its dates, the season, its counts) as supported.
+The same 50 questions, in process on the tables of 26 October (the URL is
+still refused from a session):
+
+| Group | First run | Prompt 20b |
+|---|---|---|
+| Computed | 28 of 30 | 30 of 30 |
+| Not in the data | 10 of 10 | 10 of 10 |
+| Refused | 10 of 10 | 10 of 10 |
+
+Cost 0.28 USD (35 tool calls against 43; 270 uncached input tokens, 44,065
+written to the cache, 358,122 read from it, 9,869 output), median 3.3 s and
+slowest 6.3 s a question, all 50 answered. C06 now takes one call with the
+league and the age; C11 answers 115 with the chance explained in rule 3's
+words. One answer still holds a number in no tool result: "2026/27", the
+season in progress, which the tool gives only as "as of 24 October 2026".
+The cold start measurements and the warm ping are in docs/DEPLOY.md.
+
 ## Next
 
 1. The clean check above: tune on earlier seasons, score on later ones.

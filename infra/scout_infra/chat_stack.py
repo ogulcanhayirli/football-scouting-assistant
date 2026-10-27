@@ -3,7 +3,8 @@
 Decision 9 is revised narrowly: one Lambda for the chat and nothing else;
 the page stays static and the weekly run is unchanged.
 
-* ``scout-chat``: Python 3.12 on arm64, 512 MB, 180 seconds, behind a public Function URL
+* ``scout-chat``: Python 3.12 on arm64, 1,024 MB (512 until prompt 20b: twice
+  the CPU halves the cold start), 180 seconds, behind a public Function URL
   (no API Gateway) whose CORS allows only the site's origin. The code is
   ``src/scout/chat`` with its pinned dependencies
   (``scout_infra.chat_bundle``). No reserved concurrency for now: the
@@ -15,6 +16,11 @@ the page stays static and the weekly run is unchanged.
 * ``scout-chat-<account>``: a private bucket for the caps' state (the
   site bucket is public, so the state cannot live there), retained on
   delete.
+* With ``warm_ping`` (the context value ``chatWarmPing``, prompt 20b), the
+  EventBridge rule ``scout-chat-warm`` invokes the function every 5 minutes
+  with ``{"warm": true}``: it loads the tables and calls no model, so a
+  visitor rarely meets a cold start. It needs EventBridge rights in
+  ``scout-cfn-exec`` (docs/DEPLOY.md), so it is off until they are added.
 * The Claude key is a NoEcho stack parameter, given at deploy time
   (``--parameters ScoutChat:AnthropicApiKey=...`` from the environment), so
   it is never in the synthesized template, ``cdk.out`` or any other file;
@@ -22,6 +28,8 @@ the page stays static and the weekly run is unchanged.
 """
 
 from aws_cdk import CfnOutput, CfnParameter, Duration, RemovalPolicy, Stack
+from aws_cdk import aws_events as events
+from aws_cdk import aws_events_targets as targets
 from aws_cdk import aws_iam as iam
 from aws_cdk import aws_lambda as lambda_
 from aws_cdk import aws_logs as logs
@@ -34,6 +42,9 @@ from scout_infra.site_stack import site_bucket_name
 FUNCTION = "scout-chat"
 ROLE = "scout-chat-lambda"
 KEY_PARAMETER = "AnthropicApiKey"
+WARM_RULE = "scout-chat-warm"
+WARM_MINUTES = 5
+MEMORY_MB = 1024
 
 
 def chat_bucket_name(account: str) -> str:
@@ -46,7 +57,15 @@ def site_origin(account: str, region: str) -> str:
 
 
 class ScoutChatStack(Stack):
-    def __init__(self, scope: Construct, construct_id: str, *, code: lambda_.Code, **kwargs):
+    def __init__(
+        self,
+        scope: Construct,
+        construct_id: str,
+        *,
+        code: lambda_.Code,
+        warm_ping: bool = False,
+        **kwargs,
+    ):
         super().__init__(scope, construct_id, **kwargs)
         key = CfnParameter(
             self,
@@ -110,7 +129,7 @@ class ScoutChatStack(Stack):
             architecture=lambda_.Architecture.ARM_64,
             handler="scout.chat.handler.handler",
             code=code,
-            memory_size=512,
+            memory_size=MEMORY_MB,
             timeout=Duration.seconds(180),
             # TODO(owner): reserved_concurrent_executions=2 once the Lambda quota passes 10.
             role=role,
@@ -130,6 +149,21 @@ class ScoutChatStack(Stack):
                 max_age=Duration.hours(1),
             ),
         )
+        if warm_ping:
+            events.Rule(
+                self,
+                "Warm",
+                rule_name=WARM_RULE,
+                description="Keeps the chat warm: loads the tables, calls no model (prompt 20b)",
+                schedule=events.Schedule.rate(Duration.minutes(WARM_MINUTES)),
+                targets=[
+                    targets.LambdaFunction(
+                        fn,
+                        event=events.RuleTargetInput.from_object({"warm": True}),
+                        retry_attempts=0,
+                    )
+                ],
+            )
         apply_boundary(self)
         CfnOutput(self, "ChatUrl", value=url.url)
         CfnOutput(self, "StateBucket", value=state.bucket_name)

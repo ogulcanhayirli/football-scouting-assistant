@@ -804,6 +804,24 @@ def _schema(properties: dict, required: list[str]) -> dict:
     }
 
 
+# Strict decoding writes the arguments in the declared order and cannot go
+# back, so a filter the model reaches for after a later one is lost (C06 of
+# the evaluation: the league written, then no room for the age). Without the
+# grammar the model writes table, sort_by and limit, then the league, the
+# position, the flags, the ages and the minimums, whatever order the question
+# states them in; the properties are declared in that order, and the
+# description names it (prompt 20b: 15 of 15 calls kept every filter against
+# 9 of 15 without the sentence).
+SEARCH_ORDER = (
+    "Give the arguments in the order they are listed: table, sort_by, limit, then league or "
+    "club, position, flags, rising or moved, the ages, the minimums."
+)
+SIMILAR_ORDER = (
+    "Give the arguments in the order they are listed: name, mode, age, then league or club, "
+    "the ages, the minimum ability."
+)
+
+
 def definitions(t: Tables) -> list[dict]:
     """The four tool definitions, strict; the league list comes from the data
     and is sorted, so the definitions (and the prompt cache) stay the same
@@ -825,7 +843,7 @@ def definitions(t: Tables) -> list[dict]:
                 "risk), bargains_prime (29 and under), bargains_experienced (30 to 33), "
                 "bargains_all (both lists). League is the league of the season the tables "
                 "describe; age_min compares the exact age, age_max whole years. Flags: "
-                f"{flag_text}."
+                f"{flag_text}. {SEARCH_ORDER}"
             ),
             "strict": True,
             "input_schema": _schema(
@@ -837,17 +855,15 @@ def definitions(t: Tables) -> list[dict]:
                         "description": "; ".join(f"{k}: {v[2]}" for k, v in SORTS.items()),
                     },
                     "limit": {"type": "integer", "description": "rows to return, 1 to 10"},
-                    "position": {"type": "string", "enum": sorted(POSITION_GROUPS)},
+                    "league": {"type": "string", "enum": leagues},
+                    "club": {"type": "string", "description": "part of a club name"},
                     "position_group": {
                         "type": "string",
                         "enum": GROUPS,
                         "description": "broad group: winger covers left and right wingers and "
                         "midfielders, full_back both full backs, attacking_mid the second striker",
                     },
-                    "age_min": {"type": "integer"},
-                    "age_max": {"type": "integer"},
-                    "league": {"type": "string", "enum": leagues},
-                    "club": {"type": "string", "description": "part of a club name"},
+                    "position": {"type": "string", "enum": sorted(POSITION_GROUPS)},
                     "flags": {
                         "type": "array",
                         "items": {"type": "string", "enum": FLAG_KEYS},
@@ -856,6 +872,8 @@ def definitions(t: Tables) -> list[dict]:
                     "max_flag_count": {"type": "integer"},
                     "rising": {"type": "boolean"},
                     "moved_since_forecast": {"type": "boolean"},
+                    "age_min": {"type": "integer"},
+                    "age_max": {"type": "integer"},
                     "min_ability_pct": {"type": "number"},
                     "min_elite_chance_pct": {"type": "number"},
                     "min_step_up_chance_pct": {"type": "number"},
@@ -889,7 +907,7 @@ def definitions(t: Tables) -> list[dict]:
                 "optional age, league and ability filters. mode at_age: today's players a year "
                 "either side of that age nearest to his season at that age; for a measured "
                 "great (Lionel Messi, Xavi, Thierry Henry and others) today's players of that "
-                "age in the middle of the season, with their elite chance."
+                f"age in the middle of the season, with their elite chance. {SIMILAR_ORDER}"
             ),
             "strict": True,
             "input_schema": _schema(
@@ -897,11 +915,11 @@ def definitions(t: Tables) -> list[dict]:
                     "name": {"type": "string"},
                     "mode": {"type": "string", "enum": ["now", "at_age"]},
                     "age": {"type": "integer", "description": "mode at_age: the age to compare at"},
+                    "league": {"type": "string", "enum": leagues},
+                    "club": {"type": "string", "description": "to tell apart players of one name"},
                     "age_min": {"type": "integer"},
                     "age_max": {"type": "integer"},
-                    "league": {"type": "string", "enum": leagues},
                     "min_ability_pct": {"type": "number"},
-                    "club": {"type": "string", "description": "to tell apart players of one name"},
                 },
                 ["name", "mode"],
             ),

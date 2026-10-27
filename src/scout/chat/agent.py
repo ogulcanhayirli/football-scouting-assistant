@@ -16,8 +16,10 @@
   is always recorded (an API error ends the turn the same way, keeping the
   cost of the calls already made).
 * The answer: the text blocks of the final reply. A refusal by the API, an
-  answer that repeats the rules (``scout.chat.prompt.leaks``) or a turn that
-  runs out of budget gets a fixed reply instead.
+  answer that repeats the rules (``scout.chat.prompt.leaks``), tool call
+  markup written as text (a model stuck after its last call, C06 of the
+  first evaluation) or a turn that runs out of budget gets a fixed reply
+  instead.
 * The money: each reply is priced from its usage fields (input, cache
   writes at 1.25 times, cache reads at 0.1 times, output), per model when a
   fallback model ran part of it.
@@ -27,6 +29,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -54,6 +57,7 @@ PRICES = {
     "claude-opus-4-8": (5.0, 25.0),
 }
 CACHE_WRITE, CACHE_READ = 1.25, 0.10
+TOOL_MARKUP = re.compile(r"<(?:invoke|parameter|function_calls)\b")
 USAGE = ("input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens", "output_tokens")
 
 
@@ -91,7 +95,7 @@ def cost_usd(message: Any, model: str = MODEL) -> tuple[float, dict[str, int]]:
 @dataclass
 class Turn:
     answer: str
-    outcome: str  # answered, refused_safety, leak_blocked, budget, timeout, error
+    outcome: str  # answered, refused_safety, leak_blocked, unfinished, budget, timeout, error
     tool_results: list[dict] = field(default_factory=list)
     calls: int = 0
     cost_usd: float = 0.0
@@ -204,6 +208,8 @@ class Assistant:
                 turn.answer, turn.outcome = prompt.CAPPED["error"], "error"
             elif prompt.leaks(text, self.guarded):
                 turn.answer, turn.outcome = prompt.REFUSAL, "leak_blocked"
+            elif TOOL_MARKUP.search(text):
+                turn.answer, turn.outcome = prompt.CAPPED["unfinished"], "unfinished"
             else:
                 turn.answer = text
             break

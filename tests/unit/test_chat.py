@@ -810,6 +810,22 @@ def test_definitions_are_strict_and_within_the_api_limits(tables):
     assert defs == tools.definitions(tables)  # stable, so the cache holds
 
 
+def test_filters_are_declared_in_the_order_the_model_writes_them(tables):
+    # Strict decoding keeps the declared order: a filter declared before one
+    # the model already wrote is lost (C06: the league, then no age).
+    search, _, similar, _ = tools.definitions(tables)
+    order = list(search["input_schema"]["properties"])
+    assert order[:3] == ["table", "sort_by", "limit"]
+    chain = ["league", "position_group", "flags", "rising", "moved_since_forecast", "age_min"]
+    chain += ["age_max", "min_ability_pct", "min_elite_chance_pct"]
+    assert [order.index(k) for k in chain] == sorted(order.index(k) for k in chain)
+    assert order.index("club") < order.index("position")
+    near = list(similar["input_schema"]["properties"])
+    assert near.index("league") < near.index("age_min") < near.index("age_max")
+    assert search["description"].endswith(tools.SEARCH_ORDER)
+    assert similar["description"].endswith(tools.SIMILAR_ORDER)
+
+
 # The prompt
 
 
@@ -833,6 +849,11 @@ def test_an_answer_repeating_the_rules_is_a_leak(tables):
     assert not prompt.leaks(prompt.REFUSAL, guarded)
     assert not prompt.leaks(prompt.NOT_IN_DATA + " They hold no injury news.", guarded)
     assert not prompt.leaks("Of 142 past players in his band, 30% became elite.", guarded)
+    # Rule 3's own words for a chance are what an answer is told to say (C11).
+    assert prompt.CHANCE_MEANING in rules
+    said = f"His 30% elite chance is {prompt.CHANCE_MEANING}, from 142 of them."
+    assert not prompt.leaks(said, guarded)
+    assert prompt.leaks(said + " " + rules[-300:], guarded)  # the rest is still guarded
 
 
 # The caps
@@ -1044,6 +1065,14 @@ def test_an_answer_quoting_the_rules_is_replaced(tables):
     assert turn.answer == prompt.REFUSAL
 
 
+def test_tool_markup_written_as_text_is_never_shown(tables):
+    stuck = '<invoke name="search_players">\n<parameter name="table">candidates</parameter>'
+    client = FakeClient([reply([block("text", text=stuck)])])
+    turn = agent.Assistant(tables, client).answer([], "Who?", lambda spent: True)
+    assert turn.outcome == "unfinished"
+    assert turn.answer == prompt.CAPPED["unfinished"]
+
+
 def test_the_budget_stops_a_turn(tables):
     client = FakeClient([reply([tool_call(1)], stop="tool_use"), reply([block("text", text="x")])])
     turn = agent.Assistant(tables, client).answer([], "q", lambda spent: spent == 0)
@@ -1185,6 +1214,39 @@ def test_handler_rejects_bad_requests(lambda_env):
     assert handler.handler(event({"message": ""}))["statusCode"] == 400
 
 
+def test_the_warm_ping_loads_the_tables_and_calls_no_model(tables, monkeypatch):
+    client, loads = FakeClient([]), []
+    monkeypatch.setattr(handler, "_state", {"s3": object(), "claude": client})
+    monkeypatch.setattr(handler.data, "load", lambda source: loads.append(source) or tables)
+    monkeypatch.setattr(handler.time, "monotonic", lambda: 0.0)
+    monkeypatch.setenv("SITE_BUCKET", "site")
+    tables.people = None
+    out = handler.handler({"warm": True})  # the EventBridge event itself
+    body = json.loads(out["body"])
+    assert out["statusCode"] == 200
+    assert body["warm"] is True
+    assert body["data_built"] == "2026-10-25"
+    assert len(loads) == 1
+    assert client.calls == []
+    assert "guard" not in handler._state  # no caps read or written
+    assert tables.people is not None  # player_card's index is built too
+    handler.handler({"warm": True})
+    assert len(loads) == 1  # kept in memory
+
+
+def test_the_pages_warm_request_skips_the_caps(lambda_env):
+    client, store = lambda_env
+    out = handler.handler(event({"warm": True}))
+    assert json.loads(out["body"])["warm"] is True
+    assert client.calls == []
+    assert store.body is None
+    # A message is never a warm request, nor is a body that is not JSON.
+    assert not handler.is_warm(event({"warm": True, "message": "hi"}))
+    assert not handler.is_warm(event("not json"))
+    assert not handler.is_warm(event({"message": "hi"}))
+    assert not handler.is_warm({"warm": "yes"})
+
+
 def test_history_is_cleaned():
     msg, history = handler.parse(
         event(
@@ -1246,6 +1308,15 @@ def test_eval_scores_exact_names_and_numbers_and_blames_the_right_side(tables):
     no_tool = score(item, {"answer": "Nobody.", "tool_results": []}, guarded, "[]")
     assert no_tool["blame"] == "tools"
     assert score(item, {"http_error": "HTTP 502"}, guarded, None)["blame"] == "infrastructure"
+
+
+def test_eval_takes_the_system_prompts_numbers_as_supported(tables):
+    from scout.chat_eval import unsupported
+
+    system = prompt.system_blocks(tables)[0]["text"]
+    answer = "Values run to 12 June 2026, clubs to 24 October 2026; he is worth €99m."
+    assert unsupported(answer, [], "Who?") == ["12", "2026", "24", "2026", "9.9e+07 eur"]
+    assert unsupported(answer, [], "Who?", system) == ["9.9e+07 eur"]
 
 
 def test_eval_unanswerable_and_adversarial_rules(tables):

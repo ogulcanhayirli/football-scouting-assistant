@@ -375,7 +375,7 @@ from, which the page shows under it ("From the tables").
 ```
  page (Ask tab) ── POST {message, history} ──► Function URL (CORS: the site only)
                                                   │
-                                       Lambda scout-chat (Python 3.12, arm64, 512 MB,
+                                       Lambda scout-chat (Python 3.12, arm64, 1,024 MB,
                                        180 s, at most 2 at once)
                      read index.html, data/* ◄────┤────► Claude API (Sonnet 5.5, 4 tools,
                      (site bucket)                │        at most 6 tool calls a turn)
@@ -423,6 +423,102 @@ The evaluation (`scout chat-eval`, below) sends a token derived from the key
 (an HMAC; nothing extra is stored anywhere): its questions skip the per
 visitor limit and count against their own cap of 5 USD a day, so a run never
 uses the visitors' budget.
+
+### Cold start and the warm ping (prompt 20b)
+
+The owner's first question through the page took 30 to 40 seconds and the
+second a few seconds. Measured in a cloud session on 27 October, with the
+CPU held by cgroups to Lambda's share for each memory size (0.29 of a vCPU
+at 512 MB, 0.58 at 1,024 MB, a whole one at 1,769 MB):
+
+| Step on a new instance | 512 MB | 1,024 MB | 1,769 MB |
+|---|---|---|---|
+| Import the Claude SDK (anthropic, pydantic) | 2.4 s | 1.2 s | 0.7 s |
+| Parse the six published files | 1.4 s | 0.7 s | 0.2 s |
+| All the first turn does before calling Claude (imports, clients, tables, first tool calls) | 6.2 s | 3.0 s | 1.5 s |
+| The same with the files read over the network, as first deployed (the SDK import, then the six reads one by one) | 6 to 8 s | | |
+| The same as deployed in prompt 20b (the reads run during the import) | 4.6 to 5.1 s | 2.4 s | |
+
+The first call to Claude adds about 1.6 s at any memory (4.1 s with the
+connection and the prompt cache write, 2.5 s once both exist). So the new
+instance explains 8 to 10 seconds, not 30: the rest is Lambda fetching and
+unpacking the 27 MB bundle on arm64, and a question that needs several tool
+calls (each one a model call; C06 of the first evaluation made six). The
+session cannot read the function's logs; the owner can, in CloudWatch
+(`/aws/lambda/scout-chat`): the first `REPORT` line after an idle spell
+carries `Init Duration`, and the chat's own line its `seconds`.
+
+What prompt 20b changed (deployed 27 October 2026):
+
+* Memory 1,024 MB instead of 512: twice the CPU, half the cold start. It
+  stays inside Lambda's free tier (400,000 GB seconds a month): even the 50
+  or so questions a day the 1 USD cap allows, at 6 seconds each, make about
+  9,000 GB seconds a month.
+* The six files are read at once, while the SDK imports
+  (`scout.chat.data.load`, `handler.assistant`), and player_card's name
+  index is built at load, not in a turn. The Claude and S3 clients were
+  already made once per instance and reused by every turn.
+* A warm request: `{"warm": true}` (the event itself, or the body of a POST
+  without a message) loads the clients and the tables, calls no model and
+  touches no caps; it logs `{"outcome": "warm", "cold": ..., "seconds": ...}`.
+  The page sends one when the Ask tab opens, so the instance is warm by the
+  time the question is typed, and while a question has been out for more
+  than 5 seconds the status line says "The first answer can take up to 30
+  seconds."
+* **The warm ping, built but not deployed.** `ScoutChat` adds the
+  EventBridge rule `scout-chat-warm` (every 5 minutes, `{"warm": true}`, no
+  retries; EventBridge invokes through the function's own permission, so no
+  role) when the context value `chatWarmPing` in `infra/cdk.json` is true.
+  It is false: `scout-cfn-exec`, in the versions documented here and in
+  docs/AWS_SETUP.md, allows no EventBridge rules, and the session user may
+  not read the policy to check. The owner's part, in CloudShell:
+
+```bash
+ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
+R=eu-central-1
+
+cat > chat-warm-cfn-exec.json <<EOF
+[
+  {"Sid": "ChatWarmPing", "Effect": "Allow", "Action": "events:*",
+   "Resource": "arn:aws:events:${R}:${ACCOUNT}:rule/scout-*"}
+]
+EOF
+
+add_statements() {  # policy name, file of statements; replaces statements of the same Sid
+  ARN="arn:aws:iam::${ACCOUNT}:policy/$1"
+  V=$(aws iam get-policy --policy-arn "$ARN" --query Policy.DefaultVersionId --output text)
+  aws iam get-policy-version --policy-arn "$ARN" --version-id "$V" \
+    --query PolicyVersion.Document > current.json
+  python3 - "$2" > new.json <<'PY'
+import json, sys
+doc = json.load(open("current.json"))
+add = json.load(open(sys.argv[1]))
+sids = {s["Sid"] for s in add}
+doc["Statement"] = [s for s in doc["Statement"] if s.get("Sid") not in sids] + add
+print(json.dumps(doc))
+PY
+  aws iam create-policy-version --policy-arn "$ARN" --policy-document file://new.json \
+    --set-as-default
+}
+add_statements scout-cfn-exec chat-warm-cfn-exec.json
+aws iam list-policy-versions --policy-arn "arn:aws:iam::${ACCOUNT}:policy/scout-cfn-exec" \
+  --query 'Versions[].[VersionId,IsDefaultVersion]' --output text
+```
+
+The statement covers rules named `scout-*` only; the function's invoke
+permission for EventBridge falls under the `lambda:*` statement of the chat
+setup below, and the boundary needs nothing (no role). This is the policy's
+fifth version if it was at v4; should `create-policy-version` refuse because
+five exist, delete the oldest that is not the default first (`aws iam
+delete-policy-version --version-id v1`). Then a session sets
+`"chatWarmPing": true` in `infra/cdk.json`, checks that `cdk diff ScoutChat`
+adds only the rule and one Lambda permission, and deploys with the owner's
+yes. Cost: 8,640 pings a month, a few milliseconds each on a warm instance
+(plus a load of 2 or 3 seconds when Lambda recycles it), inside the free
+tier's million requests; EventBridge does not bill a schedule rule's
+events. A ping every 5 minutes keeps one instance warm in practice (AWS
+promises nothing); a second visitor at the same moment gets a new instance,
+which the page's warm request covers.
 
 ### One time setup (the owner, CloudShell)
 
@@ -538,7 +634,7 @@ a private retained bucket).
 
 At about 0.02 to 0.04 USD a question (two or three model calls, the tools and
 the system prompt read from the cache after the first), the visitors' caps
-hold the chat under 1 USD a day and 5 USD a month. The Lambda (512 MB, a few
+hold the chat under 1 USD a day and 5 USD a month. The Lambda (1,024 MB, a few
 seconds a question), its S3 requests and its logs stay inside AWS's free
 tier at this scale.
 
@@ -557,15 +653,20 @@ pull the system prompt or go off topic. It scores exact names and numbers,
 the fixed "not in the data" sentence and the fixed refusal, and puts each
 failure down to the model's answer, the model's tool use, or the tools (by
 running the ideal tool call itself). Results: `reports/chat_eval.md` and
-`reports/chat_eval.json`. A run costs about 1 to 2 USD (the first, in
-process on 26 October, cost 0.34 USD).
+`reports/chat_eval.json`. A run costs about 0.30 USD (in process: 0.34 USD
+on 26 October, 0.28 USD on 27 October after prompt 20b), plus the Lambda's
+few seconds a question when run against the URL. Numbers an answer takes
+from the system prompt (the dates, the season, the counts it states) are not
+counted as unsupported (prompt 20b); the report gives the median and the
+slowest answer.
 
 From a Claude Code cloud session the run against the URL needs the Function
 URL's host in the environment's Allowed domains (Network access): the
-default policy refuses `*.lambda-url.eu-central-1.on.aws`, and
-`scout-session-sync` may not invoke the function directly. Without it, use
-`--local` (the same code and files, not the deployed function) and run the
-URL check from elsewhere.
+default policy refuses `*.lambda-url.eu-central-1.on.aws` (still on 27
+October: the proxy answered 403), and `scout-session-sync` may not invoke
+the function directly. Without it, use `--local` (the same code and files,
+not the deployed function) and run the URL check from elsewhere. An
+environment change reaches only sessions started after it.
 
 ## Retraining (manual, never in the weekly run)
 

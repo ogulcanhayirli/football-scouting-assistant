@@ -3,8 +3,10 @@
 Two stacks: ``ScoutSite``, the public bucket the weekly run publishes the
 page to (decision 9), and ``ScoutChat``, the one Lambda behind the page's
 Ask tab (prompt 20, decision 11; its code folder is built first by
-``scout_infra.chat_bundle``). The retired Glue, Feature Store and training
-stacks are in ``archive/`` (its README says why). The account comes from the
+``scout_infra.chat_bundle``; ``chatWarmPing`` in ``cdk.json`` adds its warm
+ping once the deploy policy allows EventBridge rules). The retired Glue,
+Feature Store and training stacks are in ``archive/`` (its README says
+why). The account comes from the
 credentials the CDK CLI runs with, so no account specific value is committed.
 """
 
@@ -31,6 +33,7 @@ ScoutChatStack(
     app,
     "ScoutChat",
     code=lambda_.Code.from_asset(str(chat_bundle.build())),
+    warm_ping=str(app.node.try_get_context("chatWarmPing")).lower() == "true",
     env=env,
     description="Football scouting assistant: the Ask tab's chat Lambda and its caps' state",
 )
