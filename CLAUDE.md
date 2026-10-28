@@ -796,7 +796,8 @@ Settle them with the owner rather than guessing.
     USD); the existing 50 must still pass and the six new ones are the
     test of the nicknames and the labels. `ScoutChat` was redeployed the
     same day without `--parameters` (the stored key kept); a warm request
-    loaded the tables of 28 October. The "ten seasons" of the requested
+    loaded the tables of 28 October, and weekly run 14 (started by hand,
+    success) published the page that opens on the Ask tab. The "ten seasons" of the requested
     welcome is written from the data: 11 seasons, 2015/16 to 2025/26.
   * **The run against the URL: done 28 October** (prompt 20c, Models),
     once the owner allowed `*.lambda-url.eu-central-1.on.aws`: 30 of 30,

@@ -468,8 +468,9 @@ says what the chat holds) and shown on every data tab.
 
 Redeployed on 28 October 2026 with the owner's yes, without
 `--parameters` (the stored key kept); a warm request then loaded the tables
-of 28 October in 6.9 s. The page's part goes out with the next weekly run
-(started by hand that day).
+of 28 October in 6.9 s. The page's part went out with weekly run 14, started
+by hand that day (success in 16 minutes; the live page then opened on the
+Ask tab with the four questions and `seasons` 2015, 11).
 
 ```
  page (Ask tab) ── POST {message, history} ──► Function URL (CORS: the site only)
