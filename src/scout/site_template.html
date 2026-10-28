@@ -525,8 +525,9 @@ footer p { margin: 0 0 8px; }
   }
   function money(v) {
     if (v == null) return '<span class="blank">no value</span>';
-    if (v >= 1e6) return "€" + (v >= 1e7 ? Math.round(v / 1e6) : (v / 1e6).toFixed(1).replace(/\.0$/, "")) + "m";
-    if (v >= 1e3) return "€" + Math.round(v / 1e3) + "k";
+    // the unit follows the rounded number: 999,999.9999 is €1m, never €1000k
+    if (v >= 1e6 || Math.round(v / 1e3) >= 1000) return "€" + (v >= 1e7 ? Math.round(v / 1e6) : (v / 1e6).toFixed(1).replace(/\.0$/, "")) + "m";
+    if (Math.round(v) >= 1000) return "€" + Math.round(v / 1e3) + "k";
     return "€" + Math.round(v);
   }
   var WORDS = ["no", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten"];

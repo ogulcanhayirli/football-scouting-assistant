@@ -538,6 +538,10 @@ def test_s3_source_reads_bodies_and_the_page_etag(tmp_path):
         (2e6, "€2m"),
         (750000.0000000005, "€750k"),
         (2500.0, "€3k"),  # halves go up, as Math.round does
+        (999999.9999999997, "€1m"),  # float noise: never €1000k
+        (999500.0, "€1m"),
+        (999499.0, "€999k"),
+        (999.6, "€1k"),
         (None, "no value"),
         (-8.4e6, "-€8.4m"),
     ],
@@ -685,7 +689,8 @@ def test_a_ranked_player_above_fair_value_is_not_a_bargain(tables):
     assert card["in_tables"] == ["bargains"]
     assert "bargain" not in card
     assert card["bargain_verdict"] == (
-        "on the value ranking at #4 (prime list) but priced above fair value, so not a bargain"
+        "No: Dear Star is on the value ranking at #4 (prime list) but priced above fair value, "
+        "so not a bargain."
     )
     assert card["value_ranking"]["list_rank"] == 4
     assert "bargain_verdict" not in tools.player_card(tables, {"name": "Sabino"})

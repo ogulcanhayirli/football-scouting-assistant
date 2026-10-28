@@ -178,11 +178,13 @@ def money(v) -> str:
         return "no value"
     if v < 0:
         return "-" + money(-v)
-    if v >= 1e6:
+    # The unit follows the rounded number: 999,999.9999 (float noise in 52
+    # bargains' values) is €1m, never €1000k, and 999.6 is €1k.
+    if v >= 1e6 or js_round(v / 1e3) >= 1000:
         if v >= 1e7:
             return f"€{js_round(v / 1e6)}m"
         return f"€{v / 1e6:.1f}".removesuffix(".0") + "m"
-    if v >= 1e3:
+    if js_round(v) >= 1000:
         return f"€{js_round(v / 1e3)}k"
     return f"€{js_round(v)}"
 
@@ -304,8 +306,8 @@ def not_a_bargain(o: dict) -> str:
     """The code's sentence for a player of the bargains ranking priced above
     his fair value, to be said as written."""
     return (
-        f"on the value ranking at #{whole(o['list_rank'])} ({o.get('list')} list) but priced "
-        "above fair value, so not a bargain"
+        f"No: {o['player']} is on the value ranking at #{whole(o['list_rank'])} "
+        f"({o.get('list')} list) but priced above fair value, so not a bargain."
     )
 
 
