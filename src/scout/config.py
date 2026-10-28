@@ -176,7 +176,17 @@ class ReportsConfig(BaseModel):
     )
     poll_seconds: float = Field(default=30.0, gt=0)
     max_run_minutes: float = Field(
-        default=100.0, gt=0, description="Batches still running then are cancelled."
+        default=20.0,
+        gt=0,
+        description="The longest the step waits on the Message Batches API (prompt 19c: run 12 "
+        "waited 100 minutes on one batch). A batch still running then is kept in pending.json "
+        "and collected by the next run; nothing is cancelled.",
+    )
+    judge_min_days: float = Field(
+        default=6.0,
+        ge=0,
+        description="Days between two judged samples: daily runs (from 6 November) judge once a "
+        "week, not 50 reports a day; 0 judges every run.",
     )
     prices: dict[str, ModelPrice] = Field(
         default_factory=lambda: {

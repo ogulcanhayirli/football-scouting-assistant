@@ -262,11 +262,14 @@ def test_publish_keeps_the_reports_best_effort(tmp_path):
     reports.mkdir()
     (reports / "reports.parquet").write_bytes(b"x")
     (reports / "summary.json").write_bytes(b"{}")
+    (reports / "pending.json").write_bytes(b'{"batches": []}')
     s3 = FakeS3()
     publish(
         s3, "data-bucket", "site-bucket", _lists(tmp_path), _site(tmp_path), reports_dir=reports
     )
     assert ("data-bucket", REPORTS_PREFIX + "reports.parquet") in s3.objects
+    # the batches a run left running reach the next run (prompt 19c)
+    assert ("data-bucket", REPORTS_PREFIX + "pending.json") in s3.objects
     # a policy without processed/reports_text/ never stops the page
     s3 = RefusingS3(REPORTS_PREFIX)
     other = tmp_path / "again"

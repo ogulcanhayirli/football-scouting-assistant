@@ -1,6 +1,7 @@
-"""Generated scout reports (prompt 19): fact sheets, the faithfulness check,
-the batches with a fake client, the token cap, the cost and the page. No
-test calls the API."""
+"""Generated scout reports (prompts 19 and 19c): fact sheets, the
+faithfulness check (typed numbers and the claims), the judge's checkable
+verdicts, the batches with a fake client (slow ones too), the token cap, the
+cost and the page. No test calls the API."""
 
 import json
 import logging
@@ -175,20 +176,44 @@ def test_one_sheet_a_player_with_both_tables_merged(sheets):
     assert "Rising: yes" in ben.text
     alex = sheets[1]
     assert "Market value: €30m" in alex.text
-    assert "Fair value (our model): €22m; his market value is 139% of it" in alex.text
-    assert "Similar players today: M. Jaber (25, Saint Etienne, Ligue 2, ability 93rd" in alex.text
+    assert "Fair value (our model): €22m; his market value is 139% of it (above our fair" in (
+        alex.text
+    )
+    assert "Similar players today: nearest first: M. Jaber (25, Saint Etienne, Ligue 2, " in (
+        alex.text
+    )
+    assert alex.similar() == ["M. Jaber", "S. Vegas", "Luis Ortega"]
+    assert "Ability: 92nd percentile among regular players of his position in 2025/26" in alex.text
     assert alex.template.startswith("Gives 0.47 assists")
+    # Prompt 19c: the season so far is never on the sheet the report is written from.
+    assert "so far" not in alex.text.lower()
+    assert "175" not in alex.text
+    assert "among the cheapest 0.3%" in ben.text
 
 
-def test_the_hash_follows_the_facts_the_prompt_and_the_model(sheets):
+def test_past_the_middle_the_bargain_place_counts_from_the_dear_end():
+    dear = _bargains().assign(value_to_fair=2.65, value_to_fair_pct=97.2)
+    ben = rt.fact_sheets(_candidates(), dear, _neighbours(), LEAGUES)[1]
+    assert "his market value is 265% of it (above our fair value), among the dearest 2.8%" in (
+        ben.text
+    )
+
+
+def test_the_hash_follows_the_cited_facts_the_prompt_and_the_model(sheets):
     alex = sheets[1]
     again = rt.fact_sheets(_candidates(), _bargains(), _neighbours(), LEAGUES)[0]
     assert again.hash("claude-haiku-5-5") == alex.hash("claude-haiku-5-5")
     assert alex.hash("claude-haiku-5-5") != alex.hash("claude-sonnet-5-5")
-    changed = _candidates()
-    changed.loc[0, "so_far_minutes"] = 260.0
-    other = rt.fact_sheets(changed, _bargains(), _neighbours(), LEAGUES)[0]
-    assert other.hash("claude-haiku-5-5") != alex.hash("claude-haiku-5-5")
+    # The season so far changes with every match and is not cited (prompt 19c):
+    # a new match keeps the report; a new club or a new forecast does not.
+    played = _candidates().assign(so_far_minutes=[260.0, 90.0], so_far_matches=[5, 1])
+    same = rt.fact_sheets(played, _bargains(), _neighbours(), LEAGUES)[0]
+    assert same.hash("claude-haiku-5-5") == alex.hash("claude-haiku-5-5")
+    for column, value in (("current_club", "Inter"), ("value_eur", 32e6)):
+        changed = _candidates()
+        changed.loc[0, column] = value
+        other = rt.fact_sheets(changed, _bargains(), _neighbours(), LEAGUES)[0]
+        assert other.hash("claude-haiku-5-5") != alex.hash("claude-haiku-5-5")
 
 
 def test_the_prefix_is_fixed_and_cached_and_the_sheet_is_the_only_variable_part(sheets):
@@ -235,11 +260,18 @@ def test_a_correctly_rounded_number_passes(sheets, rounded, exact):
     assert rt.check(GOOD.replace(exact, rounded), sheets[1]).passed
 
 
-def test_a_sheet_number_used_for_the_wrong_fact_is_left_to_the_judge(sheets):
-    # 93rd is M. Jaber's ability, not Alex Moreno's: the check sees a number
-    # of the sheet within its rounding and lets it pass; only the judge reads
-    # which fact a number belongs to.
-    assert rt.check(GOOD.replace("92nd", "93rd"), sheets[1]).passed
+def test_a_similar_players_number_needs_his_name_in_the_sentence(sheets):
+    # 93rd is M. Jaber's ability, not Alex Moreno's (prompt 19: left to the
+    # judge; prompt 19c: a similar player's number only where he is named).
+    found = rt.check(GOOD.replace("92nd", "93rd"), sheets[1]).violations
+    assert found == [
+        'the number "93rd" is on the fact sheet only for a similar player, and this sentence '
+        "names none"
+    ]
+    named = GOOD.replace(
+        "M. Jaber is the closest in style", "M. Jaber, ability 93rd percentile, is the closest"
+    )
+    assert rt.check(named, sheets[1]).violations == []
 
 
 def test_units_and_counts_must_match(sheets):
@@ -247,7 +279,91 @@ def test_units_and_counts_must_match(sheets):
     report = GOOD.replace("€30m", "€30").replace("Of 142 past players", "Of 142 minutes")
     found = rt.check(report, sheets[1]).violations
     assert 'the number "€30" is not in the fact sheet, or not rounded correctly' in found
-    assert 'the number "142" is not in the fact sheet, or not rounded correctly' in found
+    assert 'the number "142" is on the fact sheet, but not as a count of minutes' in found
+
+
+def test_a_percentage_must_be_of_the_kind_its_words_say(sheets):
+    # 25% is a chance on the sheet, not his market value against fair value.
+    found = rt.check(GOOD.replace("139% of the", "25% of the"), sheets[1]).violations
+    assert found == [
+        'the number "25%" is on the fact sheet, but not as market value as a share of fair value'
+    ]
+
+
+def test_a_rate_must_go_with_the_count_of_its_own_chance(sheets):
+    swapped = GOOD.replace("players in his elite band, 30% became", "players in his elite band, "
+                           "25% became")  # fmt: skip
+    assert rt.check(swapped, sheets[1]).violations == [
+        'the rate "25%" and the count "142" are not the rate and the count of one chance on the '
+        "fact sheet"
+    ]
+    # The step up rate and count, told as the elite chance.
+    told = GOOD.replace(
+        "Of 142 past players in his elite band, 30% became",
+        "Of 878 past players in his elite band, 25% became",
+    )
+    assert rt.check(told, sheets[1]).violations == [
+        'the rate "25%" of 878 past players is not the elite chance'
+    ]
+
+
+def test_only_the_first_similar_player_is_the_closest(sheets):
+    wrong = GOOD.replace("M. Jaber is the closest", "S. Vegas is the closest")
+    assert rt.check(wrong, sheets[1]).violations == [
+        "the report calls S. Vegas the closest in playing style, but the sheet lists the similar "
+        "players nearest first and M. Jaber is the first"
+    ]
+    both = GOOD.replace("M. Jaber is the closest", "M. Jaber and S. Vegas are the closest")
+    assert rt.check(both, sheets[1]).passed
+
+
+def test_a_first_name_added_to_an_initial_fails(sheets):
+    # Run 9: "Harry Armstrong" for H. Armstrong passed, as a possible ordinary
+    # word opening a sentence; 334 of 2,733 passed reports had one.
+    report = GOOD.replace(
+        "and M. Jaber is the closest in style, though not in level.",
+        "and nobody else is listed. Mohamed Jaber is the closest in style, though not in level.",
+    )
+    assert rt.unknown_names(report, sheets[1]) == ["Mohamed Jaber"]
+    assert rt.given_names("He is like M. Jaber. The Jaber style.", sheets[1]) == []
+
+
+def test_cheap_is_below_fair_value_and_dear_above(sheets):
+    report = GOOD.replace("priced dearly rather than cheaply", "priced cheaply")
+    assert rt.check(report, sheets[1]).violations == [
+        'the report says "cheaply", but his market value is 139% of his fair value (below 100% is '
+        "cheap, above it dear)"
+    ]
+    assert rt.check(GOOD.replace("dearly rather than cheaply", "dearly, not cheaply"),
+                    sheets[1]).passed  # fmt: skip
+
+
+def test_the_season_so_far_and_other_seasons_stay_out_of_the_report(sheets):
+    report = GOOD.replace(
+        "He raises no warning flags.", "He raises no warning flags. So far in 2026/27 he is fit."
+    )
+    assert rt.check(report, sheets[1]).violations == [
+        "the report mentions the season so far, which is not in the fact sheet (the page shows "
+        "it next to the report); describe only the season of the sheet",
+        'the season "2026/27" is not the season of the fact sheet',
+    ]
+    assert rt.check(GOOD.replace("players in his position", "players in 2025/26"),
+                    sheets[1]).passed  # fmt: skip
+
+
+@pytest.mark.parametrize(
+    "written", ["N'Guessan", "N\u2019Guessan", "N'Guessan's", "N\u02bcGuessan"]
+)
+def test_apostrophes_in_names_are_one_mark_and_never_split_a_name(written):
+    # Run 9 sent A. N'Guessan's own report to the template: "N'Guessan" folded
+    # to "n guessan", which no name of his sheet was.
+    cand = _candidates()
+    cand.loc[0, "player"] = "A. N'Guessan"
+    sheet = rt.fact_sheets(cand, _bargains(), _neighbours(), LEAGUES)[0]
+    assert rt.fold(written) == "nguessan"
+    assert rt.unknown_names(f"Then {written} scored. A. {written} is a winger.", sheet) == []
+    spans = rt.capital_spans(f"He says A. {written} plays.")
+    assert spans[-1] == f"A. {written}".removesuffix("'s")
 
 
 def test_a_number_the_report_computed_fails(sheets):
@@ -352,12 +468,17 @@ def _message(text: str, usage: dict | None = None, stop: str = "end_turn"):
 
 class FakeBatches:
     """The Message Batches surface the module uses; ``respond(custom_id,
-    params)`` gives a reply's text (or None for an errored request)."""
+    params)`` gives a reply's text (or None for an errored request).
+    ``slow``: seconds a batch takes, by its order of creation, on ``clock``;
+    the others end at once."""
 
-    def __init__(self, respond):
+    def __init__(self, respond, slow=None, clock=None):
         self.respond = respond
         self.sent: list[list[dict]] = []
         self.results_by_id = {}
+        self.slow = slow or {}
+        self.clock = clock or (lambda: 0.0)
+        self.ends = {}
 
     def create(self, requests):
         batch_id = f"msgbatch_{len(self.sent)}"
@@ -371,21 +492,37 @@ class FakeBatches:
                 result = SimpleNamespace(type="succeeded", message=_message(text))
             items.append(SimpleNamespace(custom_id=r["custom_id"], result=result))
         self.results_by_id[batch_id] = items
+        self.ends[batch_id] = self.clock() + self.slow.get(len(self.sent) - 1, 0)
         return SimpleNamespace(id=batch_id, processing_status="in_progress")
 
     def retrieve(self, batch_id):
-        return SimpleNamespace(id=batch_id, processing_status="ended")
+        ended = self.clock() >= self.ends[batch_id]
+        return SimpleNamespace(id=batch_id, processing_status="ended" if ended else "in_progress")
 
     def results(self, batch_id):
+        assert self.clock() >= self.ends[batch_id], "results of a batch still running"
         return iter(self.results_by_id[batch_id])
 
     def cancel(self, batch_id):
         raise AssertionError("no batch should be cancelled here")
 
 
-def _client(respond):
-    batches = FakeBatches(respond)
+def _client(respond, slow=None, clock=None):
+    batches = FakeBatches(respond, slow, clock)
     return SimpleNamespace(messages=SimpleNamespace(batches=batches)), batches
+
+
+class Clock:
+    """A fake monotonic clock that the runner's sleep moves on."""
+
+    def __init__(self):
+        self.t = 0.0
+
+    def __call__(self) -> float:
+        return self.t
+
+    def sleep(self, seconds: float) -> None:
+        self.t += max(seconds, 1.0)
 
 
 def _runner(client):
@@ -462,23 +599,69 @@ def test_cost_comes_from_the_usage_fields():
     assert rt.billed_tokens(got) == 500 + 300 + 70 + 1200
 
 
-def test_the_judge_uses_a_structured_output_and_its_verdicts_are_parsed(sheets):
+def test_the_judge_reads_field_names_and_its_verdicts_are_checked(sheets):
     verdict = {
         "faithful": False,
-        "offending_span": "on loan from Juventus",
+        "issues": [
+            {"span": "on loan from Juventus", "field": "none", "problem": "unsupported",
+             "explanation": "No loan is on the sheet."},
+        ],
         "hedging_adequate": True,
         "readability": 4,
         "reason": "Juventus is invented.",
-    }
+    }  # fmt: skip
+    report = GOOD.replace("at Como in Serie A", "at Como in Serie A, on loan from Juventus")
     client, batches = _client(lambda cid, p: json.dumps(verdict))
-    got = rt.judge_reports([(sheets[1], GOOD)], CFG, _runner(client), rt.Budget(10**9))
+    got = rt.judge_reports([(sheets[1], report)], CFG, _runner(client), rt.Budget(10**9))
     params = batches.sent[0][0]["params"]
     assert params["model"] == "claude-sonnet-5-5"
     assert params["output_config"]["format"]["schema"] == rt.VERDICT_SCHEMA
-    assert "Report:\n" + GOOD in params["messages"][0]["content"]
-    assert got[1] == rt.Verdict(False, "on loan from Juventus", True, 4, "Juventus is invented.")
+    content = params["messages"][0]["content"]
+    assert "[market_value] Market value: €30m" in content
+    assert "[similar_players] Similar players today: nearest first: M. Jaber" in content
+    assert "Report:\n" + report in content
+    v = got[1]
+    assert (v.faithful, v.offending_span, v.checkable) == (False, "on loan from Juventus", True)
+    assert v.issues[0]["field"] == "none"
     assert rt.parse_verdict('{"faithful": true}') is None
     assert rt.parse_verdict("not json") is None
+
+
+def test_a_verdict_whose_span_or_field_does_not_hold_is_set_aside(sheets):
+    def verdict(faithful, issues):
+        return rt.Verdict(faithful, "", True, 4, "", issues)
+
+    def issue(span, field, problem="contradicts"):
+        return {"span": span, "field": field, "problem": problem, "explanation": "x"}
+
+    text = sheets[1].text
+    ok = verdict(False, [issue("S. Vegas is the closest", "similar_players")])
+    assert rt.verify(ok, "Then S. Vegas  is the closest.", text) == []
+    assert rt.verify(verdict(False, [issue("Harry Kane", "player")]), GOOD, text) == [
+        'the span "Harry Kane" is not in the report'
+    ]
+    assert rt.verify(verdict(False, [issue("Alex Moreno", "minutes")]), GOOD, text) == [
+        'the field "minutes" is not a line of the sheet'
+    ]
+    assert rt.verify(verdict(False, []), GOOD, text) == ["not faithful, yet it lists no issue"]
+    assert rt.verify(verdict(True, [issue("Alex Moreno", "player")]), GOOD, text) == [
+        "faithful, yet it lists issues"
+    ]
+    assert rt.verify(verdict(False, [issue("Alex Moreno", "none")]), GOOD, text) == [
+        "it contradicts no field"
+    ]
+    assert set(rt.ISSUE_SCHEMA["properties"]["field"]["enum"]) == {*rt.FIELD_KEYS, "none"}
+    assert rt.sheet_keys(text) <= set(rt.FIELD_KEYS)
+
+
+def test_the_judge_reads_the_labels_as_the_writer_was_told():
+    # Run 9's judge faulted "elite band", "dearly" above fair value and the
+    # first similar player called the closest: the writer's own rules.
+    for text in (rt.WRITER_INSTRUCTIONS, rt.JUDGE_INSTRUCTIONS):
+        assert rt.LABEL_MEANINGS in text
+        assert "{labels}" not in text
+    assert "the first one is the closest" in rt.LABEL_MEANINGS
+    assert "never Harry Armstrong" in rt.WRITER_INSTRUCTIONS
 
 
 # The run, the storage and the page
@@ -507,7 +690,7 @@ def _settings(tmp_path) -> Settings:
     return settings
 
 
-VERDICT = {"faithful": True, "offending_span": "", "hedging_adequate": True,
+VERDICT = {"faithful": True, "issues": [], "hedging_adequate": True,
            "readability": 5, "reason": "Clear and supported."}  # fmt: skip
 
 
@@ -541,6 +724,11 @@ def test_the_run_writes_checks_judges_stores_and_reuses(tmp_path):
     assert ben["report"].startswith("Wins 71% of his duels")
     assert "the name" in ben["violations"] or "words" in ben["violations"]
     assert json.loads((folder / "summary.json").read_text())["judged"] == 1
+    assert json.loads((folder / rt.PENDING).read_text()) == {"batches": []}
+    assert bool(alex["judge_checkable"])
+    assert json.loads(alex["judge_issues"]) == []
+    kept = json.loads((folder / "verdicts.jsonl").read_text().splitlines()[0])
+    assert kept["fact_sheet"].startswith("Player: Alex Moreno")
     assert len((folder / "failures.jsonl").read_text().splitlines()) == 1
     assert len((folder / "verdicts.jsonl").read_text().splitlines()) == 1
     md = (settings.paths.reports_dir / "reports_text.md").read_text()
@@ -575,6 +763,124 @@ def test_the_run_writes_checks_judges_stores_and_reuses(tmp_path):
     assert (third["written"], third["reused"], third["judged"]) == (0, 2, 0)
     assert len(batches.sent) == sent
     assert third["cost_usd"] == 0
+
+
+COMPARED = ["player_id", "report", "source", "status", "attempts", "first_try", "violations",
+            "template_runs", "fact_hash", "judge_faithful", "judge_checkable", "judge_issues",
+            "judge_readability"]  # fmt: skip
+
+
+def _table(settings) -> pd.DataFrame:
+    path = settings.paths.processed_dir / "reports_text" / "reports.parquet"
+    return pd.read_parquet(path)[COMPARED].sort_values("player_id").reset_index(drop=True)
+
+
+def test_a_slow_writer_batch_is_collected_next_run_and_ends_as_a_fast_one(tmp_path):
+    # Run 12 waited its full 100 minutes on one batch (prompt 19c). Now the
+    # step waits 20; a batch still running is kept and the next run collects it.
+    now = pd.Timestamp("2026-11-06 05:30", tz="UTC")
+    fast = _settings(tmp_path / "fast")
+    client, _ = _client(_respond)
+    rt.run_reports(fast, client=client, now=now)
+
+    slow = _settings(tmp_path / "slow")
+    clock = Clock()
+    client, batches = _client(_respond, slow={0: 30 * 60}, clock=clock)
+    first = rt.run_reports(slow, client=client, now=now, sleep=clock.sleep, clock=clock)
+    assert 20 * 60 <= clock.t <= 21 * 60  # waited 20 minutes, not 100
+    assert (first["pending_players"], first["batches_pending"]) == (2, ["msgbatch_0"])
+    assert (first["written"], first["judged"]) == (0, 0)
+    folder = slow.paths.processed_dir / "reports_text"
+    waiting = json.loads((folder / rt.PENDING).read_text())["batches"]
+    assert [(b["id"], b["kind"], len(b["requests"])) for b in waiting] == [
+        ("msgbatch_0", "writer", 2)
+    ]
+    rows = _table(slow)
+    assert list(rows["status"]) == ["pending", "pending"]
+    assert list(rows["source"]) == ["template", "template"]
+    assert len(batches.sent) == 1  # nothing more was sent while it ran
+
+    # The next day the batch has ended: collected first, checked, the failing
+    # report retried in this run's rounds, the sample judged.
+    clock.t += 24 * 3600
+    second = rt.run_reports(slow, client=client, now=now + pd.Timedelta(days=1),
+                            sleep=clock.sleep, clock=clock)  # fmt: skip
+    assert (second["collected"], second["pending_players"], second["batches_pending"]) == (2, 0, [])
+    assert batches.sent[1][0]["custom_id"] == "w1-2"  # Ben's first retry: no new first try
+    assert (second["judged"], second["judge_faithful"]) == (1, 1)
+    pd.testing.assert_frame_equal(_table(slow), _table(fast))
+    assert json.loads((folder / rt.PENDING).read_text()) == {"batches": []}
+
+    # Reused as a fast one is: no request for Alex Moreno, his row unchanged.
+    sent = len(batches.sent)
+    rt.run_reports(slow, client=client, now=now + pd.Timedelta(days=8), sleep=clock.sleep,
+                   clock=clock)  # fmt: skip
+    asked = [r["custom_id"] for batch in batches.sent[sent:] for r in batch]
+    assert not any(cid.endswith("-1") for cid in asked)
+    assert _table(slow).iloc[0]["report"] == GOOD
+
+
+def test_a_batch_still_running_at_the_next_run_is_left_alone(tmp_path):
+    settings = _settings(tmp_path)
+    clock = Clock()
+    client, batches = _client(_respond, slow={0: 50 * 3600}, clock=clock)
+    now = pd.Timestamp("2026-11-06 05:30", tz="UTC")
+    rt.run_reports(settings, client=client, now=now, sleep=clock.sleep, clock=clock)
+    clock.t += 3600
+    again = rt.run_reports(settings, client=client, now=now + pd.Timedelta(hours=1),
+                           sleep=clock.sleep, clock=clock)  # fmt: skip
+    assert len(batches.sent) == 1  # its players are not asked for twice
+    assert (again["pending_players"], again["batches_pending"]) == (2, ["msgbatch_0"])
+    assert list(_table(settings)["status"]) == ["pending", "pending"]
+
+
+def test_a_collected_reply_whose_facts_changed_is_dropped(tmp_path):
+    settings = _settings(tmp_path)
+    clock = Clock()
+    client, batches = _client(_respond, slow={0: 30 * 60}, clock=clock)
+    now = pd.Timestamp("2026-11-06 05:30", tz="UTC")
+    rt.run_reports(settings, client=client, now=now, sleep=clock.sleep, clock=clock)
+    lists = settings.paths.processed_dir / "lists"
+    _candidates().assign(current_club=["Inter", "Torino"]).to_parquet(lists / "candidates.parquet")
+    clock.t += 24 * 3600
+    summary = rt.run_reports(settings, client=client, now=now + pd.Timedelta(days=1),
+                             sleep=clock.sleep, clock=clock)  # fmt: skip
+    assert (summary["collected"], summary["collected_stale"]) == (1, 1)
+    # Alex Moreno written again from his new sheet, next to Ben Okafor's retry
+    assert [r["custom_id"] for r in batches.sent[1]] == ["w1-2", "w0-1"]
+
+
+def test_a_slow_judge_batch_gives_its_verdicts_to_the_next_run(tmp_path):
+    settings = _settings(tmp_path)
+    clock = Clock()
+    # batch 0: the writer, batch 1 and 2: Ben's retries, batch 3: the judge
+    client, batches = _client(_respond, slow={3: 30 * 60}, clock=clock)
+    now = pd.Timestamp("2026-11-06 05:30", tz="UTC")
+    first = rt.run_reports(settings, client=client, now=now, sleep=clock.sleep, clock=clock)
+    assert (first["judged"], first["batches_pending"]) == (0, ["msgbatch_3"])
+    clock.t += 24 * 3600
+    second = rt.run_reports(settings, client=client, now=now + pd.Timedelta(days=1),
+                            sleep=clock.sleep, clock=clock)  # fmt: skip
+    assert (second["judged"], second["judge_faithful"], second["judge_due"]) == (1, 1, False)
+    table = pd.read_parquet(settings.paths.processed_dir / "reports_text" / "reports.parquet")
+    alex = table.set_index("player_id").loc[1]
+    assert pd.Timestamp(alex["judged_at"]) == now  # judged when the sample was drawn
+    # Ben Okafor asked for once more (three attempts), no second sample
+    assert len(batches.sent) == 7
+    assert not any(r["custom_id"].startswith("j-") for b in batches.sent[4:] for r in b)
+
+
+def test_the_judge_samples_once_a_week_however_often_the_run(tmp_path):
+    settings = _settings(tmp_path)
+    client, _ = _client(_respond)
+    now = pd.Timestamp("2026-11-06 05:30", tz="UTC")
+    assert rt.run_reports(settings, client=client, now=now)["judge_due"]
+    lists = settings.paths.processed_dir / "lists"
+    _candidates().assign(current_club=["Inter", "Torino"]).to_parquet(lists / "candidates.parquet")
+    daily = rt.run_reports(settings, client=client, now=now + pd.Timedelta(days=1))
+    assert (daily["written"], daily["judge_due"], daily["judged"]) == (2, False, 0)
+    weekly = rt.run_reports(settings, client=client, now=now + pd.Timedelta(days=6, hours=-0.5))
+    assert (weekly["judge_due"], weekly["judged"]) == (True, 1)
 
 
 def _stored(status, runs, version=rt.PROMPT_VERSION, fact_hash="old"):
@@ -653,3 +959,37 @@ def test_the_dictionary_names_every_stored_column():
     assert list(words["column"]) == list(rt.REPORT_COLUMNS)
     assert set(words["table"]) == {"reports"}
     assert words["meaning"].str.len().gt(20).all()
+
+
+def test_the_judge_test_scores_the_hand_sorting(tmp_path):
+    settings = _settings(tmp_path)
+    client, _ = _client(_respond)
+    rt.run_reports(settings, client=client, now=pd.Timestamp("2026-11-06", tz="UTC"))
+    folder = settings.paths.processed_dir / "reports_text"
+    table = pd.read_parquet(folder / "reports.parquet").set_index("player_id")
+    rows = [
+        {"player_id": 1, "player": "Alex Moreno", "fact_hash": table.at[1, "fact_hash"][:12],
+         "category": "real_error", "field": "similar_players", "span": "M. Jaber is the closest",
+         "note": ""},
+        {"player_id": 2, "player": "Ben Okafor", "fact_hash": "nothere", "category": "real_error",
+         "field": "player", "span": "x", "note": ""},
+    ]  # fmt: skip
+    sorting = tmp_path / "sorting.csv"
+    pd.DataFrame(rows).to_csv(sorting, index=False)
+    found = {"faithful": False, "hedging_adequate": True, "readability": 4, "reason": "r",
+             "issues": [{"span": "M. Jaber is the closest in style", "field": "similar_players",
+                         "problem": "contradicts", "explanation": "e"}]}  # fmt: skip
+    judge, batches = _client(lambda cid, p: json.dumps(found))
+    summary = rt.judge_test(settings, client=judge, sorting=sorting)
+    assert batches.sent[0][0]["custom_id"] == "t-1"
+    assert "[player] Player: Alex Moreno" in batches.sent[0][0]["params"]["messages"][0]["content"]
+    assert (summary["scored"], summary["agreed"], summary["not_found"]) == (1, 1, ["Ben Okafor"])
+    md = (settings.paths.reports_dir / "judge_test.md").read_text()
+    assert "| Alex Moreno | real_error | similar_players | not faithful |" in md
+
+
+def test_the_committed_sorting_has_the_columns_the_judge_test_reads():
+    table = pd.read_csv(rt.SORTING)
+    assert set(table["category"]) == {"real_error", "judge_mistake", "sheet_gap"}
+    assert (table.loc[table["category"] == "real_error", "span"].str.len() > 0).all()
+    assert set(table["field"]) <= set(rt.FIELD_KEYS)

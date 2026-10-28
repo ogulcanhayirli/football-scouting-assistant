@@ -110,7 +110,8 @@ $C elo                                       # team Elo from cached fixtures, re
 $C scouting [--strength v2|transfer|elo|transfer_elo]  # league strength, ability, elite, step up, riser
 $C ability                                  # ability versions: stability, backtest (reports/ability.md)
 $C lists                                    # the two tables and reports/candidates.md; run after backtest, moves, scouting, forecast history
-$C reports [--dry-run]                      # prompt 19: a written report per player (Claude Haiku 5.5, Message Batches), checked in code, 50 judged (Claude Sonnet 5.5); after lists, before site; needs ANTHROPIC_API_KEY, else one log line and nothing
+$C reports [--dry-run]                      # prompt 19: a written report per player (Claude Haiku 5.5, Message Batches), checked in code, 50 judged once in 6 days (Claude Sonnet 5.5); waits at most 20 minutes, a batch still running is collected next run (prompt 19c); after lists, before site; needs ANTHROPIC_API_KEY, else one log line and nothing
+$C reports --judge-test [--limit 20]        # prompt 19c: the judge on judge/sorting.csv (run 9's 24 unfaithful verdicts sorted by hand), reports/judge_test.md; about 0.05 USD; needs ANTHROPIC_API_KEY
 $C current [--as-of DAY] [--max-requests N]  # today's squads, transfers, season in progress (about 2,000 requests)
 $C features --current                       # the weekly run: newest season only, earlier ones as stored, plus the season so far
 $C score                                    # the weekly run: newest season with the stored models, no training
@@ -183,7 +184,7 @@ bucket named by `$SCOUT_S3_BUCKET` (eu-central-1).
 | The measured greats (prompts 18b, 18c) | `data/processed/greats/` | `greats.parquet` (239 seasons of 23 greats, one per age, 48 `emb_*`), `greats.json` (label, attribution, measures left out and kept, the correction's test), `correction.csv` (shift and spread ratio per position group and measure), `statsbomb-logo.png`; read by `scout site`; in S3 since 25 October (owner's yes; the 18c rebuild too) |
 | Archetypes (prompt 18c) | `archetypes/` (committed) and `data/processed/archetypes/` | one YAML file per player (`legends/`: 8, `calibration/`: 6), drafted 25 October and awaiting the owner's review; `archetypes.parquet` (each archetype's `z_*`, ability, `style_*`, 48 `emb_*`), `archetypes.json` (traits, sources, label, calibration verdict), `neighbours.parquet` (today's ten nearest each), `calibration.parquet` (drafted against measured per trait); written by `scout archetypes`, read by `scout site`; in S3 since 25 October (owner's yes) |
 | The page | `data/site/` | `index.html` (both tables embedded, 1.8 MB, 0.3 MB gzip on 24 October) and `data/` (the two tables as CSV and Parquet, `dictionary.csv`, `similar.json`); published to `scout-site-<account>` |
-| Written reports (prompt 19) | `data/processed/reports_text/` | `reports.parquet` (one row a player: fact sheet, its hash, the report or the template, source, status, attempts, the check's violations, the judge's verdict), `runs.jsonl` (each run's counts, tokens and cost), `verdicts.jsonl`, `failures.jsonl`, `summary.json`, `dictionary.csv`; written by `scout reports`, read by `scout site`, kept in S3 by `scout publish` (best effort). None yet: no run with a key so far |
+| Written reports (prompt 19) | `data/processed/reports_text/` | `reports.parquet` (one row a player: fact sheet, its hash, the report or the template, source, status, attempts, the check's violations, the judge's verdict), `runs.jsonl` (each run's counts, tokens and cost), `verdicts.jsonl` (with the sheet each verdict read, since prompt 19c), `failures.jsonl`, `summary.json`, `dictionary.csv`, `pending.json` (batches a run left running, collected by the next, prompt 19c); written by `scout reports`, read by `scout site`, kept in S3 by `scout publish` (best effort; in S3 since run 9, 25 October). Runs 8 to 12 so far, prompt 19.2; 19.3 rewrites all once |
 | Chat state (prompt 20) | S3 `scout-chat-<account>` (private, retained), `state/chat.json` | the caps' counters: a salt, the hour's visitors as salted IP hashes with their message counts, USD today and this month (visitors and the evaluation apart), token totals; written by the chat Lambda with conditional writes; deployed 26 October 2026 |
 | Chat evaluation (prompt 20) | `reports/chat_eval_set.json`, `reports/chat_eval.md`, `reports/chat_eval.json` | the 50 questions with their expected names and numbers and ideal tool calls; each run's answers, scores and causes. Built from the published files (`chat.site_url`). First run 26 October, second (prompt 20b) 27 October, both in process (`--local`); third (prompt 20c) 28 October through the Function URL itself |
 | User facing tables | `data/processed/lists/` | `candidates`, `bargains` (Parquet, CSV), `dictionary.csv` (see Outputs) |
@@ -232,7 +233,7 @@ through the native API, and model only regular players (450+ minutes).
 | Similar players (decision 10) | `embed --train` | the same player's other season among the five nearest (identity retrieval, 2023 to 2025) | cosine on the style vectors | hit rate overall and by position group against random; replacement check (a sale and a same position signing within 60 days: signing among the departed player's ten nearest) |
 | Greats correction (prompt 18c) | `greats` | a StatsBomb season held for Barcelona lands next to the same player's API Football season (top five, 2016/17 to 2020/21) | the uncorrected thin peer group | top five hit rate, median rank, players better and worse |
 | Archetypes (prompt 18c) | `archetypes` | drafted percentiles against the measured ones for six players drafted blind | a draft of 50 on every trait | share within 15 points (the owner's rule: most), mean gap; the real season's rank when searched with the draft |
-| Scout reports (prompt 19) | `reports` | a report whose every number and name is in its fact sheet (the check in code), then the judge's faithful, hedging and readability | the explanation written by rule (shown whenever the check still fails) | share passing on the first try and after two retries, judge verdicts on 50 a week, the owner's agreement with the judge on 20 (`judge/agreement.csv`); cost per run |
+| Scout reports (prompts 19, 19c) | `reports` | a report whose every number is on its fact sheet as the kind of number its words say, every name on the sheet, and no claim the sheet's order or fields refute (the check in code), then the judge's faithful (each span with the field it contradicts, checked in code), hedging and readability | the explanation written by rule (shown whenever the check still fails) | share passing on the first try and after two retries, checkable judge verdicts on 50 a week, the judge against the hand sorting (`judge/sorting.csv`, `--judge-test`), the owner's agreement with the judge on 20 (`judge/agreement.csv`); cost per run |
 | Chat (prompt 20, decision 11) | `chat-eval` | 30 questions whose names and numbers are computed from the published tables, 10 the tables cannot answer, 10 attempts to pull the prompt or go off topic | the ideal tool call run in code (it holds every expected answer: the tools agree with pandas on all 30) | exact match pass rate per group; each failure put down to the model's answer, its tool use or the tools; numbers found in no tool result; the run's cost |
 | Riser (decision 3) | `scouting` | one season ability: both next seasons 20 above the best of this and last season and at the 70th percentile or better; half of team minutes now | `rank_rate` | as above, plus top 50 precision per season against the base rate |
 
@@ -325,6 +326,20 @@ October 2026, from MODELS.md and `reports/`:
   test (about 0.65 USD expected; about 0.10 USD a week after that while
   nothing changes, once the reports are kept in S3). The check cannot tell
   which fact a number of the sheet belongs to; the judge can.
+  Run 9 (25 October, 19.2): 2,734 written for 0.74 USD, 29% failed the first
+  try, 8 still after retries; the judge called 26 of 50 faithful. Prompt
+  19c (28 October, MODELS.md) read the 24 others: 9 real errors the check
+  could not see (4 first names added to an initial, 4 similar players
+  wrongly called the closest, 1 season so far told as the league's), 8
+  judge mistakes, 7 left open by the sheet. The check is now typed (a
+  percentage must be the kind its words say, a similar player's number only
+  where he is named, a rate with its own chance's count) and checks those
+  claims: on run 9's 50 it catches 8 of the 9 real errors (9 of 9 on the
+  new sheets), none of the judge mistakes; on all 2,733 passed reports it
+  fails 744 (429 wrong "closest", 333 added first names, 22 cheap or dear
+  against the ratio). The typed numbers alone catch none of the 9. The judge
+  returns each span with its field, checked in code; its agreement with the
+  hand sorting is not measured (no key in the session: `--judge-test`).
 * The chat (prompt 20, deployed 26 October): the first evaluation, on the
   tables of 26 October, run in process (`chat-eval --local`, the same code,
   tools and published files; the Function URL is unreachable from a cloud
@@ -424,7 +439,12 @@ read this" box says how they are written and checked, the judge's count of
 faithful reports and, once `judge/agreement.csv` holds an answer, the
 owner's agreement with the judge. The published `dictionary.csv` gains the
 `reports` rows (the stored table's columns); `scout lists` and the
-registered forecasts keep their two table dictionary.
+registered forecasts keep their two table dictionary. Since prompt 19c a
+report cites only the forecast and the club today: the fact sheet holds no
+season so far, so the hash that decides a rewrite moves only on a move, a
+new forecast or a new prompt, and the panel shows the season so far as its
+own block under the report ("Season so far, to <day>: ...", context, not
+part of the forecast or of the report).
 
 **The Ask tab** (prompt 20, `src/scout/chat/`, decision 11): a chat box on
 the page that posts `{message, history}` (the last six turns as plain text)
@@ -598,7 +618,7 @@ detail stays in `reports/scouting.md`, `reports/moves.md`,
 * Similar players, tested by finding the same player's other season among the nearest neighbours: **done 24 October (prompt 18, decision 10).**
 * The measured greats from StatsBomb open data, against today's players with the calibrated elite chance: **done 25 October (prompt 18b).**
 * The thin peer group's correction and archetypes for players without data, with a blind calibration: **done 25 October (prompt 18c); the archetypes await the owner's review.**
-* Generated scout reports with a faithfulness check and a weekly judge: **built 25 October (prompt 19); first real run 25 October (94% template, on length); length handling fixed in prompt 19b, the next weekly run tests it.**
+* Generated scout reports with a faithfulness check and a weekly judge: **built 25 October (prompt 19); first real run 25 October (94% template, on length); length handling fixed in prompt 19b (run 9: 8 of 2,734 on the template); the judge's verdicts sorted, the check typed, the judge made checkable, the reports made stable and slow batches carried over in prompt 19c (28 October).**
 * January window forecast, published mid December and scored in February.
 * A capped chat over the two tables: **built and deployed 26 October (prompt 20)**; evaluated in process (28 of 30, 10 of 10, 10 of 10); the two fixes, a faster cold start and the 5 minute warm ping deployed 27 October (prompt 20b: 30 of 30, 10 of 10, 10 of 10); run through the Function URL on 28 October (prompt 20c): 30 of 30, 10 of 10, 10 of 10, 0.26 USD.
 * A matchup report before any match model.
@@ -613,7 +633,9 @@ creates it; it then calls `scout update`, which prompt 4 must add), then
 `features --current`, `score`, `embed` (prompt 18: 17 seconds, 1.3 GB),
 `archetypes` (prompt 18c: 21 seconds; reloads `archetypes/` from the
 checkout, so the owner's edits reach the page), `lists`, `reports` (prompt
-19: `continue-on-error`, up to 100 minutes of batches, the cost line in the
+19: `continue-on-error`, at most 20 minutes of batches since prompt 19c, a
+batch still running collected by the next run from `pending.json`, the cost
+line in the
 run's summary, the owner's 20 judged reports kept as the run's artifact
 `scout-reports-judged`), `site`, `publish`. There is no daily run; the neighbours of the
 current rows are computed by this weekly one. It never trains.
@@ -699,7 +721,8 @@ src/scout/  config, secrets, ratelimit, storage, sync, athena, featurestore,
   models/                   targets, backtest, estimators, moves, run, store (the stored models)
 forecasts/  registered forecasts, one dated folder each (committed)
 archetypes/ legends/ and calibration/: one YAML file per player, drafted, for the owner to review and edit
-judge/      agreement.csv: the owner's yes or no on the weekly judge's verdicts (prompt 19), read by scout site
+judge/      agreement.csv: the owner's yes or no on the weekly judge's verdicts (prompt 19), read by scout site;
+            sorting.csv: run 9's 24 unfaithful verdicts sorted by hand (prompt 19c), read by scout reports --judge-test
 training/   SageMaker entry point and requirements
 scripts/    feasibility.py, run_extras.py, rebuild_match_seasons.py, run_expansion.py, repair_names.py
 tests/      unit, contracts, fixtures (synthetic)
@@ -762,10 +785,10 @@ Settle them with the owner rather than guessing.
     Lambda rights to `scout-cfn-exec` (v4) and `scout-boundary` (v2) on 26
     October.
 * The page published by weekly run 9 (25 October, started by hand after
-  prompt 19b; seen on 26 October) says 2,726 written reports and 8 by rule,
-  and 26 of the 50 judged faithful: the 19b fix let nearly every report pass
-  the check, and the judge's 26 of 50 is the owner's to read
-  (`judge/agreement.csv`). Its cost and its log were not read here.
+  prompt 19b) said 2,726 written reports and 8 by rule, and 26 of the 50
+  judged faithful. Prompt 19c sorted the other 24 (Models, MODELS.md); the
+  owner's agreement with the judge (`judge/agreement.csv`) is still his to
+  give.
 
 * `SCOUTING.md` does not exist; the scouting decisions are in the docstring of
   `src/scout/scouting.py` and the numbers in MODELS.md.
@@ -969,3 +992,18 @@ Settle them with the owner rather than guessing.
   added. The check matches a number to the sheet, not to its fact; the
   judge reads meaning. Batches take no server side fallback, so a refused
   verdict is left out. Nothing was uploaded to S3 by these sessions.
+  Since then the owner added `KeepTheReports` (the reports files are in S3
+  from run 9 on) and runs 9 to 12 ran with the key (Models).
+* Written reports, prompt 19c (28 October, prompt version 19.3; tested with
+  the fake client only: no `SCOUT_CHAT_CLAUDE_KEY` or `ANTHROPIC_API_KEY`
+  was set in the session). Open: (1) the new judge's agreement with the
+  hand sorting is not measured: run `scout reports --judge-test` with a key
+  before the next weekly run, which rewrites every report and with it the
+  sheets the sorted reports were written from (after it, read the older
+  `processed/reports_text/reports.parquet` version from the bucket first);
+  (2) the next weekly run is the full rewrite the owner approved (about 0.80
+  to 0.95 USD expected; after it about 0.10 to 0.15 USD a week, weekly or
+  daily); how many reports the stricter check sends to the template is
+  measured only by that run; (3) `pending.json` reaches the next run only through `scout
+  publish`, so a run whose publish fails starts without it (the batches'
+  replies are then paid but unused, and the players written again).

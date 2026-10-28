@@ -27,9 +27,10 @@ env:
 jobs:
   weekly:
     runs-on: ubuntu-latest
-    # The reports step may wait on the Message Batches API for up to 100
-    # minutes (reports_text.max_run_minutes); everything else takes about 5.
-    timeout-minutes: 150
+    # The reports step waits on the Message Batches API for at most 20
+    # minutes (reports_text.max_run_minutes, prompt 19c); a batch still
+    # running then is collected by the next run. Everything else takes about 5.
+    timeout-minutes: 60
     env:
       AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
@@ -99,12 +100,14 @@ jobs:
 
       # Prompt 19: Claude Haiku 5.5 writes a report per player from his fact
       # sheet, code checks every number and name, Claude Sonnet 5.5 judges a
-      # sample of 50. Publishing never depends on it: without the
+      # sample of 50 once in 6 days. It first collects any batch the last run
+      # left running (pending.json, kept in S3 by publish), then waits at most
+      # 20 minutes on new ones. Publishing never depends on it: without the
       # ANTHROPIC_API_KEY secret it logs one line and does nothing, and a
       # failure here is ignored (the page then shows the explanations).
       - name: Scout reports (written, checked, a sample judged)
         continue-on-error: true
-        timeout-minutes: 120
+        timeout-minutes: 30
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: uv run scout --config "$CONFIG" reports | tee reports.txt

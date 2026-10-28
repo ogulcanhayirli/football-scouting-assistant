@@ -1434,7 +1434,8 @@ model of football: nothing here changes a table, a chance or a flag.
   computed number (€8.4m more than fair), wrong units (€30 for 30%, 142
   minutes for 142 players), the wrong league number (Ligue 1 on a sheet with
   Ligue 2), the length, and reports that pass.
-* **Its limits, by design.** The check reads that a number exists in the
+* **Its limits, by design** (prompt 19c narrowed them: typed numbers, fields
+  and claims, below). The check reads that a number exists in the
   sheet, not which fact it belongs to: "93rd percentile" for a player whose
   ability is 92nd passes when a similar player in the sheet is 93rd (a test
   says so). A number without a unit or a counted word is matched against the
@@ -1497,6 +1498,143 @@ session had no Claude API key either), so the next weekly run is the real
 test of the first try and retry pass rates; its numbers go here. Expected
 cost of that full rerun: about 0.65 USD if one report in five fails the
 first try, at most about 1.45 USD if they fail as in run 8 (docs/DEPLOY.md).
+
+## Scout reports: the judge's verdicts, a typed check and stable reports (prompt 19c, 28 October 2026)
+
+**Runs 9 to 12.** Run 9 (25 October, prompt 19.2) wrote all 2,734 reports
+for 0.74 USD (writer 0.66, judge 0.08): 796 failed the check on the first try
+(29%) and 8 still after the retries, so the page showed 2,726 written reports.
+The length fix held. Runs 10 to 12 (26 and 27 October, started by hand)
+reused nearly everything and cost 0.08 to 0.09 USD each, almost all of it the
+judge. Run 12 waited its full 100 minutes on one batch and got 46 verdicts of
+50. Over the four runs the judge called 98 of 196 reports faithful, run 9 26
+of 50, although every one had passed the number and name check.
+
+**The 24 unfaithful verdicts of run 9, read one by one** (`judge/sorting.csv`,
+committed, with the span and the field of each):
+
+| Kind | Reports | What | Example |
+|---|---|---|---|
+| A real error the check could not see | 9 | a first name added to an initial (4: Harry Armstrong, Taras Mykhavko, Rien Van Helden, Alessandro Fontanarosa); the second or third similar player called the closest (4); his own season so far told as the league's (1) | K. Mac Allister: "Alessandro Dellavalle is closest to him in playing style", but Dellavalle is the second of the list and L. Jäger the first |
+| A judge mistake (the report is faithful) | 8 | "his elite band", the prompt's own words, read as a wrong label (2); "dearly" at 265% and 177% of fair value, read as wrong because the sheet also said "among the cheapest 97.2%" (2); a not rated reason that is exactly the condition he fails (2); "no warning flags" at the forecast, read against today's flag (1); "bottom 8%" repeated from the sheet (1) | A. Koné: "so the market prices him dearly rather than cheaply" at 265% of fair value |
+| Something else: the sheet left it open | 7 | the first similar player called the closest, true, but the sheet did not say the list was nearest first (5); "this season" meaning 2025/26 in the ability line and 2026/27 in the season so far line (2) | L. Hall: "Iza Carcelén is the closest to him in playing style" (the first of his list) |
+
+The judge also passed two real errors in reports it called unfaithful for
+another reason (Jair and J. Tverskov: injuries counted over twelve months
+told as this season's) and one in a report it called faithful (Pau Cubarsí:
+the first and the third similar players called the closest). None of the
+real errors was a number on the sheet attached to the wrong fact.
+
+**What changed in the check.** Rerun on all 2,733 reports that had passed (on
+their own sheets, with the season so far line), the new check fails 744:
+429 of the 1,564 "closest" claims named someone other than the nearest, 333
+reports added a first name to an initial, 22 called a player cheap above his
+fair value or dear below it, 5 named another season, 3 used a sheet number
+as another kind of number. On run 9's 50 judged reports it catches 8 of the
+9 real errors with those same sheets and 9 of 9 with the sheets of prompt
+19c (the season so far is no longer on them, so citing it fails); it flags
+none of the 8 judge mistakes and none of the 7 sheet gaps, and finds one
+real error among the 26 the judge passed. The typed number part on its own
+catches none of the 9: the errors were not in the numbers.
+
+* **Typed numbers.** A percentage is read with what its words say it
+  measures (a chance's rate, market value as a share of fair value, a place
+  among the listed players, a share of team minutes, a change of value, top
+  or bottom so many percent, a share of his own passes or duels) and must
+  match a sheet percentage of that kind; a percentile must be a percentile;
+  money must be a value field; a count that names what it counts (minutes,
+  matches, players, a match rating) never matches a sheet number that names
+  something else. The sheet's own sentences (flags, standout stats) are read
+  by the same rules. A number whose words say nothing matches any sheet
+  number of its unit, as before.
+* **Fields.** A similar player's number (his age, his ability) is allowed only
+  in a sentence that names a similar player. Each count of past players and
+  the rate after it must be the count and the rate of one chance, and of the
+  chance the sentence names when it names one ("Of 878 past players in his
+  elite band, 25% became" fails: 878 and 25% are the step up chance).
+* **Claims.** Only the first similar player may be called the closest (the
+  first two may be "the closest" together); a first name added to an initial
+  fails anywhere, also opening a sentence, where it used to pass as a
+  possible ordinary word; cheap must be below 100% of fair value and dear
+  above it ("not cheaply" and "dearly rather than cheaply" are read as such);
+  the report may not mention the season so far nor a season label other than
+  the sheet's.
+* **Apostrophes.** Straight and curly apostrophes and the modifier letter are
+  one mark inside a name and never split it: "N'Guessan" folds to
+  "nguessan", so A. N'Guessan's own report (sent to the template twice) now
+  passes.
+* **The sheet.** The similar players are listed "nearest first"; the fair
+  value line says above or below; past the middle the bargain place counts
+  from the dear end ("among the dearest 2.8%", not "the cheapest 97.2%"); the
+  ability line names the season (in 2025/26) instead of "this season". The
+  writer is told the same rules (no added first names, only the first is the
+  closest, no season so far), and the label meanings are one text shared by
+  the writer's and the judge's prompts.
+
+**The judge's verdicts are checkable.** The judge reads the sheet with each
+line opened by its field name (`[elite_chance] Elite chance: ...`) and
+returns, for every claim the sheet does not support, the exact span, the
+field it contradicts (or none, for an added name or reason) and whether it
+contradicts a line or no line covers it. Code then checks each verdict: every
+span must be in the report (spacing and quote marks aside), every field on
+the sheet, an unfaithful verdict must list an issue and a faithful one none.
+A verdict that fails is stored but set aside (`judge_checkable`), and the
+page counts only checkable ones. The judge also reads the label meanings the
+writer was given, which answers the judge mistakes of run 9. No Claude API
+key was set in this session, so the new judge was tested with the fake
+client only: its agreement with the hand sorting is not measured yet.
+`scout reports --judge-test` runs it on the first 20 sorted reports (9 real
+errors, 8 judge mistakes, 3 sheet gaps; about 0.05 USD through the Message
+Batches API) and writes `reports/judge_test.md`: a real error agrees when the
+verdict is checkable, unfaithful and one of its spans overlaps the sorted
+span, a judge mistake when the verdict is faithful. Run it before the next
+weekly run: that run rewrites every report, and the sorted reports' sheets
+then live only in the bucket's older versions of `reports.parquet`
+(`verdicts.jsonl` keeps the sheet of every verdict from now on).
+
+**Stable reports** (decided in this prompt; the one full rewrite approved).
+The report cites only the forecast facts and the club today: the season so
+far left the fact sheet, so the hash that decides a rewrite covers only what
+the report may cite. A new match changes nothing; a move (club today), a new
+forecast or a new prompt does. The page shows the season so far as its own
+block under the report ("Season so far, to 24 October 2026: 7 matches; 629
+minutes, 100% of team minutes; ...", with the line "League matches of the
+season in progress: context, not part of the forecast or of the report").
+What it changes in the text: no more "So far this season he has 512 minutes
+in 7 matches" (1,059 of the 2,733 run 9 reports had such a sentence), no mix
+of "this season" for two seasons, and the example report in the prompt ends
+on the similar player instead. Prompt version 19.3, so the next run rewrites
+every report once.
+
+**Slow batches.** The step waits at most 20 minutes (`max_run_minutes`). A
+batch still running then is not cancelled: its id and what each request was
+for (the player, his sheet's hash, the attempt, the earlier word counts) go
+to `processed/reports_text/pending.json`, kept in S3 with the reports; its
+players show the explanation for now, with status pending. The next run
+collects every such batch before sending anything: a writer reply is checked
+as the attempt it was and its retries join that run's rounds, a verdict is
+applied if the report it read is still the one shown, and a reply whose
+sheet changed since is dropped and the player written again. A batch still
+running at the next run is left alone, and its players are not asked for
+twice. Tests with a fake client and a fake clock: a writer batch of 30
+minutes ends after the 20 minute wait as pending, is collected the next day,
+and the stored table equals a fast run's column for column (report, status,
+attempts, first try, violations, the judge's verdict); then it is reused as a
+fast one is.
+
+**The judge once a week.** With daily runs from 6 November, the judge reads a
+sample only when none was judged or sent in the last 6 days
+(`judge_min_days`), so 50 reports a week, not 50 a day.
+
+**Cost.** The one full rewrite: about 0.70 to 0.85 USD for the writer (run 9
+paid 0.66 for the same 2,734 reports with 29% retried; the new claims may add
+retries) and about 0.10 for the judge, so about 0.80 to 0.95 USD. After that:
+the judge about 0.10 USD a week (runs 9 to 12 paid 0.075 to 0.083 for 50;
+the field names and the issues add about a quarter) and the writer only for
+players whose cited facts changed, mostly moves (a few cents a week, more in
+the January window). About 0.10 to 0.15 USD a week whether the runs are
+weekly or daily, against about 0.70 USD a run (about 4.90 a week daily) had
+the season so far stayed in the sheets.
 
 ## The chat over the tables (prompt 20, 26 October 2026)
 

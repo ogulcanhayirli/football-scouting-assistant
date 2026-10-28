@@ -1,0 +1,25 @@
+run_at,player_id,player,fact_hash,category,field,span,note
+2026-10-25,276662,P. Pagis,f8b3f242831e,real_error,season_so_far,Ligue 1 has returned 7 matches and 524 minutes so far this season,his own season so far told as the league's
+2026-10-25,405360,H. Armstrong,bda9b1452103,real_error,player,Harry Armstrong,a first name the sheet does not give (H. Armstrong)
+2026-10-25,385027,T. Mykhavko,732adcbf2184,real_error,player,Taras Mykhavko,a first name the sheet does not give
+2026-10-25,358380,R. Van Helden,79a5a95f131f,real_error,player,Rien Van Helden,a first name the sheet does not give
+2026-10-25,336704,A. Fontanarosa,918adf7c8075,real_error,player,Alessandro Fontanarosa,a first name the sheet does not give
+2026-10-25,5967,K. Mac Allister,76e3e68adc2f,real_error,similar_players,Alessandro Dellavalle is closest to him in playing style,the second listed called the closest
+2026-10-25,70366,John,048c5e24641b,real_error,similar_players,J. Pavlenka is the closest in playing style,the third listed called the closest
+2026-10-25,15855,J. Tverskov,769a7363d8e3,real_error,similar_players,F. Grillitsch is closest in playing style,"the second listed called the closest; also 6 matches missed injured (12 months) told as this season, which the judge missed"
+2026-10-25,8990,N. Ghandri,93fc26a00da1,real_error,similar_players,"Luccas Claro, Eyüpspor in the Süper Lig, is closest to him in playing style",the third listed called the closest
+2026-10-25,296667,Gavi,036efb84ba6d,judge_mistake,elite_chance,,elite band is the prompt's own words for the elite chance's band
+2026-10-25,181808,F. Miretti,ce981c622c6c,judge_mistake,elite_chance,,elite band is the prompt's own words for the elite chance's band
+2026-10-25,437482,A. Koné,8a9db1391ec6,judge_mistake,fair_value,,265% of fair value is dear by the prompt's rule; the judge read 'among the cheapest 97.2%' as cheap
+2026-10-25,13736,D. Muñoz,ba6200f20529,judge_mistake,fair_value,,177% of fair value is dear; the judge read 'among the cheapest 84%' as cheap
+2026-10-25,370475,E. Dijkstra,043c528a5165,judge_mistake,elite_chance,,"rank #1,839 is the one condition he fails (he is 19), so the reason is the sheet's"
+2026-10-25,63274,B. Yılmaz,869d4d5aab87,judge_mistake,elite_chance,,"at 26 his age is the one condition he fails (rank #323 is inside), so the reason is the sheet's"
+2026-10-25,107,S. Diop,d00fc314208c,judge_mistake,warning_flags,,no flags at the forecast is what the sheet says; today's flag was in the season so far line
+2026-10-25,302926,N. Romero,5f35494163e0,judge_mistake,standout_stats,,the report repeats the sheet's own 'bottom 8%'
+2026-10-25,284492,L. Hall,890f477a18d4,sheet_gap,similar_players,Iza Carcelén is the closest to him in playing style,"the first listed, so true, but the sheet did not say the list is nearest first"
+2026-10-25,162887,E. Millot,69dc47a3f558,sheet_gap,similar_players,R. Bogarín and A. Ibrahimović are closest to him in playing style,the first two listed; the order was not on the sheet
+2026-10-25,362711,Jair,67d26c5a9115,sheet_gap,similar_players,K. Diks is closest to him in playing style,"the first listed; the order was not on the sheet. Also 11 matches missed injured (12 months) told as this season, which the judge missed"
+2026-10-25,30765,I. Radu,c2f8955647fd,sheet_gap,similar_players,M. Maignan is closest in playing style,the first listed; the order was not on the sheet
+2026-10-25,26302,Pablo Maffeo,23d6c679743c,sheet_gap,similar_players,J. Williams is the closest to him in playing style,the first listed; the order was not on the sheet
+2026-10-25,287916,R. van den Berg,cf1c7ed8fc64,sheet_gap,season_so_far,He has no league minutes so far this season.,the sheet said this season for 2025/26 (ability) and for 2026/27 (season so far)
+2026-10-25,47341,Marc Roca,ad97af40ae0d,sheet_gap,season_so_far,and in the 90th percentile so far this season,the sheet said this season for 2025/26 (ability) and for 2026/27 (season so far)

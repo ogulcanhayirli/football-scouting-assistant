@@ -280,14 +280,30 @@ stored one is reused. A player whose report ended on the template is asked
 for again on the next run, once; after two runs in a row on the template he
 is left to the explanation written by rule until the prompt version or the
 writer model changes (`template_runs`), so failures are not paid for every
-week. Each run, Claude
-Sonnet 5.5 judges 50 reports not judged before (structured output: faithful
-with the offending passage, hedging adequate, readability 1 to 5).
+week. Once in 6 days (`judge_min_days`, so daily runs judge once a week),
+Claude Sonnet 5.5 judges 50 reports not judged before (structured output:
+faithful, every unsupported span with the field of the sheet it contradicts,
+hedging adequate, readability 1 to 5; code checks every span against the
+report and every field against the sheet, prompt 19c). Since prompt 19c the
+fact sheet holds only what the report may cite, the forecast and the club
+today: the season so far is shown next to the report on the page, so a new
+match never rewrites a report.
 
 * **The step never blocks the page.** Without the `ANTHROPIC_API_KEY` secret it
-  logs one line and does nothing; any failure is ignored (`continue-on-error`);
-  batches still running after `max_run_minutes` (100) are cancelled and their
-  players show the explanation this week.
+  logs one line and does nothing; any failure is ignored (`continue-on-error`).
+* **Slow batches** (prompt 19c; run 12 waited its full 100 minutes on one). The
+  step waits at most `max_run_minutes` (20) on the Message Batches API. A
+  batch still running then is not cancelled: its id and what each request
+  was for go to `processed/reports_text/pending.json` (kept in S3 by `scout
+  publish` with the reports), its players show the explanation written by
+  rule for now (status pending), and the page is published. The next run
+  first collects every batch in that file: writer replies are checked,
+  retried and stored exactly as if they had come back in time, verdicts are
+  applied to the reports they read, and a reply whose sheet changed since is
+  dropped. A batch still running at the next run is left alone and its
+  players are not asked for twice; results stay readable for 29 days, and a
+  batch that cannot be read any more is asked for again. The step's timeout
+  is 30 minutes and the job's 60.
 * **Hard token cap** (`reports_text.max_tokens_per_run` in
   `configs/backfill.ultra.yaml`, 30 million): before a batch is sent, each
   request's worst case (its input counted at one token per two bytes, which
@@ -306,8 +322,9 @@ with the offending passage, hedging adequate, readability 1 to 5).
   reply (input, cache writes at 2 times for the one hour cache, cache reads at
   0.1 times, output; half price through the Message Batches API) and printed
   in the run's summary as one line, `Reports: <n> written (<n> failed the
-  check first, <n> still after retries, <n> held), <n> reused, <n> judged;
-  cost $<total> (writer $<x>, judge $<y>); <tokens> of 30,000,000 tokens.`
+  check first, <n> still after retries, <n> held), <n> reused, <n> collected
+  from an earlier batch, <n> in a batch still running, <n> judged; cost
+  $<total> (writer $<x>, judge $<y>); <tokens> of 30,000,000 tokens.`
   Every run also appends its numbers to `processed/reports_text/runs.jsonl`.
 
 What it costs. The estimates below were made before any real run, from the
@@ -327,7 +344,20 @@ October, commit 6ef72a8) stands next to them.
 | Judge, 50 reports | about 0.30 USD | 0.08 USD |
 | **Full regeneration with the judge** | **about 0.70 to 1.10 USD** | **1.41 USD**, 21.2 million of the 30 million tokens |
 | **Weekly run, nothing changed** (today: the tables are rebuilt byte for byte until a `scout current` pull) | **about 0.30 USD** (the judge only) | about 0.10 USD (the judge's real cost) |
-| Weekly run after a pull that moves the season so far of most players | about a full regeneration | |
+| Weekly run after a pull that moves the season so far of most players | about a full regeneration (until prompt 19c) | |
+
+**Since prompt 19c** (prompt version 19.3, so the next run rewrites every
+report once, approved by the owner): run 9 paid 0.66 USD for the writer on
+2,734 reports with 29% retried, and runs 9 to 12 paid 0.075 to 0.083 USD for
+the judge's 50.
+
+| Run | Expected |
+|---|---|
+| The one full rewrite (writer, first tries and retries; the stricter check may add retries) | about 0.70 to 0.85 USD |
+| Judge, 50 reports (field names and issues add about a quarter) | about 0.10 USD |
+| **The next run in all** | **about 0.80 to 0.95 USD** |
+| **A week after that, weekly or daily runs** (the judge once in 6 days, the writer only for players whose cited facts changed, mostly moves) | **about 0.10 to 0.15 USD** |
+| A week of daily runs had the season so far stayed on the sheets | about 4.90 USD (0.70 a run) |
 
 Why run 8 cost more: 98% of the reports failed the length rule of 120 to
 150 words on the first try and 94% still after two retries, nearly all on
@@ -359,7 +389,19 @@ in the repository; the page's "how to read this" box shows the agreement rate
 from the next run on. The weekly run keeps both files as the artifact
 `scout-reports-judged` of the run (Actions, the run, Artifacts; 90 days); a
 session running `scout reports` writes them under `reports/`. Every verdict
-also stays in `processed/reports_text/verdicts.jsonl`.
+also stays in `processed/reports_text/verdicts.jsonl`, with the sheet it
+read since prompt 19c.
+
+`scout reports --judge-test [--limit 20]` (prompt 19c) runs the judge as it is
+now on the reports sorted by hand in `judge/sorting.csv` (run 9's 24
+unfaithful verdicts: 9 real errors, 8 judge mistakes, 7 sheet gaps) and
+writes its agreement to `reports/judge_test.md`; about 0.05 USD for 20 through
+the Message Batches API, with `ANTHROPIC_API_KEY` set (in a session, the
+owner's `SCOUT_CHAT_CLAUDE_KEY` passed as `ANTHROPIC_API_KEY=... scout
+reports --judge-test`, never printed). It reads the sorted reports' sheets
+from `reports.parquet`, so run it before the next weekly run rewrites them,
+or fetch the older version of `processed/reports_text/reports.parquet` from
+the bucket first.
 
 ## The chat (prompt 20)
 

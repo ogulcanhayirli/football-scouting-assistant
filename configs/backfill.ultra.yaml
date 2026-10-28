@@ -157,13 +157,16 @@ backfill:
 # through the Message Batches API. The cap counts every token one run may be
 # billed for (writer and judge, input, cache writes and reads, output);
 # requests that could pass it are not sent. Rates in USD per million tokens.
+# The step waits at most 20 minutes on the batches (prompt 19c): a batch still
+# running is collected by the next run; the judge reads a sample once in 6 days.
 reports_text:
   writer_model: claude-haiku-5-5
   judge_model: claude-sonnet-5-5
   judge_sample: 50
   retries: 2
   max_tokens_per_run: 30000000
-  max_run_minutes: 100
+  max_run_minutes: 20
+  judge_min_days: 6
   prices:
     claude-haiku-5-5: {input: 0.10, output: 0.50}
     claude-sonnet-5-5: {input: 2.00, output: 10.00}

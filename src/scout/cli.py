@@ -355,8 +355,13 @@ def cmd_lists(settings: Settings, args: argparse.Namespace) -> int:
 
 
 def cmd_reports(settings: Settings, args: argparse.Namespace) -> int:
-    from scout.reports_text import cost_line, estimate_run, run_reports
+    from scout.reports_text import cost_line, estimate_run, judge_test, run_reports
 
+    if args.judge_test:
+        print(
+            judge_test(settings, limit=args.limit) or "Judge test: skipped (no ANTHROPIC_API_KEY)."
+        )
+        return 0
     if args.dry_run:
         for key, value in estimate_run(settings).items():
             print(f"{key}: {value}")
@@ -831,6 +836,13 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Build the fact sheets and estimate the run's tokens and cost; no request is sent",
     )
+    rep.add_argument(
+        "--judge-test",
+        action="store_true",
+        help="Prompt 19c: the judge on the reports sorted by hand in judge/sorting.csv, its "
+        "agreement in reports/judge_test.md (about 0.05 USD for 20); writes no report",
+    )
+    rep.add_argument("--limit", type=int, default=20, help="Reports for --judge-test")
     rep.set_defaults(func=cmd_reports)
 
     ce = sub.add_parser(

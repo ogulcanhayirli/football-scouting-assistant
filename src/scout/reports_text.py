@@ -7,8 +7,11 @@ tables (one report a player, also when he is in both):
   line: age, position, club at forecast and today, league, value and fair
   value, ability percentile, each chance with its count of past players and
   what it measured, the flags with their raw numbers, the rising tag, the
-  three explanation stats, the season so far, the three most similar players
-  of today and, on the bargains, the list, the minutes and the contract. The
+  three explanation stats, the three most similar players of today (nearest
+  first) and, on the bargains, the list, the minutes and the contract. Since
+  prompt 19c it holds only what the report may cite, the forecast and the
+  club today: the season so far changes with every match and is shown next
+  to the report on the page instead, so a match never rewrites a report. The
   sheet is the only variable part of the request; the system prompt and the
   shared instructions are a fixed prefix with prompt caching.
 * **Writer.** Claude Haiku 5.5 writes about 130 words (never more than 150,
@@ -18,8 +21,13 @@ tables (one report a player, also when he is in both):
   otherwise the stored one is reused.
 * **Check, in code** (``check``). Every number of the report (with its percent
   sign or unit) must match a number of the fact sheet within the rounding the
-  report wrote it with, and every proper noun must be a name of the fact
-  sheet; the length must be 90 to 170 words (prompt 19b: the first real run
+  report wrote it with and, since prompt 19c, of the kind its words say (a
+  chance's rate, a share of fair value, of minutes, a percentile...); a
+  similar player's number only where he is named, a rate with the count of
+  its own chance. Every proper noun must be a name of the fact sheet (no
+  first name added to an initial), only the first similar player may be
+  called the closest, cheap and dear must follow the fair value ratio, and
+  the season so far stays out; the length must be 90 to 170 words (prompt 19b: the first real run
   held 120 to 150 and sent 94% of the players to the template, nearly all
   for a few words over). A failing report goes back to the writer with the
   violations, its word count and the cut needed, at most twice; after that
@@ -27,12 +35,20 @@ tables (one report a player, also when he is in both):
   logged (``failures.jsonl``). A player whose report ended on the template
   is asked for again on the next run, once (``template_runs``), then not
   until the prompt version or the writer model changes.
-* **Judge.** Each run a sample of reports not judged before (``judge_sample``,
-  50) goes to Claude Sonnet 5.5 with a structured output: faithful (with the
-  offending span), hedging adequate, readability 1 to 5. The verdicts are
-  stored, and ``reports/reports_text.md`` lays out 20 of them for the owner,
-  whose agreement goes to ``judge/agreement.csv`` (committed) and from there
-  to the page.
+* **Judge.** Once in ``judge_min_days`` (6) a sample of reports not judged
+  before (``judge_sample``, 50) goes to Claude Sonnet 5.5 with the sheet's
+  field names and a structured output: faithful, every unsupported span with
+  the field it contradicts, hedging adequate, readability 1 to 5. Code
+  checks each span against the report and each field against the sheet
+  (``verify``); a verdict that fails is set aside. The verdicts are stored,
+  and ``reports/reports_text.md`` lays out 20 of them for the owner, whose
+  agreement goes to ``judge/agreement.csv`` (committed) and from there to the
+  page; ``judge_test`` scores the judge against the hand sorting of
+  ``judge/sorting.csv``.
+* **Slow batches** (prompt 19c). The step waits at most ``max_run_minutes``
+  (20); a batch still running is kept in ``pending.json`` and collected by
+  the next run before anything new is sent, its replies checked, retried,
+  judged and stored as a fast batch's are.
 * **Budget.** ``max_tokens_per_run`` is a hard cap: before a batch is sent,
   each request's worst case (its input estimated from above, plus its
   ``max_tokens``) is added to what the run has used, and requests that could
@@ -41,7 +57,7 @@ tables (one report a player, also when he is in both):
 
 Everything lands in ``data/processed/reports_text/``: ``reports.parquet``
 (one row a player), ``runs.jsonl``, ``verdicts.jsonl``, ``failures.jsonl``,
-``summary.json`` and ``dictionary.csv``. ``scout site`` rebuilds the fact
+``summary.json``, ``dictionary.csv`` and ``pending.json``. ``scout site`` rebuilds the fact
 sheets and shows a stored report only when its hash still matches, so a
 stale report never reaches the page. Tests use a fake client; nothing here
 calls the API without ``ANTHROPIC_API_KEY``.
@@ -59,7 +75,7 @@ import re
 import time
 import unicodedata
 from collections.abc import Callable, Iterable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 import pandas as pd
@@ -69,7 +85,7 @@ from scout.fsutil import atomic_write_text
 log = logging.getLogger(__name__)
 
 OUT = "reports_text"  # under data/processed
-PROMPT_VERSION = "19.2"  # part of every fact hash: a new prompt regenerates every report
+PROMPT_VERSION = "19.3"  # part of every fact hash: a new prompt regenerates every report
 SIMILAR_SHOWN = 3
 WORDS_TARGET = 130  # what the prompt asks for
 WORDS_ASKED = 150  # the most the prompt allows; the check allows ``words_max`` (170)
@@ -109,13 +125,19 @@ class Num:
     """A number of a fact sheet or a report. ``unit``: plain, pct, eur or
     ordinal; ``tag``: what it counts (age, minutes, players, ...) when the
     words around it say so; ``step``: the precision it was written with (0
-    for the exact values of the tables)."""
+    for the exact values of the tables); ``kind``: what a percentage or a
+    percentile measures (``KINDS``) when the words around it say so;
+    ``field``: the key of the sheet's fact it belongs to (sheet numbers only);
+    ``at``: where it starts in the report (report numbers only)."""
 
     value: float
     unit: str = "plain"
     tag: str | None = None
     step: float = 0.0
     text: str = ""
+    kind: str | None = None
+    field: str | None = None
+    at: int = -1
 
 
 @dataclass(frozen=True)
@@ -125,6 +147,46 @@ class Fact:
     numbers: tuple[Num, ...] = ()
     names: tuple[str, ...] = ()  # the proper nouns this fact holds
     people: tuple[str, ...] = ()  # names of people: a surname alone is allowed too
+
+    @property
+    def key(self) -> str:
+        return field_key(self.label)
+
+
+# The field name of each line of a sheet: what the judge names when a report
+# contradicts a line (prompt 19c). ``season_so_far`` is only on sheets of
+# prompt version 19.2 and before, kept so their verdicts can be read again.
+LABEL_KEYS = {
+    "Player": "player",
+    "Season described": "season",
+    "Age": "age",
+    "Position": "position",
+    "Club at forecast": "club_at_forecast",
+    "Club today": "club_today",
+    "Value rank": "value_rank",
+    "Bargain list": "bargain_list",
+    "Market value": "market_value",
+    "Fair value (our model)": "fair_value",
+    "Ability": "ability",
+    "Minutes": "minutes",
+    "Elite chance": "elite_chance",
+    "Step up chance": "step_up_chance",
+    "Big move chance": "big_move_chance",
+    "Fall back risk": "fall_back_risk",
+    "Warning flags": "warning_flags",
+    "Rising": "rising",
+    "Standout stats": "standout_stats",
+    "Contract until": "contract",
+    "Tag": "tag",
+    "Season so far": "season_so_far",
+    "Similar players today": "similar_players",
+}
+FIELD_KEYS = list(LABEL_KEYS.values())
+CHANCE_KEYS = ("elite_chance", "step_up_chance", "big_move_chance", "fall_back_risk")
+
+
+def field_key(label: str) -> str:
+    return LABEL_KEYS.get(label, fold(label).replace(" ", "_"))
 
 
 @dataclass
@@ -144,12 +206,35 @@ class FactSheet:
         blob = f"{PROMPT_VERSION}\n{model}\n{self.text}".encode()
         return hashlib.sha256(blob).hexdigest()
 
+    @property
+    def keyed_text(self) -> str:
+        """The sheet as the judge reads it: each line opened by its field name."""
+        return keyed(self.text)
+
     def numbers(self) -> list[Num]:
-        found = []
+        """Every number of the sheet with the field it belongs to: the ones
+        given with each fact, and the ones its text holds (flags and stats
+        written as sentences), whose kind is read from the words around them
+        just as in a report. Read once a sheet: the check asks for them for
+        every number of every attempt."""
+        cached = self.__dict__.get("_numbers")
+        if cached is None or cached[0] != len(self.facts):
+            found = []
+            for f in self.facts:
+                for n in (*f.numbers, *extract_numbers(f"{f.label}: {f.text}")):
+                    found.append(replace(n, field=f.key))
+            cached = self.__dict__["_numbers"] = (len(self.facts), found)
+        return cached[1]
+
+    def similar(self) -> list[str]:
+        """The similar players, nearest first."""
         for f in self.facts:
-            found += f.numbers
-            found += extract_numbers(f"{f.label}: {f.text}")
-        return found
+            if f.key == "similar_players":
+                return list(f.people)
+        return []
+
+    def fact(self, key: str) -> Fact | None:
+        return next((f for f in self.facts if f.key == key), None)
 
     def names(self) -> set[str]:
         """Folded name phrases: the names of every fact, a person's single
@@ -222,7 +307,7 @@ def _rate(pct) -> str:
 def _rate_nums(pct, players, decile=None) -> tuple[Num, ...]:
     nums = [Num(float(players), tag="players")]
     if int(pct) > 0:
-        nums.append(Num(float(pct), "pct"))
+        nums.append(Num(float(pct), "pct", kind="chance"))
     if decile is not None:
         nums.append(Num(float(decile), tag="decile"))
     return tuple(nums)
@@ -288,38 +373,6 @@ def _club_today(row: pd.Series) -> Fact:
     return Fact("Club today", f"{where}, the same club", names=(club, league or ""))
 
 
-def _so_far(row: pd.Series) -> Fact | None:
-    when = row.get("so_far_date")
-    if not _present(when):
-        return None
-    minutes = row.get("so_far_minutes")
-    if not _present(minutes) or float(minutes) <= 0:
-        return Fact("Season so far", f"to {day(when)}: no league minutes in our leagues yet")
-    league = row.get("so_far_league")
-    nums = [Num(float(minutes), tag="minutes")]
-    parts = []
-    if _present(row.get("so_far_matches")):
-        parts.append(f"{int(row['so_far_matches'])} matches")
-        nums.append(Num(float(row["so_far_matches"]), tag="matches"))
-    parts.append(f"{int(minutes):,} minutes")
-    if _present(row.get("so_far_minutes_share")):
-        share = float(row["so_far_minutes_share"]) * 100
-        parts.append(f"{share:.0f}% of team minutes")
-        nums.append(Num(share, "pct"))
-    text = f"to {day(when)}" + (f", {league}" if _present(league) else "") + ": " + ", ".join(parts)
-    if _present(row.get("so_far_ability_pct")):
-        text += f"; ability so far {ordinal(round(row['so_far_ability_pct']))} percentile"
-        nums.append(Num(float(row["so_far_ability_pct"])))
-    if _present(row.get("so_far_goals_per90")):
-        goals, assists = float(row["so_far_goals_per90"]), float(row["so_far_assists_per90"])
-        text += f"; {goals:.2f} goals and {assists:.2f} assists per 90 minutes"
-        nums += [Num(goals, tag="goals"), Num(assists, tag="assists")]
-    flags = row.get("so_far_flags")
-    if _present(flags):
-        text += f"; warning flags today: {flags}"
-    return Fact("Season so far", text, tuple(nums), names=(league,) if _present(league) else ())
-
-
 def _similar(rows: pd.DataFrame | None, leagues: dict[str, str]) -> Fact | None:
     if rows is None or rows.empty:
         return None
@@ -333,8 +386,11 @@ def _similar(rows: pd.DataFrame | None, leagues: dict[str, str]) -> Fact | None:
             f"ability {ordinal(ability)} percentile)"
         )
         names += [r.neighbour, r.neighbour_club, league]
-        nums += [Num(float(age), tag="age"), Num(float(r.neighbour_ability_pct))]
-    text = "; ".join(parts) + " (alike in playing style, not in level)"
+        nums += [Num(float(age), tag="age"), Num(float(r.neighbour_ability_pct), kind="percentile")]
+    # The order is said (prompt 19c): run 9's judge faulted "X is the closest"
+    # because the sheet did not say who was, and four of nine such reports had
+    # picked the second or third.
+    text = "nearest first: " + "; ".join(parts) + " (alike in playing style, not in level)"
     people = tuple(names[0::3])
     places = tuple(n for i, n in enumerate(names) if i % 3)
     return Fact("Similar players today", text, tuple(nums), places, people)
@@ -405,27 +461,41 @@ def sheet_for(
                 if barg is not None and _present(barg.get("value_to_fair"))
                 else float(value) / float(fair) * 100
             )
-            text += f"; his market value is {ratio:.0f}% of it"
-            nums.append(Num(ratio, "pct"))
+            shown = round(ratio)
+            side = "above" if shown > 100 else "below" if shown < 100 else "at"
+            text += f"; his market value is {ratio:.0f}% of it ({side} our fair value)"
+            nums.append(Num(ratio, "pct", kind="fair_ratio"))
         if barg is not None and _present(barg.get("value_to_fair_pct")):
+            # Run 9's judge read "among the cheapest 97.2%" as cheap; past the
+            # middle the line now counts from the dear end.
             cheap = float(barg["value_to_fair_pct"])
-            text += f", among the cheapest {cheap:g}% of listed players of his position group"
-            nums.append(Num(cheap, "pct"))
+            if cheap <= 50:
+                text += f", among the cheapest {cheap:g}% of listed players of his position group"
+                nums.append(Num(cheap, "pct", kind="cheapest"))
+            else:
+                dear = round(100 - cheap, 1)
+                text += f", among the dearest {dear:g}% of listed players of his position group"
+                nums.append(Num(dear, "pct", kind="cheapest"))
         facts.append(Fact("Fair value (our model)", text, tuple(nums)))
     if _present(row.get("ability_pct")):
         ability = round(float(row["ability_pct"]))
         facts.append(
             Fact(
                 "Ability",
-                f"{ordinal(ability)} percentile among regular players of his position this season, "
-                "from his output per 90 minutes over the last 2 seasons (100 is the best)",
-                (Num(float(row["ability_pct"])),),
+                f"{ordinal(ability)} percentile among regular players of his position in "
+                f"{season_label(int(row['season']))}, from his output per 90 minutes over the last "
+                "2 seasons (100 is the best)",
+                (Num(float(row["ability_pct"]), kind="percentile"),),
             )
         )
     if barg is not None and _present(barg.get("minutes_share")):
         share = float(barg["minutes_share"]) * 100
         facts.append(
-            Fact("Minutes", f"{share:.0f}% of his club's league minutes", (Num(share, "pct"),))
+            Fact(
+                "Minutes",
+                f"{share:.0f}% of his club's league minutes",
+                (Num(share, "pct", kind="minutes_share"),),
+            )
         )
     if cand is not None:
         facts += [_chance_fact(cand, p) for p in CHANCES]
@@ -459,9 +529,9 @@ def sheet_for(
         for tag in ("on_loan", "stale_value"):
             if _present(barg.get(tag)) and bool(barg[tag]):
                 facts.append(Fact("Tag", TAGS[tag]))
-    so_far = _so_far(row)
-    if so_far is not None:
-        facts.append(so_far)
+    # No season so far (prompt 19c): it changes with every match, so a sheet
+    # holding it would be written again every day; the page shows it as its
+    # own block next to the report.
     similar = _similar(neighbours, leagues)
     if similar is not None:
         facts.append(similar)
@@ -503,17 +573,23 @@ def fact_sheets(
 
 # Text handling
 
-WORD = re.compile(r"[^\W\d_](?:[\w'\u2019-]*[^\W_])?")
+# Straight and curly apostrophes, the modifier letter and the left quote some
+# sources use in N'Guessan or O'Brien: one mark, never a word break (prompt 19c).
+APOSTROPHES = "'\u2019\u2018\u02bc"
+WORD = re.compile(r"[^\W\d_](?:[\w" + APOSTROPHES + r"-]*[^\W_])?")
 
 
 def fold(text: str) -> str:
-    """Lower case without accents, hyphens and punctuation as spaces."""
-    text = str(text).replace("\u2019", "'")
+    """Lower case without accents, hyphens and punctuation as spaces; an
+    apostrophe inside a name is dropped, not a space ("N'Guessan" is
+    "nguessan"), and a possessive "'s" goes."""
+    text = re.sub("[" + APOSTROPHES + "]", "'", str(text))
     for a, b in (("ı", "i"), ("ø", "o"), ("æ", "ae"), ("ß", "ss"), ("đ", "d"), ("ł", "l")):
         text = text.replace(a, b).replace(a.upper(), b.upper())
     text = unicodedata.normalize("NFKD", text)
     text = "".join(c for c in text if not unicodedata.combining(c)).lower()
     text = re.sub(r"'s\b", "", text)
+    text = re.sub(r"(?<=\w)'(?=\w)", "", text)
     return " ".join(re.sub(r"[^\w]+", " ", text).split())
 
 
@@ -558,27 +634,109 @@ NEXT_TAGS = {
     **dict.fromkeys(["assist", "assists"], "assists"),
     **dict.fromkeys(["month", "months"], "months"),
 }
-PREV_TAGS = {"aged": "age", "age": "age", "decile": "decile", "rank": "rank", "ranked": "rank"}
+PREV_TAGS = {"aged": "age", "age": "age", "decile": "decile", "rank": "rank", "ranked": "rank",
+             "rating": "rating"}  # fmt: skip
 EURO_AFTER = re.compile(r"\s*(euros?|eur)\b", re.IGNORECASE)
 LETTERS = re.compile(r"[A-Za-z][A-Za-z'-]*")
 
 
+CLAUSE = re.compile(r"[.;:!?,](?:\s|$)|[()]")
+
+
+def _around(text: str, start: int, end: int) -> tuple[list[str], list[str]]:
+    """The lower case words before (up to three) and after (up to five) a
+    number, within its clause (a comma ends one too)."""
+    after = text[end : end + 60]
+    cut = CLAUSE.search(after)
+    after = after[: cut.start()] if cut else after
+    before = text[max(0, start - 40) : start]
+    cuts = list(CLAUSE.finditer(before))
+    before = before[cuts[-1].end() :] if cuts else before
+    return (
+        [w.lower() for w in LETTERS.findall(before)][-3:],
+        [w.lower() for w in LETTERS.findall(after)][:5],
+    )
+
+
 def _tag(text: str, start: int, end: int) -> str | None:
+    """What a count counts, from the words next to it within its clause: a
+    word before it that names a count ("aged 24 to 26", "decile 9 of 10",
+    "a match rating of 7.28") first, then one after it ("142 players")."""
     if text[max(0, start - 1) : start] == "#":
         return "rank"
-    for w in LETTERS.findall(text[end : end + 40])[:2]:
-        if w.lower() in NEXT_TAGS:
-            return NEXT_TAGS[w.lower()]
-    for w in reversed(LETTERS.findall(text[max(0, start - 30) : start])[-2:]):
-        if w.lower() in PREV_TAGS:
-            return PREV_TAGS[w.lower()]
+    before, after = _around(text, start, end)
+    if "rating" in after[:3]:  # "a 7.28 average match rating" counts no matches
+        return "rating"
+    if before[-1:] and before[-1] in PREV_TAGS:
+        return PREV_TAGS[before[-1]]
+    linked = before[-1:] and before[-1] in ("to", "of", "or")
+    if linked and before[-2:-1] and before[-2] in PREV_TAGS:
+        return PREV_TAGS[before[-2]]
+    for i, w in enumerate(after[:2]):
+        if w == "per":  # "0.4 per 90 minutes" is a rate, not minutes
+            break
+        # "aged 21 to 23 this season" counts no seasons: those two only right after
+        if w in NEXT_TAGS and (i == 0 or NEXT_TAGS[w] not in ("seasons", "age")):
+            return NEXT_TAGS[w]
+    return None
+
+
+# What a percentage or a percentile measures (prompt 19c), read from the words
+# around it in a report and in the sheet's own sentences alike:
+KINDS = {
+    "chance": "a historical rate of a chance or of the fall back risk",
+    "fair_ratio": "market value as a share of fair value",
+    "cheapest": "his place among the listed players by value against fair value",
+    "minutes_share": "a share of team minutes, or the flag's threshold",
+    "value_change": "the change of his value on a year before",
+    "peer_rank": "top or bottom so many percent of his peers",
+    "stat": "a share of his own actions (passes, duels, his team's shots)",
+    "percentile": "an ability percentile",
+}
+OUTCOME_VERBS = {"became", "become", "saw", "joined", "went", "made", "reached", "entered", "got"}
+FALLING = {"fell", "dropped", "down", "lost", "falling", "fallen", "drop", "fall", "declined"}
+
+
+def _kind(text: str, start: int, end: int, unit: str) -> str | None:
+    b, a = _around(text, start, end)
+    if unit != "pct":
+        if a[:1] == ["percentile"] or b[-1:] == ["percentile"] or b[-2:] == ["percentile", "of"]:
+            return "percentile"
+        return None
+    if b[-1:] and b[-1] in ("top", "bottom"):
+        return "peer_rank"
+    if set(b[-2:]) & {"cheapest", "dearest"}:
+        return "cheapest"
+    if (a[:1] and a[0] in OUTCOME_VERBS | {"rate", "chance", "risk"}) or (
+        a[:2] == ["of", "them"] and a[2:3] and a[2] in OUTCOME_VERBS
+    ):  # not "completes 65% of them"
+        return "chance"
+    if a[:1] == ["of"] and "minutes" in a and "per" not in a[: a.index("minutes")]:
+        return "minutes_share"
+    if b[-1:] and b[-1] in ("played", "plays", "playing"):
+        return "minutes_share"
+    fair_words = {"fair", "model", "model's"} & set(a)
+    if a[:1] == ["of"] and (
+        a[1:2] in (["it"], ["that"], ["this"], ["our"], ["fair"], ["what"]) or fair_words
+    ):
+        return "fair_ratio"
+    if (a[:1] and a[0] in ("lower", "down", "less")) or a[:3] == ["on", "a", "year"]:
+        return "value_change"
+    if set(b) & FALLING:
+        return "value_change"
+    if a[:1] == ["of"] and a[1:2] and a[1] in ("his", "the", "all", "team's"):
+        return "stat"
     return None
 
 
 def extract_numbers(text: str) -> list[Num]:
-    """Every number with its unit, its precision and what it counts."""
+    """Every number with its unit, its precision, what it counts, what kind
+    of percentage it is, and where it stands."""
     found = []
+    labels = [m.span() for m in SEASON_LABEL.finditer(text)]  # checked as labels, not numbers
     for m in NUMBER.finditer(text):
+        if any(a <= m.start() < b for a, b in labels):
+            continue
         digits = m["int"].replace(",", "")
         decimals = len(m["dec"]) - 1 if m["dec"] else 0
         value = float(digits + (m["dec"] or ""))
@@ -602,21 +760,32 @@ def extract_numbers(text: str) -> list[Num]:
                 _tag(text, m.start(), m.end()),
                 10.0**-decimals * scale,
                 m.group(0).strip(),
+                _kind(text, m.start(), m.end(), unit),
+                at=m.start(),
             )
         )
     for m in WORD_NUMBER.finditer(text):
         value = float(NUMBER_WORDS[m[1].lower()])
-        found.append(Num(value, "plain", _tag(text, m.start(), m.end()), 1.0, m[1]))
+        found.append(Num(value, "plain", _tag(text, m.start(), m.end()), 1.0, m[1], at=m.start()))
     return found
 
 
 def _compatible(said: Num, fact: Num) -> bool:
+    """Typed (prompt 19c): a percentage whose words say what it measures
+    matches only a sheet percentage of that kind, a percentile only a
+    percentile, money only money; a count that names what it counts never
+    matches a sheet number that names something else (prompt 19). A number
+    whose words say nothing matches any sheet number of its unit."""
     if "eur" in (said.unit, fact.unit) and said.unit != fact.unit:
         return False
     if said.unit == "pct" and fact.unit != "pct":
         return False
     if said.unit == "ordinal" and fact.unit not in ("plain", "ordinal"):
         return False
+    if said.kind is not None and fact.kind != said.kind:
+        return False
+    if said.unit in ("pct", "eur"):
+        return True
     return said.tag is None or fact.tag is None or said.tag == fact.tag
 
 
@@ -673,7 +842,7 @@ def _tokens(text: str) -> list[_Token]:
     out = []
     for m in WORD.finditer(text):
         word, possessive = m.group(0), False
-        for s in ("'s", "\u2019s"):
+        for s in [a + "s" for a in APOSTROPHES]:
             if word.endswith(s) and len(word) > 2:
                 word, possessive = word[: -len(s)], True
         if word[0].isupper():
@@ -804,7 +973,160 @@ def unknown_names(
                 continue
         if not _covered(tokens, names, vocabulary):
             bad.append(text[tokens[0].start : tokens[-1].end])
+    for given in given_names(text, sheet):
+        if not any(given in b or b in given for b in bad):
+            bad.append(given)
     return bad
+
+
+def given_names(text: str, sheet: FactSheet) -> list[str]:
+    """A first name the report put before a surname the sheet gives with an
+    initial ("Harry Armstrong" for H. Armstrong). Opening a sentence it passed
+    the name check as a possible ordinary word; run 9's judge found four."""
+    found = []
+    for person in (sheet.player, *sheet.similar()):
+        m = re.match(r"^([^\W\d_])\.\s+(.+)$", str(person))
+        if not m:
+            continue
+        initial, rest = fold(m[1]), m[2]
+        pattern = r"(?<![\w.])([^\W\d_][\w" + APOSTROPHES + r"-]+)\s+" + re.escape(rest) + r"(?!\w)"
+        for hit in re.finditer(pattern, text):
+            word = fold(hit[1])
+            if word[:1] == initial and word not in STARTERS and hit[1][0].isupper():
+                found.append(hit.group(0))
+    return found
+
+
+# Claims (prompt 19c): where run 9's judge found real errors that neither the
+# number nor the name check could see.
+
+SENTENCE_END = re.compile(r"(?<=[.!?])(?<!\b[^\W\d_]\.)(?<!\bSt\.)(?<!\s\d\.)\s+(?=[A-Z0-9\"'(])")
+CLOSEST = re.compile(r"\b(closest|nearest|most similar|most alike)\b", re.IGNORECASE)
+SO_FAR = re.compile(r"\bso far\b|\bseason in progress\b", re.IGNORECASE)
+SEASON_LABEL = re.compile(r"\b20\d\d/\d\d\b")
+CHEAP = re.compile(r"\b(cheaply|below)\b", re.IGNORECASE)
+DEAR = re.compile(r"\b(dearly|above)\b", re.IGNORECASE)
+CHANCE_WORDS = {
+    "elite_chance": ("elite", "100 most valuable"),
+    "step_up_chance": ("step up", "times better"),
+    "big_move_chance": ("big move", "top 20 club"),
+    "fall_back_risk": ("fall back", "times worse", "as many warning flags", "as many flags"),
+}
+
+
+def sentences(text: str) -> list[tuple[int, int]]:
+    """Where each sentence starts and ends; an initial ("M. Jaber"), "St."
+    and "1. FC Köln" do not end one."""
+    out, start = [], 0
+    for m in SENTENCE_END.finditer(text):
+        out.append((start, m.start()))
+        start = m.end()
+    out.append((start, len(text)))
+    return out
+
+
+def _mentions(person: str, sentence: str, own: set[str]) -> bool:
+    """The sentence names this similar player: his full name or one of his
+    names (not an initial, nor a name he shares with the player himself)."""
+    folded = f" {fold(sentence)} "
+    name = fold(person)
+    if f" {name} " in folded:
+        return True
+    parts = [p for p in name.split() if len(p) > 2 and p not in own]
+    return any(f" {p} " in folded for p in parts)
+
+
+def claim_violations(report: str, sheet: FactSheet, said: list[Num]) -> list[str]:
+    """The claims the sheet's own order and fields decide."""
+    out = []
+    similar = sheet.similar()
+    own = set(fold(sheet.player).split())
+    spans = sentences(report)
+    for start, end in spans:
+        text = report[start:end]
+        if similar and CLOSEST.search(text):
+            named = [i for i, p in enumerate(similar) if _mentions(p, text, own)]
+            if named and named != list(range(len(named))):
+                who = " and ".join(similar[i] for i in named)
+                out.append(
+                    f"the report calls {who} the closest in playing style, but the sheet lists "
+                    f"the similar players nearest first and {similar[0]} is the first"
+                )
+        out += _chance_pairs(text, sheet, [n for n in said if start <= n.at < end], start)
+        out += _direction(text, sheet)
+    if sheet.fact("season_so_far") is None and SO_FAR.search(report):
+        out.append(
+            "the report mentions the season so far, which is not in the fact sheet (the page "
+            "shows it next to the report); describe only the season of the sheet"
+        )
+    described = sheet.fact("season")
+    own_season = set(SEASON_LABEL.findall(described.text)) if described else set()
+    for label_ in sorted(set(SEASON_LABEL.findall(report)) - own_season):
+        out.append(f'the season "{label_}" is not the season of the fact sheet')
+    return out
+
+
+def _chance_pairs(text: str, sheet: FactSheet, said: list[Num], offset: int) -> list[str]:
+    """Each count of past players and the rate after it must be the count and
+    the rate of one chance; when the words name the chance, of that one."""
+    counts = [n for n in said if n.tag == "players"]
+    rates = [n for n in said if n.kind == "chance"]
+    nums = {k: [n for n in sheet.numbers() if n.field == k] for k in CHANCE_KEYS}
+    out, begin = [], offset
+    for i, count in enumerate(counts):
+        stop = counts[i + 1].at if i + 1 < len(counts) else offset + len(text)
+        rate = next((r for r in rates if count.at < r.at < stop), None)
+        if rate is None:
+            continue
+        holds = [k for k in CHANCE_KEYS if number_in(count, nums[k]) and number_in(rate, nums[k])]
+        segment = text[begin - offset : stop - offset].lower()
+        named = [k for k, ws in CHANCE_WORDS.items() if any(w in segment for w in ws)]
+        begin = rate.at + len(rate.text)
+        if not holds:
+            out.append(
+                f'the rate "{rate.text}" and the count "{count.text}" are not the rate and the '
+                "count of one chance on the fact sheet"
+            )
+        elif len(named) == 1 and named[0] not in holds:
+            out.append(
+                f'the rate "{rate.text}" of {count.text} past players is not the '
+                f"{sheet.fact(named[0]).label.lower() if sheet.fact(named[0]) else named[0]}"
+            )
+    return out
+
+
+def _unnegated(pattern: re.Pattern, text: str) -> re.Match | None:
+    """The first match not after a "not" or a "than" ("not priced cheaply",
+    "dearly rather than cheaply")."""
+    for m in pattern.finditer(text):
+        before = [w.lower() for w in LETTERS.findall(text[max(0, m.start() - 30) : m.start()])]
+        if not set(before[-3:]) & {"not", "never", "neither", "nor", "than", "isn't", "wasn't"}:
+            return m
+    return None
+
+
+def _direction(text: str, sheet: FactSheet) -> list[str]:
+    """Cheap is below fair value and dear above it."""
+    if "fair" not in text.lower():
+        return []
+    ratio = next(
+        (n.value for n in sheet.numbers() if n.kind == "fair_ratio" and n.field == "fair_value"),
+        None,
+    )
+    if ratio is None:
+        return []
+    cheap, dear = (_unnegated(p, text) for p in (CHEAP, DEAR))
+    shown = round(ratio)
+    if cheap and not dear and shown >= 100:
+        word = cheap.group(0)
+    elif dear and not cheap and shown <= 100:
+        word = dear.group(0)
+    else:
+        return []
+    return [
+        f'the report says "{word}", but his market value is {shown}% of his fair value '
+        "(below 100% is cheap, above it dear)"
+    ]
 
 
 # The check
@@ -826,19 +1148,41 @@ def check(
     words_max: int = 170,
     gazetteer: Iterable[str] = (),
 ) -> Check:
-    """Every number of the report in the fact sheet within its rounding,
-    every proper noun a name of the sheet, and the length in range."""
+    """Every number of the report in the fact sheet within its rounding and
+    of the kind its words say (prompt 19c), a similar player's number only in
+    a sentence that names a similar player, every proper noun a name of the
+    sheet, the claims of ``claim_violations``, and the length in range."""
     violations = []
     allowed = sheet.numbers()
+    own = [n for n in allowed if n.field != "similar_players"]
+    similar = sheet.similar()
+    mine = set(fold(sheet.player).split())
     said = extract_numbers(report)
+    bounds = sentences(report)
     for num in said:
-        if not number_in(num, allowed):
-            violations.append(
-                f'the number "{num.text}" is not in the fact sheet, or not rounded correctly'
-            )
+        start, end = next(((s, e) for s, e in bounds if s <= num.at < e), (0, len(report)))
+        names_similar = any(_mentions(p, report[start:end], mine) for p in similar)
+        pool = allowed if names_similar else own
+        if number_in(num, pool):
+            continue
+        loose = replace(num, kind=None, tag=None)
+        if num.kind and number_in(loose, pool):
+            what = f", but not as {KINDS[num.kind]}"
+        elif number_in(num, allowed):
+            what = " only for a similar player, and this sentence names none"
+        elif num.tag and number_in(loose, pool):
+            what = f", but not as a count of {num.tag}"
+        else:
+            what = None
+        violations.append(
+            f'the number "{num.text}" is on the fact sheet{what}'
+            if what
+            else f'the number "{num.text}" is not in the fact sheet, or not rounded correctly'
+        )
     spans = _spans(report)
     for name in unknown_names(report, sheet, gazetteer):
         violations.append(f'the name "{name}" is not in the fact sheet')
+    violations += claim_violations(report, sheet, said)
     n = words(report)
     if not words_min <= n <= words_max:
         violations.append(f"the report has {n} words; it must have {words_min} to {words_max}")
@@ -889,6 +1233,38 @@ def _unwrap(text: str) -> str:
     return "\n\n".join(paragraphs)
 
 
+# What the sheet's labels mean: the writer is told it, and the judge reads the
+# sheet the same way (run 9's judge faulted 8 reports that followed it).
+LABEL_MEANINGS = _unwrap(
+    """
+- Ability: where his output per 90 minutes ranks among the regular players of his position
+in the season described; 100 is the best.
+- Market value is the market's valuation. Fair value is what our model, trained on earlier
+seasons, says a player with his record is worth. A market value above fair value (over 100%
+of it) means the market prices him dearly, below it (under 100%) cheaply; neither is a
+verdict on him. His place among the listed players ("among the cheapest" or "the dearest" so
+many percent) never turns a value above fair value into a cheap one.
+- Elite chance: past players in the same band who became one of the most valuable players in
+the world. Only young players already among the more valuable get one. "His elite band",
+"his step up band" and the like name the band of past players a chance was measured on.
+- Step up chance: past players whose value rank became several times better.
+- Big move chance: past players who joined one of the clubs with the most valuable squads.
+- Fall back risk: past players with as many warning flags whose value rank became much worse.
+- Warning flags: reasons for doubt, each with his own number: low minutes, injuries, a falling
+value. They are the flags at the forecast.
+- Rising: he is in the top group of a model that looks for players whose play may rise
+clearly. It is a tag, not a rate.
+- Standout stats: where he stands furthest from players of his position and age band; "top"
+and "bottom" so many percent are written as the sheet writes them.
+- Similar players today: players whose style of play is closest to his, nearest first: the
+first one is the closest.
+- Bargain list: players whose market value is low against their fair value; the prime list is
+the younger one, the experienced list the older one.
+- Not rated: the table gives no rate there. Say so if it matters, with the sheet's own
+condition he does not meet (his rank or his age) if you give a reason; invent no other.
+"""
+)
+
 WRITER_INSTRUCTIONS = _unwrap(
     """
 How to write the report
@@ -898,71 +1274,58 @@ paragraphs. A report over 150 words is rejected, so leave out the least telling 
 than squeezing them all in: you do not have to use every line of the sheet. No title, no
 headings, no bullet points, no bold, no emoji. Return only the report.
 
-2. Use the fact sheet and nothing else. Every number you write must appear in the fact sheet.
-Copy numbers as the sheet writes them, as digits. You may round a number only correctly and
-only to fewer decimals (0.47 may become 0.5, never 0.4). Do not calculate anything new: no
-differences, sums, ratios or averages of your own, and no number words such as "three" for a
-number the sheet writes as 3.
+2. Use the fact sheet and nothing else. Every number you write must appear in the fact sheet,
+as the fact it is there: a rate as that chance's rate, a percentile as his ability, a share of
+minutes as his minutes. Copy numbers as the sheet writes them, as digits. You may round a
+number only correctly and only to fewer decimals (0.47 may become 0.5, never 0.4). Do not
+calculate anything new: no differences, sums, ratios or averages of your own, and no number
+words such as "three" for a number the sheet writes as 3.
 
 3. Names. Every name you write (player, club, league, competition, country or person) must
-appear in the fact sheet, spelled as it is there. Do not mention a nationality, a coach, a
-former club, a rumour, a data source or any player who is not in the sheet. When unsure
-whether something is in the sheet, leave it out.
+appear in the fact sheet, spelled exactly as it is there. Never add a first name to an
+initial: write H. Armstrong, never Harry Armstrong, even when you know it. Do not mention a
+nationality, a coach, a former club, a rumour, a data source or any player who is not in the
+sheet. When unsure whether something is in the sheet, leave it out.
 
 4. Odds are history, not predictions. Each chance and risk in the sheet is a historical rate:
 of the past players our tables put in the same band, the share who later did something. Say
 it that way, for example "of <count> past players in his band, <rate> became one of the 100
-most valuable players within 2 seasons", with the count and the rate from the sheet. Never
-write that he will do something, never call a rate his chance, probability or likelihood,
-never say he is likely, set, bound, destined, guaranteed or certain to do anything, and never
-promise a transfer or a rise. Keep the count of past players next to each rate you mention.
+most valuable players within 2 seasons", with the count and the rate of the same line of the
+sheet. Never write that he will do something, never call a rate his chance, probability or
+likelihood, never say he is likely, set, bound, destined, guaranteed or certain to do
+anything, and never promise a transfer or a rise. Keep the count of past players next to
+each rate you mention.
 
 5. What to cover. Open with who he is: age, position, club and league. Then the most telling
 of: his ability percentile, his market value against the fair value, the rates that are
 rated, the warning flags, the rising tag and the standout stats. Mention every warning flag
-with its own number, or say he raises none. If he moved after the forecast, say so. Use the
-season so far only as context: it is not part of the forecast. You may name one or two of the
-similar players; if you do, say the likeness is in playing style, not level.
+with its own number, or say he raises none. If he moved after the forecast, say so. The
+sheet describes the season at its end and his club today, nothing of the season now in
+progress: never write about this season's matches, minutes or form, nor "so far" (the page
+shows them next to your report). You may name one or two of the similar players; if you do,
+say the likeness is in playing style, not level, and call only the first one the closest.
 
 6. What the labels mean.
-- Ability: where his output per 90 minutes ranks among the regular players of his position
-this season; 100 is the best.
-- Market value is the market's valuation. Fair value is what our model, trained on earlier
-seasons, says a player with his record is worth. A value well below fair value means the
-market prices him cheaply, well above means dearly; neither is a verdict on him.
-- Elite chance: past players in the same band who became one of the most valuable players in
-the world. Only young players already among the more valuable get one.
-- Step up chance: past players whose value rank became several times better.
-- Big move chance: past players who joined one of the clubs with the most valuable squads.
-- Fall back risk: past players with as many warning flags whose value rank became much worse.
-- Warning flags: reasons for doubt, each with his own number: low minutes, injuries, a falling
-value.
-- Rising: he is in the top group of a model that looks for players whose play may rise
-clearly. It is a tag, not a rate.
-- Standout stats: where he stands furthest from players of his position and age band.
-- Similar players today: players whose style of play is closest to his.
-- Bargain list: players whose market value is low against their fair value; the prime list is
-the younger one, the experienced list the older one.
-- Not rated: the table gives no rate there. Say so if it matters; do not invent a reason.
+- {labels}
 
 7. Tone. Measured and concrete. Prefer football words to statistical ones. No hype, no
 judgement of character, no advice to buy or sell.
 
-8. An example of the length and the shape: 137 words, about a made up player from a made up
+8. An example of the length and the shape: 132 words, about a made up player from a made up
 fact sheet. Never copy its names or its numbers; use only your own fact sheet.
 
 Marco Ferri is a 21-year-old central midfielder at Riverton in the Example League, where he
-still plays. His ability sits in the 84th percentile of the regular midfielders this season.
+still plays. His ability sits in the 84th percentile of the regular midfielders in 2025/26.
 The market values him at €8m, below the €12.4m our model calls fair, so he is priced cheaply.
 Of 156 past players in his elite band, 15% became one of the 100 most valuable players within
 2 seasons, and of 880 in his step up band, 20% saw their value rank become at least 3 times
 better. He raises one warning flag: he played 41% of his team's minutes. He wins 68% of his
-duels, top 5% of midfielders aged 21 to 23. J. Ortiz is the closest to him in playing style,
-not in level. So far this season he has 512 minutes in 7 matches.
+duels, top 5% of midfielders aged 21 to 23. J. Ortiz, the first of his similar players, is the
+closest to him in playing style, not in level.
 
 The fact sheet comes in the next message, one fact per line as "label: value".
 """
-)
+).replace("- {labels}", LABEL_MEANINGS)
 
 JUDGE_SYSTEM = (
     "You check short scouting reports that another model wrote for a football fan from a fact "
@@ -971,19 +1334,28 @@ JUDGE_SYSTEM = (
 
 JUDGE_INSTRUCTIONS = _unwrap(
     """
-Read the fact sheet, then the report, and give three verdicts.
+Read the fact sheet, then the report, and give your verdicts. Each line of the sheet opens with
+its field name in square brackets, for example "[elite_chance] Elite chance: ...".
 
 faithful: true only when every claim of the report is supported by the fact sheet: each
 number, each name, the direction of each comparison (market value above or below fair
 value), which warning flags are raised, whether he moved, which chances are rated, what each
 chance measured. A plain football paraphrase of a fact is fine. Anything the sheet does not
-support is not: an added reason, a nationality, a trait, a transfer, a club or player not in
-the sheet, an invented or wrongly rounded number, a reversed comparison, a rate given to the
-wrong outcome.
+support is not: an added reason, a first name added to an initial, a nationality, a trait, a
+transfer, a club or player not in the sheet, an invented or wrongly rounded number, a number
+of one line told as the fact of another, a reversed comparison, a rate given to the wrong
+outcome, a similar player called the closest who is not the first.
 
-offending_span: when faithful is false, the shortest exact passage of the report, copied
-character for character, that the sheet does not support; when faithful is true, an empty
-string.
+issues: one entry for each claim the sheet does not support, none when faithful is true and
+at least one when it is false. Each entry has:
+- span: the shortest exact passage of the report that makes the claim, copied character for
+character;
+- field: the field name of the sheet line the claim contradicts or misuses, or "none" when no
+line covers it (an added name, reason, trait, transfer or season);
+- problem: "contradicts" when a line says otherwise, "unsupported" when no line says it;
+- explanation: one short sentence.
+Code checks every span against the report and every field against the sheet; a verdict whose
+span is not in the report or whose field is not on the sheet is set aside.
 
 hedging_adequate: true when every chance and risk is presented as what happened to past
 players in the same band (a historical rate), never as a prediction or a probability for this
@@ -994,21 +1366,49 @@ with small stiffness. 3: understandable but list like or awkward. 2: hard to fol
 confusing.
 
 reason: one short sentence on the most important point of your verdicts.
-"""
-)
 
+The writer was told what the labels mean; read the sheet the same way:
+- {labels}
+"""
+).replace("- {labels}", LABEL_MEANINGS)
+
+ISSUE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "span": {"type": "string"},
+        "field": {"type": "string", "enum": [*FIELD_KEYS, "none"]},
+        "problem": {"type": "string", "enum": ["contradicts", "unsupported"]},
+        "explanation": {"type": "string"},
+    },
+    "required": ["span", "field", "problem", "explanation"],
+    "additionalProperties": False,
+}
 VERDICT_SCHEMA = {
     "type": "object",
     "properties": {
         "faithful": {"type": "boolean"},
-        "offending_span": {"type": "string"},
+        "issues": {"type": "array", "items": ISSUE_SCHEMA},
         "hedging_adequate": {"type": "boolean"},
         "readability": {"type": "integer", "enum": [1, 2, 3, 4, 5]},
         "reason": {"type": "string"},
     },
-    "required": ["faithful", "offending_span", "hedging_adequate", "readability", "reason"],
+    "required": ["faithful", "issues", "hedging_adequate", "readability", "reason"],
     "additionalProperties": False,
 }
+
+
+def keyed(text: str) -> str:
+    """A sheet's text with each line opened by its field name."""
+    lines = []
+    for line in text.split("\n"):
+        label_, _, _ = line.partition(": ")
+        lines.append(f"[{field_key(label_)}] {line}")
+    return "\n".join(lines)
+
+
+def sheet_keys(text: str) -> set[str]:
+    return {field_key(line.partition(": ")[0]) for line in text.split("\n") if line}
+
 
 FEEDBACK = (
     "An automatic check compared your report with the fact sheet and rejected it:\n{problems}\n"
@@ -1042,7 +1442,8 @@ def writer_params(cfg, sheet: FactSheet, previous: str = "", problems=()) -> dic
 
 
 def judge_params(cfg, sheet_text: str, report: str) -> dict:
-    content = f"Fact sheet:\n{sheet_text}\n\nReport:\n{report}"
+    """The judge's request: the sheet with its field names, then the report."""
+    content = f"Fact sheet:\n{keyed(sheet_text)}\n\nReport:\n{report}"
     return {
         "model": cfg.judge_model,
         "max_tokens": cfg.judge_max_tokens,
@@ -1170,14 +1571,24 @@ def _reply(item) -> Reply:
     return Reply(item.custom_id, status, text, usage)
 
 
-CANCEL_GRACE = 600  # seconds for a cancelled batch to end and give what it finished
+@dataclass
+class Pending:
+    """A batch still running when the step stopped waiting (prompt 19c):
+    its id and what each of its requests was for, kept in ``pending.json``
+    so the next run collects it before it sends anything new."""
+
+    id: str
+    kind: str  # writer or judge
+    created_at: str
+    requests: dict[str, dict]  # custom_id -> the player, his sheet's hash, the attempt
 
 
 @dataclass
 class Batches:
-    """Sends a list of requests as one batch and waits for it, until the
-    run's deadline; a batch still running then is cancelled, and the
-    requests it did finish are kept."""
+    """Sends a list of requests as one batch and waits for it until the
+    step's deadline (``max_run_minutes``, 20). A batch still running then is
+    not cancelled: it is kept in ``pending`` and its requests come back as
+    pending, for the next run to collect (run 12 waited 100 minutes on one)."""
 
     client: object
     poll_seconds: float
@@ -1185,35 +1596,56 @@ class Batches:
     sleep: Callable[[float], None] = time.sleep
     clock: Callable[[], float] = time.monotonic
     created: list[str] = field(default_factory=list)
+    pending: list[Pending] = field(default_factory=list)
+    now: str = ""
 
-    def run(self, requests: list[dict]) -> dict[str, Reply]:
+    def _wait(self, batch_id: str) -> dict[str, Reply] | None:
+        batches = self.client.messages.batches
+        batch = batches.retrieve(batch_id)
+        while batch.processing_status != "ended":
+            if self.clock() > self.deadline:
+                return None
+            self.sleep(self.poll_seconds)
+            batch = batches.retrieve(batch_id)
+        return {item.custom_id: _reply(item) for item in batches.results(batch_id)}
+
+    def run(self, requests: list[dict], kind: str = "writer", meta=None) -> dict[str, Reply]:
         if not requests:
             return {}
         if self.clock() > self.deadline:
-            log.warning("reports: past the run's deadline, %d requests not sent", len(requests))
+            log.warning("reports: past the step's deadline, %d requests not sent", len(requests))
             return {r["custom_id"]: Reply(r["custom_id"], "missing") for r in requests}
-        batches = self.client.messages.batches
-        batch = batches.create(requests=requests)
+        batch = self.client.messages.batches.create(requests=requests)
         self.created.append(batch.id)
         log.info("reports: batch %s, %d requests", batch.id, len(requests))
-        cancelled_at = None
-        batch = batches.retrieve(batch.id)
-        while batch.processing_status != "ended":
-            now = self.clock()
-            if cancelled_at is None and now > self.deadline:
-                log.warning("reports: batch %s past the run's deadline, cancelled", batch.id)
-                batches.cancel(batch.id)
-                cancelled_at = now
-            elif cancelled_at is not None and now > cancelled_at + CANCEL_GRACE:
-                log.warning("reports: batch %s did not end after its cancel", batch.id)
-                break
-            self.sleep(self.poll_seconds)
-            batch = batches.retrieve(batch.id)
-        replies = {}
-        if batch.processing_status == "ended":
-            replies = {item.custom_id: _reply(item) for item in batches.results(batch.id)}
+        replies = self._wait(batch.id)
+        if replies is None:
+            log.warning(
+                "reports: batch %s still running after the step's wait; the next run collects it",
+                batch.id,
+            )
+            meta = meta or {}
+            asked = {r["custom_id"]: meta.get(r["custom_id"], {}) for r in requests}
+            self.pending.append(Pending(batch.id, kind, self.now, asked))
+            return {cid: Reply(cid, "pending") for cid in asked}
         for r in requests:
             replies.setdefault(r["custom_id"], Reply(r["custom_id"], "missing"))
+        return replies
+
+    def collect(self, pending: Pending) -> dict[str, Reply] | None:
+        """An earlier run's batch: its replies once it has ended (waiting for
+        it within this step's deadline), None while it still runs. A batch
+        that can no longer be read (results are kept 29 days) gives every
+        request back as missing, to be written again."""
+        try:
+            replies = self._wait(pending.id)
+        except Exception as exc:  # the SDK's not found and the like; never stop the run
+            log.warning("reports: batch %s cannot be read (%s); asked for again", pending.id, exc)
+            replies = {}
+        if replies is None:
+            return None
+        for cid in pending.requests:
+            replies.setdefault(cid, Reply(cid, "missing"))
         return replies
 
 
@@ -1225,7 +1657,7 @@ class Outcome:
     player_id: int
     report: str
     source: str  # model or template
-    status: str  # passed, failed, held (cap or deadline: tried again next run)
+    status: str  # passed, failed, held (cap or deadline), pending (in a batch still running)
     attempts: int
     first_try: bool | None  # passed the check on the first try; None when never written
     violations: list[str]
@@ -1242,108 +1674,186 @@ def write_reports(
     reserve: int = 0,
     now: str = "",
     usage: dict | None = None,
+    carried: dict[int, tuple[dict, Reply]] | None = None,
 ) -> dict[int, Outcome]:
     """The writer's rounds: every sheet once, then the failures again with
-    their violations, ``cfg.retries`` times at most."""
+    their violations, ``cfg.retries`` times at most. ``carried``: the replies
+    of an earlier run's batch collected now, with what their request was
+    (the attempt, the earlier word counts, the first try's result); each is
+    checked as that attempt and its retries join this run's rounds, so a
+    slow batch ends exactly as a fast one would have."""
     gazetteer = set(gazetteer)
     by_id = {s.player_id: s for s in sheets}
+    carried = {pid: c for pid, c in (carried or {}).items() if pid in by_id}
     state = {
-        s.player_id: {"previous": "", "problems": [], "attempts": 0, "words": []} for s in sheets
-    }
+        s.player_id: {"previous": "", "feedback": [], "problems": [], "attempts": 0, "words": [],
+                      "first": None}
+        for s in sheets
+    }  # fmt: skip
     done: dict[int, Outcome] = {}
-    first: dict[int, bool] = {}
-    todo = [s.player_id for s in sheets]
-    for round_ in range(cfg.retries + 1):
-        if not todo:
-            break
-        requests = [
-            {
-                "custom_id": f"w{round_}-{pid}",
-                "params": writer_params(
-                    cfg, by_id[pid], state[pid]["previous"], state[pid].get("feedback", [])
-                ),
-            }
-            for pid in todo
-        ]
-        sent, held = budget.take(requests, reserve)
-        for r in held:
-            pid = int(r["custom_id"].split("-", 1)[1])
-            done[pid] = _held(by_id[pid], state[pid], first.get(pid), now, "the token cap")
-        replies = runner.run(sent)
-        retry = []
-        for r in sent:
-            pid = int(r["custom_id"].split("-", 1)[1])
-            reply = replies[r["custom_id"]]
-            budget.spend(reply.usage)
-            if usage is not None:
-                _add(usage, reply.usage)
-            st = state[pid]
-            if reply.status == "missing" or reply.status in ("canceled", "expired"):
-                done[pid] = _held(by_id[pid], st, first.get(pid), now, "the run's deadline")
-                continue
-            st["attempts"] += 1
-            note = None
-            if reply.status == "succeeded" and reply.text:
-                result = check(reply.text, by_id[pid], cfg.words_min, cfg.words_max, gazetteer)
-                problems = result.violations
-                st["words"].append(result.words)
-                note = length_note(result.words, cfg.words_min)
-            else:
-                problems = [f"the request ended as {reply.status} {reply.error}".strip()]
-            first.setdefault(pid, not problems)
-            if not problems:
-                done[pid] = Outcome(pid, reply.text, "model", "passed", st["attempts"],
-                                    first[pid], [], now, st["words"])  # fmt: skip
-                continue
-            st["previous"], st["problems"] = reply.text, problems
-            # What the writer is told: the violations, with the length one replaced
-            # by the count and the cut, which also comes when only a number failed.
-            feedback = [p for p in problems if not p.startswith("the report has ")]
-            st["feedback"] = feedback + ([note] if note else [])
-            retry.append(pid)
-        todo = retry
-    for pid in todo:
-        st = state[pid]
-        sheet = by_id[pid]
+
+    def take(pid: int, reply: Reply) -> bool:
+        """Checks one reply; True when it goes back to the writer."""
+        st, sheet = state[pid], by_id[pid]
+        budget.spend(reply.usage)
+        if usage is not None:
+            _add(usage, reply.usage)
+        if reply.status == "pending":
+            done[pid] = _held(sheet, st, now, "a batch still running", "pending")
+            return False
+        if reply.status in ("missing", "canceled", "expired"):
+            done[pid] = _held(sheet, st, now, "the run's deadline")
+            return False
+        st["attempts"] += 1
+        note = None
+        if reply.status == "succeeded" and reply.text:
+            result = check(reply.text, sheet, cfg.words_min, cfg.words_max, gazetteer)
+            problems = result.violations
+            st["words"].append(result.words)
+            note = length_note(result.words, cfg.words_min)
+        else:
+            problems = [f"the request ended as {reply.status} {reply.error}".strip()]
+        if st["first"] is None:
+            st["first"] = not problems
+        if not problems:
+            done[pid] = Outcome(pid, reply.text, "model", "passed", st["attempts"], st["first"],
+                                [], now, st["words"])  # fmt: skip
+            return False
+        st["previous"], st["problems"] = reply.text, problems
+        # What the writer is told: the violations, with the length one replaced
+        # by the count and the cut, which also comes when only a number failed.
+        feedback = [p for p in problems if not p.startswith("the report has ")]
+        st["feedback"] = feedback + ([note] if note else [])
+        if st["attempts"] <= cfg.retries:
+            return True
         log.warning(
             "reports: %s (%d) failed the check %d times: %s; the template is shown",
             sheet.player,
             pid,
             st["attempts"],
-            "; ".join(st["problems"]),
+            "; ".join(problems),
         )
         done[pid] = Outcome(pid, sheet.template, "template", "failed", st["attempts"],
-                            first.get(pid), st["problems"], now, st["words"])  # fmt: skip
+                            st["first"], problems, now, st["words"])  # fmt: skip
+        return False
+
+    todo = []
+    for pid, (meta, reply) in carried.items():
+        st = state[pid]
+        st["attempts"] = int(meta.get("attempts", 0))
+        st["words"] = list(meta.get("words", []))
+        st["first"] = meta.get("first")
+        if take(pid, reply):
+            todo.append(pid)
+    todo += [s.player_id for s in sheets if s.player_id not in carried]
+    while todo:
+        requests, meta = [], {}
+        for pid in todo:
+            st, cid = state[pid], f"w{state[pid]['attempts']}-{pid}"
+            params = writer_params(cfg, by_id[pid], st["previous"], st["feedback"])
+            requests.append({"custom_id": cid, "params": params})
+            meta[cid] = {
+                "player_id": pid,
+                "fact_hash": by_id[pid].hash(cfg.writer_model),
+                "attempts": st["attempts"],
+                "words": st["words"],
+                "first": st["first"],
+            }
+        sent, held = budget.take(requests, reserve)
+        for r in held:
+            pid = int(r["custom_id"].split("-", 1)[1])
+            done[pid] = _held(by_id[pid], state[pid], now, "the token cap")
+        replies = runner.run(sent, "writer", meta)
+        todo = []
+        for r in sent:
+            pid = int(r["custom_id"].split("-", 1)[1])
+            if take(pid, replies[r["custom_id"]]):
+                todo.append(pid)
     return done
 
 
-def _held(sheet: FactSheet, st: dict, first, now: str, why: str) -> Outcome:
-    return Outcome(sheet.player_id, sheet.template, "template", "held", st["attempts"], first,
-                   [f"not written: {why}"], now, st["words"])  # fmt: skip
+def _held(sheet: FactSheet, st: dict, now: str, why: str, status: str = "held") -> Outcome:
+    return Outcome(sheet.player_id, sheet.template, "template", status, st["attempts"],
+                   st["first"], [f"not written: {why}"], now, st["words"])  # fmt: skip
 
 
 @dataclass
 class Verdict:
     faithful: bool
-    offending_span: str
+    offending_span: str  # the first issue's span; blank when faithful
     hedging_adequate: bool
     readability: int
     reason: str
+    issues: list[dict] = field(default_factory=list)  # span, field, problem, explanation
+    problems: list[str] = field(default_factory=list)  # what ``verify`` found; empty: checkable
+
+    @property
+    def checkable(self) -> bool:
+        return not self.problems
 
 
 def parse_verdict(text: str) -> Verdict | None:
     try:
         data = json.loads(text)
+        issues = [
+            {k: str(i[k]) for k in ("span", "field", "problem", "explanation")}
+            for i in data["issues"]
+        ]
         verdict = Verdict(
             bool(data["faithful"]),
-            str(data.get("offending_span", "")),
+            issues[0]["span"] if issues else "",
             bool(data["hedging_adequate"]),
             int(data["readability"]),
             str(data.get("reason", "")),
+            issues,
         )
     except (ValueError, KeyError, TypeError):
         return None
     return verdict if 1 <= verdict.readability <= 5 else None
+
+
+def _plain(text: str) -> str:
+    """Whitespace, quotes, apostrophes and dashes made alike, for finding a
+    quoted span in its report."""
+    text = re.sub("[" + APOSTROPHES + "]", "'", str(text))
+    text = re.sub("[\u201c\u201d\u201e]", '"', text)
+    text = re.sub("[\u2010-\u2015]", "-", text)
+    return " ".join(text.split()).strip(" .,;:")
+
+
+def verify(verdict: Verdict, report: str, sheet_text: str) -> list[str]:
+    """What makes a verdict uncheckable: faithful with issues or unfaithful
+    without one, a span that is not in the report, a field that is not a line
+    of the sheet (prompt 19c)."""
+    found = []
+    if verdict.faithful and verdict.issues:
+        found.append("faithful, yet it lists issues")
+    if not verdict.faithful and not verdict.issues:
+        found.append("not faithful, yet it lists no issue")
+    keys, body = sheet_keys(sheet_text), _plain(report)
+    for issue in verdict.issues:
+        span = _plain(issue["span"])
+        if not span or span not in body:
+            found.append(f'the span "{issue["span"]}" is not in the report')
+        if issue["field"] != "none" and issue["field"] not in keys:
+            found.append(f'the field "{issue["field"]}" is not a line of the sheet')
+        if issue["field"] == "none" and issue["problem"] == "contradicts":
+            found.append("it contradicts no field")
+    return found
+
+
+def verdict_from(reply: Reply, sheet_text: str, report: str) -> Verdict | None:
+    """A reply's verdict with what ``verify`` found; None without one."""
+    verdict = parse_verdict(reply.text) if reply.status == "succeeded" else None
+    if verdict is not None:
+        verdict.problems = verify(verdict, report, sheet_text)
+        if verdict.problems:
+            log.warning("reports: a verdict set aside: %s", "; ".join(verdict.problems))
+    return verdict
+
+
+def report_sha(report: str) -> str:
+    return hashlib.sha256(str(report).encode()).hexdigest()[:16]
 
 
 def judge_reports(
@@ -1353,25 +1863,31 @@ def judge_reports(
     budget: Budget,
     usage: dict | None = None,
 ) -> dict[int, Verdict]:
-    requests = [
-        {"custom_id": f"j-{sheet.player_id}", "params": judge_params(cfg, sheet.text, report)}
-        for sheet, report in items
-    ]
+    requests, meta, by_cid = [], {}, {}
+    for sheet, report in items:
+        cid = f"j-{sheet.player_id}"
+        requests.append({"custom_id": cid, "params": judge_params(cfg, sheet.text, report)})
+        meta[cid] = {"player_id": sheet.player_id, "fact_hash": sheet.hash(cfg.writer_model),
+                     "report_sha": report_sha(report)}  # fmt: skip
+        by_cid[cid] = (sheet, report)
     sent, held = budget.take(requests)
     if held:
         log.warning("reports: %d judge requests held back by the token cap", len(held))
-    replies = runner.run(sent)
+    replies = runner.run(sent, "judge", meta)
     verdicts = {}
     for r in sent:
         reply = replies[r["custom_id"]]
         budget.spend(reply.usage)
         if usage is not None:
             _add(usage, reply.usage)
-        verdict = parse_verdict(reply.text) if reply.status == "succeeded" else None
+        if reply.status == "pending":
+            continue
+        sheet, report = by_cid[r["custom_id"]]
+        verdict = verdict_from(reply, sheet.text, report)
         if verdict is None:
             log.warning("reports: no verdict for %s (%s)", r["custom_id"], reply.status)
             continue
-        verdicts[int(r["custom_id"].split("-", 1)[1])] = verdict
+        verdicts[sheet.player_id] = verdict
     return verdicts
 
 
@@ -1385,14 +1901,16 @@ REPORT_COLUMNS = {
     "report is written again only when it changes, and the page shows a report only when it "
     "matches today's sheet.",
     "fact_sheet": "The facts the report was written from, one per line, all taken from the two "
-    "tables, the similar players and the season so far.",
+    "tables and the similar players: the forecast and the club today, never the season so far "
+    "(since prompt 19c).",
     "report": "What the page shows: the written report when it passed the check, otherwise the "
     "template explanation of the tables.",
     "source": "model when the report was written by the writer model and passed the check; "
     "template when the template explanation is shown instead.",
     "status": "passed (written and checked), failed (failed the check after every retry, the "
-    "template is shown) or held (not written this run because of the token cap or the deadline; "
-    "tried again next run).",
+    "template is shown), held (not written this run because of the token cap or the deadline; "
+    "tried again next run) or pending (in a batch still running when the run stopped waiting; "
+    "the next run collects it).",
     "model": "The writer model's id.",
     "generated_at": "When the report was written (UTC).",
     "attempts": "How many times the writer was asked for this sheet in its last run (one, plus "
@@ -1407,7 +1925,13 @@ REPORT_COLUMNS = {
     "judge_model": "The judge model's id, for the reports in a weekly sample.",
     "judged_at": "When the judge read the report (UTC).",
     "judge_faithful": "The judge's verdict: every claim is supported by the fact sheet.",
-    "judge_offending_span": "The passage the judge found unsupported; blank when faithful.",
+    "judge_offending_span": "The passage the judge found unsupported (its first issue); blank "
+    "when faithful.",
+    "judge_issues": "Every passage the judge found unsupported, as JSON: the span, the field of "
+    "the sheet it contradicts (or none), contradicts or unsupported, and why.",
+    "judge_checkable": "True when code found every span of the verdict in the report and every "
+    "field on the sheet, and the verdict agrees with its issues; a verdict that is not is set "
+    "aside and not counted.",
     "judge_hedging_adequate": "The judge's verdict: every chance reads as a historical rate, "
     "never as a prediction.",
     "judge_readability": "The judge's readability score for a football fan, 1 (confusing) to 5 "
@@ -1432,6 +1956,23 @@ def load_stored(processed: Path) -> pd.DataFrame:
     if not path.is_file():
         return pd.DataFrame(columns=list(REPORT_COLUMNS))
     return pd.read_parquet(path)
+
+
+PENDING = "pending.json"  # the batches a run left running, for the next run to collect
+
+
+def load_pending(processed: Path) -> list[Pending]:
+    path = out_dir(processed) / PENDING
+    if not path.is_file():
+        return []
+    return [Pending(**b) for b in json.loads(path.read_text(encoding="utf-8"))["batches"]]
+
+
+def save_pending(processed: Path, pending: list[Pending]) -> None:
+    folder = out_dir(processed)
+    folder.mkdir(parents=True, exist_ok=True)
+    body = {"batches": [p.__dict__ for p in pending]}
+    atomic_write_text(folder / PENDING, json.dumps(body, indent=2, default=str) + "\n")
 
 
 def _append_jsonl(path: Path, rows: list[dict]) -> None:
@@ -1520,7 +2061,7 @@ def plan(
 # For estimates only (``--dry-run``, docs/DEPLOY.md); a run's cost comes from its usage fields.
 BYTES_PER_TOKEN = 3.3  # English and figures on the Claude 5 tokenizers, roughly
 WRITER_OUTPUT_GUESS = 450  # a 150 word report is about 220 tokens; the rest is thinking
-JUDGE_OUTPUT_GUESS = 800  # the verdict is short; thinking at medium effort is most of it
+JUDGE_OUTPUT_GUESS = 150  # runs 9 to 12 measured 110 to 125 a verdict; the issues add some
 
 
 def estimate_run(settings) -> dict:
@@ -1584,10 +2125,71 @@ def _now() -> pd.Timestamp:
     return pd.Timestamp.now(tz="UTC").floor("s")
 
 
-def run_reports(settings, client=None, now: pd.Timestamp | None = None, sleep=time.sleep) -> dict:
+def judge_due(stored: pd.DataFrame, waiting: list[Pending], now: pd.Timestamp, days: float) -> bool:
+    """The weekly sample is due when no sample was judged or sent to the
+    judge in the last ``days`` days (prompt 19c: daily runs from 6 November
+    must not judge 50 reports a day)."""
+    stamps = []
+    if not stored.empty and "judged_at" in stored:
+        stamps += [pd.Timestamp(t) for t in stored["judged_at"].dropna()]
+    stamps += [pd.Timestamp(p.created_at) for p in waiting if p.kind == "judge" and p.created_at]
+    if not stamps:
+        return True
+    return now - max(stamps) >= pd.Timedelta(days=days) - pd.Timedelta(hours=1)
+
+
+def _row(sheet: FactSheet, o: Outcome, model: str, old) -> dict:
+    runs = _template_runs(old, model)
+    return {
+        "player_id": sheet.player_id,
+        "player": sheet.player,
+        "tables": sheet.tables,
+        "fact_hash": sheet.hash(model),
+        "fact_sheet": sheet.text,
+        "report": o.report,
+        "source": o.source,
+        "status": o.status,
+        "model": model,
+        "generated_at": o.generated_at,
+        "attempts": o.attempts,
+        "prompt_version": PROMPT_VERSION,
+        "template_runs": {"passed": 0, "failed": runs + 1}.get(o.status, runs),
+        "first_try": o.first_try,
+        "violations": "; ".join(o.violations),
+        **dict.fromkeys(JUDGE_COLUMNS),
+    }
+
+
+def _apply(table: pd.DataFrame, pid: int, v: Verdict, model: str, stamp: str) -> None:
+    at = table["player_id"] == pid
+    table.loc[at, "judge_model"] = model
+    table.loc[at, "judged_at"] = stamp
+    table.loc[at, "judge_faithful"] = v.faithful
+    table.loc[at, "judge_offending_span"] = v.offending_span
+    table.loc[at, "judge_issues"] = json.dumps(v.issues, ensure_ascii=False)
+    table.loc[at, "judge_checkable"] = v.checkable
+    table.loc[at, "judge_hedging_adequate"] = v.hedging_adequate
+    table.loc[at, "judge_readability"] = v.readability
+    table.loc[at, "judge_reason"] = v.reason
+
+
+def run_reports(
+    settings,
+    client=None,
+    now: pd.Timestamp | None = None,
+    sleep=time.sleep,
+    clock=time.monotonic,
+) -> dict:
     """``scout reports``. Without a client and without ``ANTHROPIC_API_KEY``
     it logs one line and returns an empty summary: the page then shows the
-    reports still matching their sheets and the template elsewhere."""
+    reports still matching their sheets and the template elsewhere.
+
+    The step waits at most ``max_run_minutes`` (20) on the Message Batches
+    API. It first collects the batches an earlier run left running
+    (``pending.json``): their writer replies are checked as the attempt they
+    were and their verdicts applied, as if they had come back in time; a
+    reply whose sheet changed since is dropped. A batch still running is
+    left for the run after, and its players are not asked for again."""
     cfg = settings.reports_text
     if client is None:
         if not os.environ.get("ANTHROPIC_API_KEY", "").strip():
@@ -1601,73 +2203,119 @@ def run_reports(settings, client=None, now: pd.Timestamp | None = None, sleep=ti
         client = anthropic.Anthropic()
     now = now or _now()
     stamp = now.isoformat()
+    model = cfg.writer_model
     processed = settings.paths.processed_dir
     cand, barg, near, leagues = inputs(settings)
     sheets = fact_sheets(cand, barg, near, leagues)
+    by_sheet = {s.player_id: s for s in sheets}
     names = gazetteer(cand, barg, near, settings)
     stored = load_stored(processed)
-    todo, keep = plan(sheets, stored, cfg.writer_model, cfg.template_runs)
     before = {int(r["player_id"]): r for _, r in stored.iterrows()} if not stored.empty else {}
-    log.info("reports: %d fact sheets, %d to write, %d reused", len(sheets), len(todo), len(keep))
+    runner = Batches(client, cfg.poll_seconds, clock() + cfg.max_run_minutes * 60, sleep, clock,
+                     now=stamp)  # fmt: skip
     budget = Budget(cfg.max_tokens_per_run)
-    runner = Batches(client, cfg.poll_seconds, time.monotonic() + cfg.max_run_minutes * 60, sleep)
-    reserve = cfg.judge_sample * (cfg.judge_max_tokens + 6000)  # the judge's worst case, kept free
     writer_usage, judge_usage = {}, {}
-    outcomes = write_reports(todo, cfg, runner, budget, names, reserve, stamp, writer_usage)
+
+    # What earlier runs left running, collected before anything new is sent.
+    waiting = load_pending(processed)
+    carried_w, carried_j, still, collected, stale = {}, {}, [], 0, 0
+    for p in waiting:
+        replies = runner.collect(p)
+        if replies is None:
+            still.append(p)
+            continue
+        log.info("reports: collected batch %s (%s, %d requests)", p.id, p.kind, len(replies))
+        for cid, reply in replies.items():
+            meta = p.requests.get(cid, {})
+            pid = meta.get("player_id")
+            sheet = by_sheet.get(pid)
+            if sheet is None or meta.get("fact_hash") != sheet.hash(model):
+                stale += 1  # his facts changed since: written again from today's sheet
+                _add(writer_usage if p.kind == "writer" else judge_usage, reply.usage)
+                budget.spend(reply.usage)
+                continue
+            collected += 1
+            if p.kind == "writer":
+                carried_w[pid] = (meta, reply)
+            else:
+                carried_j[pid] = (meta, reply, p.created_at)
+    in_flight = {
+        m["player_id"]
+        for p in still
+        if p.kind == "writer"
+        for m in p.requests.values()
+        if m.get("player_id") in by_sheet
+        and m.get("fact_hash") == by_sheet[m["player_id"]].hash(model)
+        and m.get("player_id") in before
+    }
+    judging = {m.get("player_id") for p in still if p.kind == "judge" for m in p.requests.values()}
+
+    todo, keep = plan(sheets, stored, model, cfg.template_runs)
+    for sheet in [t for t in todo if t.player_id in in_flight]:
+        keep[sheet.player_id] = before[sheet.player_id]
+    todo = [t for t in todo if t.player_id not in in_flight]
+    log.info(
+        "reports: %d fact sheets, %d to write (%d collected), %d reused, %d still in a batch",
+        len(sheets), len(todo), len(carried_w), len(keep) - len(in_flight), len(in_flight),
+    )  # fmt: skip
+    reserve = cfg.judge_sample * (cfg.judge_max_tokens + 6000)  # the judge's worst case, kept free
+    outcomes = write_reports(
+        todo, cfg, runner, budget, names, reserve, stamp, writer_usage, carried=carried_w
+    )
 
     rows = []
-    by_sheet = {s.player_id: s for s in sheets}
     for sheet in sheets:
         pid = sheet.player_id
         if pid in outcomes:
-            o = outcomes[pid]
-            rows.append(
-                {
-                    "player_id": pid,
-                    "player": sheet.player,
-                    "tables": sheet.tables,
-                    "fact_hash": sheet.hash(cfg.writer_model),
-                    "fact_sheet": sheet.text,
-                    "report": o.report,
-                    "source": o.source,
-                    "status": o.status,
-                    "model": cfg.writer_model,
-                    "generated_at": o.generated_at,
-                    "attempts": o.attempts,
-                    "prompt_version": PROMPT_VERSION,
-                    "template_runs": {
-                        "passed": 0,
-                        "failed": _template_runs(before.get(pid), cfg.writer_model) + 1,
-                        "held": _template_runs(before.get(pid), cfg.writer_model),
-                    }[o.status],
-                    "first_try": o.first_try,
-                    "violations": "; ".join(o.violations),
-                    **dict.fromkeys(JUDGE_COLUMNS),
-                }
-            )
+            rows.append(_row(sheet, outcomes[pid], model, before.get(pid)))
         else:
             rows.append({c: keep[pid].get(c) for c in REPORT_COLUMNS})
     table = pd.DataFrame(rows, columns=list(REPORT_COLUMNS))
 
-    sample = judge_sample(table, cfg.judge_sample, now.strftime("%Y-%m-%d"))
-    items = [
-        (by_sheet[pid], table.loc[table["player_id"] == pid, "report"].iloc[0]) for pid in sample
-    ]
-    verdicts = judge_reports(items, cfg, runner, budget, judge_usage) if items else {}
-    for pid, v in verdicts.items():
-        at = table["player_id"] == pid
-        table.loc[at, "judge_model"] = cfg.judge_model
-        table.loc[at, "judged_at"] = stamp
-        table.loc[at, "judge_faithful"] = v.faithful
-        table.loc[at, "judge_offending_span"] = v.offending_span
-        table.loc[at, "judge_hedging_adequate"] = v.hedging_adequate
-        table.loc[at, "judge_readability"] = v.readability
-        table.loc[at, "judge_reason"] = v.reason
+    # The verdicts of a judge batch an earlier run left running, on the
+    # reports they read, if those are still the ones shown.
+    verdicts: dict[int, Verdict] = {}
+    for pid, (meta, reply, sent_at) in carried_j.items():
+        budget.spend(reply.usage)
+        _add(judge_usage, reply.usage)
+        row = table.loc[table["player_id"] == pid].iloc[0]
+        if row["source"] != "model" or report_sha(row["report"]) != meta.get("report_sha"):
+            continue
+        verdict = verdict_from(reply, row["fact_sheet"], row["report"])
+        if verdict is not None:
+            verdicts[pid] = verdict
+            _apply(table, pid, verdict, cfg.judge_model, sent_at or stamp)
 
+    due = not carried_j and judge_due(stored, waiting, now, cfg.judge_min_days)
+    sample = []
+    if due:
+        pool = table[~table["player_id"].isin(judging)]
+        sample = judge_sample(pool, cfg.judge_sample, now.strftime("%Y-%m-%d"))
+        items = [
+            (by_sheet[pid], table.loc[table["player_id"] == pid, "report"].iloc[0])
+            for pid in sample
+        ]
+        fresh = judge_reports(items, cfg, runner, budget, judge_usage) if items else {}
+        for pid, v in fresh.items():
+            _apply(table, pid, v, cfg.judge_model, stamp)
+        verdicts.update(fresh)
+    else:
+        log.info("reports: the judge's sample is not due (one a %g days)", cfg.judge_min_days)
+
+    pending = still + runner.pending
     summary = summarize(outcomes, table, verdicts, writer_usage, judge_usage, budget, cfg, stamp)
     summary["batches"] = runner.created
+    summary["collected"] = collected
+    summary["collected_stale"] = stale
+    summary["pending_players"] = len(in_flight) + sum(
+        o.status == "pending" for o in outcomes.values()
+    )
+    summary["batches_pending"] = [p.id for p in pending]
+    summary["judge_due"] = due
     save(processed, table, outcomes, verdicts, summary, stamp)
-    path = write_owner_report(settings.paths.reports_dir, table, sample, verdicts, summary)
+    save_pending(processed, pending)
+    shown = sample or sorted(verdicts)
+    path = write_owner_report(settings.paths.reports_dir, table, shown, verdicts, summary)
     log.info("reports: %s", cost_line(summary))
     log.info("Report: %s", path)
     return summary
@@ -1708,7 +2356,8 @@ def summarize(outcomes, table, verdicts, writer_usage, judge_usage, budget, cfg,
         "shown_model": int(shown.get("model", 0)),
         "shown_template": int(shown.get("template", 0)),
         "judged": len(verdicts),
-        "judge_faithful": sum(v.faithful for v in verdicts.values()),
+        "judge_checkable": sum(v.checkable for v in verdicts.values()),
+        "judge_faithful": sum(v.faithful for v in verdicts.values() if v.checkable),
         "judge_hedging_adequate": sum(v.hedging_adequate for v in verdicts.values()),
         "judge_readability": {
             str(k): sum(v.readability == k for v in verdicts.values()) for k in range(1, 6)
@@ -1733,7 +2382,9 @@ def cost_line(summary: dict) -> str:
     return (
         f"Reports: {summary['written']} written ({summary['failed_first_try']} failed the check "
         f"first, {summary['failed_after_retries']} still after retries, {summary['held']} held), "
-        f"{summary['reused']} reused, {summary['judged']} judged; cost ${summary['cost_usd']:.2f} "
+        f"{summary['reused']} reused, {summary.get('collected', 0)} collected from an earlier "
+        f"batch, {summary.get('pending_players', 0)} in a batch still running, "
+        f"{summary['judged']} judged; cost ${summary['cost_usd']:.2f} "
         f"(writer ${summary['writer_cost_usd']:.2f}, judge ${summary['judge_cost_usd']:.2f}); "
         f"{summary['tokens_used']:,} of {summary['token_cap']:,} tokens."
     )
@@ -1747,6 +2398,7 @@ TYPES = {
     "first_try": "boolean",
     "judge_faithful": "boolean",
     "judge_hedging_adequate": "boolean",
+    "judge_checkable": "boolean",
 }
 
 
@@ -1785,7 +2437,17 @@ def save(processed: Path, table, outcomes, verdicts, summary, stamp) -> Path:
     _append_jsonl(
         folder / "verdicts.jsonl",
         [
-            {c: r[c] for c in ["player_id", "player", "fact_hash", "report", *JUDGE_COLUMNS]}
+            {
+                c: r[c]
+                for c in [
+                    "player_id",
+                    "player",
+                    "fact_hash",
+                    "fact_sheet",
+                    "report",
+                    *JUDGE_COLUMNS,
+                ]
+            }
             for _, r in judged.iterrows()
         ],
     )
@@ -1869,18 +2531,25 @@ def write_owner_report(
     ]
     if summary["judged"]:
         r = summary["judge_readability"]
+        checkable = summary.get("judge_checkable", summary["judged"])
         parts += [
-            f"* Faithful: {summary['judge_faithful']} of {summary['judged']}.",
+            f"* Checkable (every span found in its report, every field on its sheet): "
+            f"{checkable} of {summary['judged']}; the rest are set aside.",
+            f"* Faithful: {summary['judge_faithful']} of the {checkable} checkable.",
             f"* Hedging adequate: {summary['judge_hedging_adequate']} of {summary['judged']}.",
             "* Readability: " + ", ".join(f"{k}: {r[str(k)]}" for k in range(5, 0, -1)) + ".",
             "",
         ]
-        spans = [(p, v) for p, v in verdicts.items() if not v.faithful]
-        if spans:
-            parts += ["Unfaithful passages:", ""]
-            parts += [
-                f'* {rows.at[p, "player"]}: "{v.offending_span}" ({v.reason})' for p, v in spans
-            ]
+        faulted = [(p, v) for p, v in verdicts.items() if not v.faithful or not v.checkable]
+        if faulted:
+            parts += ["Unfaithful passages, with the field of the sheet each one contradicts:", ""]
+            for p, v in faulted:
+                issues = "; ".join(
+                    f'"{i["span"]}" ({i["field"]}, {i["problem"]}: {i["explanation"]})'
+                    for i in v.issues
+                )
+                aside = f" Set aside: {'; '.join(v.problems)}." if v.problems else ""
+                parts.append(f"* {rows.at[p, 'player']}: {issues or v.reason}.{aside}")
             parts.append("")
     else:
         parts += ["No report was judged in this run.", ""]
@@ -1906,7 +2575,8 @@ def write_owner_report(
             "> " + row["report"].replace("\n", "\n> "),
             "",
             f"Judge: faithful {'yes' if v.faithful else 'no'}"
-            + (f' ("{v.offending_span}")' if v.offending_span else "")
+            + "".join(f' ("{i["span"]}", field {i["field"]})' for i in v.issues)
+            + ("" if v.checkable else f" (set aside: {'; '.join(v.problems)})")
             + f", hedging adequate {'yes' if v.hedging_adequate else 'no'}, readability "
             f"{v.readability}. {v.reason}",
             "",
@@ -1930,6 +2600,117 @@ def write_owner_report(
     path = reports_dir / "reports_text.md"
     atomic_write_text(path, "\n".join(parts))
     return path
+
+
+# The judge against a hand sorting (prompt 19c)
+
+SORTING = Path("judge") / "sorting.csv"  # committed: run 9's 24 unfaithful verdicts, sorted by hand
+SCORED = {"real_error": False, "judge_mistake": True}  # the verdict the sorting expects
+
+
+def _overlaps(a: str, b: str) -> bool:
+    a, b = _plain(a).lower(), _plain(b).lower()
+    return bool(a) and bool(b) and (a in b or b in a)
+
+
+def judge_test(
+    settings, client=None, limit: int = 20, sorting: Path = SORTING, sleep=time.sleep
+) -> dict:
+    """``scout reports --judge-test``: the judge, as it is now, on the first
+    ``limit`` reports of the hand sorting, through the Message Batches API
+    (about 0.05 USD for 20). A real error agrees when the verdict is
+    checkable, unfaithful, and one of its spans overlaps the sorted span; a
+    judge mistake agrees when the verdict is faithful; a sheet gap is shown,
+    not scored. The reports and their sheets come from ``verdicts.jsonl`` and
+    ``reports.parquet``; once a full rewrite has replaced a sheet, read the
+    older ``reports.parquet`` (the bucket keeps its versions) into place
+    first. Writes ``reports/judge_test.md``."""
+    cfg = settings.reports_text
+    if client is None:
+        if not os.environ.get("ANTHROPIC_API_KEY", "").strip():
+            log.warning("reports: ANTHROPIC_API_KEY is not set; the judge test is skipped")
+            return {}
+        import anthropic
+
+        client = anthropic.Anthropic()
+    processed = settings.paths.processed_dir
+    wanted = pd.read_csv(sorting, dtype={"fact_hash": str}).fillna("").head(limit)
+    folder = out_dir(processed)
+    kept = folder / "verdicts.jsonl"
+    seen = pd.read_json(kept, lines=True) if kept.is_file() else pd.DataFrame()
+    stored = load_stored(processed)
+    items, missing = [], []
+    for _, w in wanted.iterrows():
+        prefix = str(w["fact_hash"])
+        match = (
+            seen[seen["fact_hash"].astype(str).str.startswith(prefix)] if not seen.empty else seen
+        )
+        sheets = stored[stored["fact_hash"].astype(str).str.startswith(prefix)]
+        if match.empty or sheets.empty:
+            missing.append(str(w["player"]))
+            continue
+        items.append((w, sheets.iloc[0]["fact_sheet"], match.iloc[-1]["report"]))
+    runner = Batches(client, cfg.poll_seconds, time.monotonic() + cfg.max_run_minutes * 60, sleep)
+    requests = [
+        {"custom_id": f"t-{int(w['player_id'])}", "params": judge_params(cfg, sheet, report)}
+        for w, sheet, report in items
+    ]
+    replies = runner.run(requests, "judge")
+    usage, rows = {}, []
+    for (w, sheet, report), r in zip(items, requests, strict=True):
+        reply = replies[r["custom_id"]]
+        _add(usage, reply.usage)
+        v = verdict_from(reply, sheet, report)
+        expected = SCORED.get(str(w["category"]))
+        if v is None or expected is None:
+            agreed = None
+        elif expected:
+            agreed = v.faithful
+        else:
+            agreed = (
+                not v.faithful
+                and v.checkable
+                and any(_overlaps(i["span"], w["span"]) for i in v.issues)
+            )
+        rows.append((w, v, agreed))
+    scored = [a for _, _, a in rows if a is not None]
+    summary = {
+        "asked": len(items),
+        "not_found": missing,
+        "verdicts": sum(v is not None for _, v, _ in rows),
+        "checkable": sum(v is not None and v.checkable for _, v, _ in rows),
+        "scored": len(scored),
+        "agreed": sum(scored),
+        "cost_usd": round(cost_usd(usage, cfg.judge_model, cfg), 4) if usage else 0.0,
+    }
+    lines = [
+        "# The judge against the hand sorting",
+        "",
+        f"`scout reports --judge-test` on {len(items)} reports of `{sorting}` "
+        f"({model_name(cfg.judge_model)}): agreed on {summary['agreed']} of {summary['scored']} "
+        f"scored (real errors found at the sorted span, judge mistakes now faithful); "
+        f"{summary['checkable']} of {summary['verdicts']} verdicts checkable; "
+        f"cost {summary['cost_usd']:.2f} USD."
+        + (f" Not found: {', '.join(missing)}." if missing else ""),
+        "",
+        "| Player | Sorted as | Field | Judge | Issues | Agrees |",
+        "|---|---|---|---|---|---|",
+    ]
+    for w, v, agreed in rows:
+        said = "no verdict" if v is None else ("faithful" if v.faithful else "not faithful")
+        if v is not None and not v.checkable:
+            said += " (set aside)"
+        issues = "" if v is None else "; ".join(f'"{i["span"]}" ({i["field"]})' for i in v.issues)
+        mark = "" if agreed is None else ("yes" if agreed else "no")
+        lines.append(
+            f"| {w['player']} | {w['category']} | {w['field']} | {said} | "
+            f"{issues.replace('|', '/')} | {mark} |"
+        )
+    path = Path(settings.paths.reports_dir) / "judge_test.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    atomic_write_text(path, "\n".join(lines) + "\n")
+    log.info("reports: judge test %s, %s", summary, path)
+    return summary
 
 
 # The page
@@ -1965,6 +2746,8 @@ def page_reports(
         else:
             rows[str(sheet.player_id)] = ["template", sheet.template]
     judged = stored[stored["judged_at"].notna()] if "judged_at" in stored else stored.iloc[:0]
+    if "judge_checkable" in judged:  # a verdict code could not check is not counted (prompt 19c)
+        judged = judged[judged["judge_checkable"].astype("boolean").fillna(True).astype(bool)]
     return {
         "available": True,
         "label": label(cfg.writer_model),

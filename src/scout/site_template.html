@@ -184,6 +184,7 @@ tr.sim td { padding: 0 10px 12px; }
 .report { margin: 0 0 12px; }
 .report p { margin: 0 0 4px; max-width: 80ch; font-size: 14px; line-height: 1.5; }
 .report .small { display: block; }
+.report .sofar { margin-top: 8px; }
 .simlist { margin: 0 0 6px; padding-left: 22px; }
 .simlist li { margin: 4px 0; }
 .simlist .meta { display: inline; }
@@ -787,7 +788,8 @@ footer p { margin: 6px 0; max-width: 100ch; }
     body.insertAdjacentHTML("beforeend", '<tr class="sim"><td colspan="' + cols + '"><div class="simbox"><div class="report">Loading the report.</div><div class="near">Loading similar players.</div></div></td></tr>');
     button.setAttribute("aria-expanded", "true");
     var id = Number(button.dataset.id), report = body.querySelector("tr.sim .report"), near = body.querySelector("tr.sim .near");
-    loadReports().then(function (r) { report.innerHTML = reportHtml(r, id); }, function () { report.innerHTML = '<p class="none">The reports file (data/reports.json) did not load.</p>'; });
+    var block = soFarBlock(rowOf(id));
+    loadReports().then(function (r) { report.innerHTML = reportHtml(r, id) + block; }, function () { report.innerHTML = '<p class="none">The reports file (data/reports.json) did not load.</p>' + block; });
     loadSimilar().then(function () { near.innerHTML = panel(id); }, function () { near.innerHTML = simFailed(); });
   }
 
@@ -801,6 +803,25 @@ footer p { margin: 6px 0; max-width: 100ch; }
       return r.json();
     });
     return reportsWait;
+  }
+  // The season so far (prompt 19c): its own block under the report, never in
+  // the report's text, so a new match does not rewrite a report.
+  function rowOf(id) {
+    return DATA.candidates.concat(DATA.bargains).filter(function (o) { return o.player_id === id; })[0] || null;
+  }
+  function soFarBlock(o) {
+    if (!o || !D.so_far_date) return "";
+    var parts = [];
+    if (!o.so_far_minutes) parts.push("no league minutes yet");
+    else {
+      if (o.so_far_matches != null) parts.push(int(o.so_far_matches) + " matches");
+      parts.push(int(o.so_far_minutes) + " minutes, " + Math.round(o.so_far_minutes_share * 100) + "% of team minutes");
+      if (o.so_far_ability_pct != null) parts.push("ability " + int(o.so_far_ability_pct) + " percentile");
+      if (o.so_far_goals_per90 != null) parts.push(o.so_far_goals_per90.toFixed(2) + " goals and " + o.so_far_assists_per90.toFixed(2) + " assists per 90 minutes");
+    }
+    parts.push(o.so_far_flag_count ? "flags today: " + o.so_far_flags : "no flags today");
+    return '<p class="sofar"><b>Season so far, to ' + esc(day(D.so_far_date)) + ":</b> " + parts.map(esc).join("; ") +
+      '</p><span class="small">League matches of the season in progress: context, not part of the forecast or of the report.</span>';
   }
   function reportHtml(r, id) {
     if (!r.available) return "";
@@ -1184,7 +1205,7 @@ footer p { margin: 6px 0; max-width: 100ch; }
     var R = D.reports;
     if (R && R.available) {
       var agree = R.agreement ? " The owner read " + int(R.agreement.read) + " of the judge's verdicts and agreed with " + int(R.agreement.agreed) + " (" + Math.round(100 * R.agreement.agreed / R.agreement.read) + "%)." : "";
-      items.push("<b>Written reports.</b> Each player's panel (Report and similar players) has a report of about 130 words that " + esc(R.writer) + " writes from the row's facts. Code checks that every number and every name in it is among those facts; a report that still fails after two rewrites is replaced by the explanation written by rule (" + int(R.written) + " written, " + int(R.template) + " by rule this week). Its odds are historical rates, like everywhere on this page. Each week " + esc(R.judge) + " grades a sample for faithfulness, hedging and readability: " + int(R.judge_faithful) + " of the " + int(R.judged) + " graded so far were faithful." + agree);
+      items.push("<b>Written reports.</b> Each player's panel (Report and similar players) has a report of about 130 words that " + esc(R.writer) + " writes from the row's facts. Code checks that every number and every name in it is among those facts; a report that still fails after two rewrites is replaced by the explanation written by rule (" + int(R.written) + " written, " + int(R.template) + " by rule this week). It describes the forecast and his club today; the season so far is shown under it as its own block, so a new match never rewrites it. Its odds are historical rates, like everywhere on this page. Each week " + esc(R.judge) + " grades a sample for faithfulness, hedging and readability: " + int(R.judge_faithful) + " of the " + int(R.judged) + " graded so far were faithful." + agree);
     }
     $("howto-list").innerHTML = items.map(function (t) { return "<li>" + t + "</li>"; }).join("");
   }

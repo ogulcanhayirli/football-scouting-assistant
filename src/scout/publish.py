@@ -42,6 +42,7 @@ REPORT_FILES = {
     "runs.jsonl",
     "verdicts.jsonl",
     "failures.jsonl",
+    "pending.json",  # prompt 19c: the batches a run left running, for the next run to collect
 }
 LIST_FILES = {
     f"{name}.{suffix}"
