@@ -512,7 +512,11 @@ sources sit in the footer, every link and credit kept. One system font, 16
 px on phones and 17 on desktop, a 720 px column (tables 1,100 px), one
 accent, light and dark from the system; the character counter shows from
 400 characters on; the suggested questions hide after the first question
-(the follow ups take over), and the conversation sits above the box. Caps (`src/scout/chat/guard.py`): 20
+(the follow ups take over), and the conversation sits above the box.
+Published by weekly run 15 (started by hand on 28 October with the
+owner's go, success in 12 minutes; the live page then carried the new
+title, 2,734 players across 36 leagues and the three questions). No
+redeploy of `ScoutChat`: the function never reads `SUGGESTED`. Caps (`src/scout/chat/guard.py`): 20
 messages an hour per IP (salted hash), 1 USD a day and 5 USD a month from
 the usage fields, 500 characters, all with a fixed polite reply; the Claude
 Console workspace's spend limit is the hard backstop. Since prompt 20b the

@@ -433,7 +433,9 @@ says what the chat holds) and shown on every data tab.
   at 19?", "Which 20 year olds have the best chance of becoming elite?"
   (prompt 20e dropped "Show me bargains in the Eredivisie" from the page;
   the evaluation still asks it as N04). Since prompt 20e the welcome sits
-  in a collapsed "What it knows and what it does not" under the box.
+  in a collapsed "What it knows and what it does not" under the box; the
+  minimal page went out with weekly run 15, started by hand on 28 October
+  (success in 12 minutes), with no redeploy of the chat.
 * **Follow ups:** after each answer, two or three questions built from its
   tool results (`followUps` in the page): "Tell me about" and "Who plays
   most like ... today?" for the first player returned, then "Show me
