@@ -289,6 +289,12 @@ GREATS = [  # great, season, age, source, club, league, group, minutes, thin, ab
 ]
 
 
+ARCHETYPES = [  # key, kind, name, group, ability
+    (["ronaldo_nazario", "legends", "Ronaldo Nazário", "winger", 100], _vec(0, 127, 0, 0)),
+    (["messi_25", "calibration", "Lionel Messi at 25", "winger", 100], _vec(127, 0, 0, 0)),
+]
+
+
 def _b64(vectors):
     return base64.b64encode(bytes(v & 0xFF for vec in vectors for v in vec)).decode()
 
@@ -358,7 +364,28 @@ def similar_json():
             "rows": [r for r, _ in GREATS],
             "vectors": _b64([v for _, v in GREATS]),
         },
-        "archetypes": {"available": False},
+        "archetypes": {
+            "available": True,
+            "label": "Archetype from the record, not measured.",
+            "calibration": {"calibrated": False, "text": "Half the traits within 15 points."},
+            "trait_names": {"goals_per90": "goals", "dribbles_success_per90": "dribbles"},
+            "columns": ["key", "kind", "name", "group", "ability"],
+            "rows": [r for r, _ in ARCHETYPES],
+            "details": {
+                "ronaldo_nazario": {
+                    "era": "Barcelona 1996/97",
+                    "drafted": "Drafted from the record.",
+                    "reviewed": False,
+                    "traits": [
+                        ["goals_per90", 99, "34 goals."],
+                        ["dribbles_success_per90", 98, "."],
+                    ],
+                    "sources": ["Wikipedia"],
+                },
+                "messi_25": {"era": "2012/13", "reviewed": False, "traits": [], "sources": []},
+            },
+            "vectors": _b64([v for _, v in ARCHETYPES]),
+        },
     }
 
 
@@ -1424,3 +1451,106 @@ def test_eval_reads_the_key_under_either_name(monkeypatch):
     assert claude_key() == "sk-cloud"
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-local")
     assert claude_key() == "sk-local"
+
+
+# Nicknames and legends (prompt 20d)
+
+
+@pytest.mark.parametrize(
+    ("asked", "meant"),
+    [
+        ("R9", "Ronaldo Nazário"),
+        ("  r9 ", "Ronaldo Nazário"),
+        ("Il Fenómeno", "Ronaldo Nazário"),
+        ("CR7", "Cristiano Ronaldo"),
+        ("La Pulga", "Lionel Messi"),
+        ("Zizou", "Zinedine Zidane"),
+        ("Il Maestro", "Andrea Pirlo"),
+        ("Rio", "Rio Ferdinand"),
+        ("R. Messi", "R. Messi"),  # only a whole name is looked up
+        ("Kenan Yıldız", "Kenan Yıldız"),
+    ],
+)
+def test_nicknames_are_read_before_any_search(asked, meant):
+    assert tools.resolve(asked) == meant
+
+
+def test_similar_to_a_legend_uses_his_archetype_and_says_so(tables):
+    r = tools.similar_players(tables, {"name": "R9", "mode": "now"})
+    assert r["label"] == tools.ARCHETYPE_LABEL == "archetype from the record, not measured"
+    assert r["query"]["archetype"] == "Ronaldo Nazário"
+    assert "not yet reviewed" in r["query"]["status"]
+    assert r["nearest"][0]["player"] == "Old Wing"  # the vector along his axis
+    assert {o["player"] for o in r["nearest"]} <= {
+        "Jesús Rodríguez",
+        "Kenan Yıldız",
+        "Wing Twin",
+        "Old Wing",
+    }
+    assert "illustrative only" in r["how_far_to_trust_it"]
+    young = tools.similar_players(tables, {"name": "R9", "mode": "now", "age_max": 21})
+    assert "Old Wing" not in [o["player"] for o in young["nearest"]]
+    at_age = tools.similar_players(tables, {"name": "R9", "mode": "at_age", "age": 20})
+    assert at_age["label"] == tools.ARCHETYPE_LABEL
+    assert "no seasons by age" in at_age["note"]
+
+
+def test_a_card_for_a_legend_is_his_archetype(tables):
+    r = tools.player_card(tables, {"name": "R9"})
+    assert r["found"] is False
+    assert r["label"] == tools.ARCHETYPE_LABEL
+    assert r["archetype"]["strongest_traits"][0] == {
+        "trait": "goals",
+        "percentile": 99,
+        "why": "34 goals.",
+    }
+    assert "never measured" in r["note"]
+
+
+def test_calibration_drafts_are_never_a_target(tables):
+    assert tools._archetype_match(tables.similar, "Lionel Messi at 25") is None
+    assert tools._archetype_match(tables.similar, "Ronaldo Nazário")["key"] == "ronaldo_nazario"
+
+
+def test_a_nickname_names_the_players_of_today_it_also_matches(tables):
+    assert tools._also(tables, "Back", "Ronaldo Nazário") == ["Tom Back", "Ugo Back"]
+    assert tools._also(tables, "Ronaldo Nazário", "Ronaldo Nazário") == []
+
+
+def test_a_measured_great_carries_his_label(tables):
+    r = tools.similar_players(tables, {"name": "La Pulga", "mode": "at_age", "age": 21})
+    assert r["label"] == tools.GREATS_LABEL == "measured, cross era comparison is rough"
+    now = tools.similar_players(tables, {"name": "Messi", "mode": "now"})
+    assert now["measured_great"] == "Lionel Messi"
+    assert now["ages_held"] == [21]
+
+
+def test_the_prompt_names_the_legends_and_keeps_their_labels_speakable(tables):
+    facts, rules = prompt.system_prompt(tables)
+    assert "Ronaldo Nazário" in facts
+    assert "Lionel Messi at 25" not in facts
+    assert tools.ARCHETYPE_LABEL in rules
+    assert tools.GREATS_LABEL in rules
+    guarded = prompt.shingles(rules)
+    answer = (
+        "Ronaldo Nazário is not in the data as a player: he is an archetype from the record, "
+        "not measured. Today's nearest is Old Wing; for a measured great, cross era comparison "
+        "is rough."
+    )
+    assert not prompt.leaks(answer, guarded)
+
+
+def test_eval_phrases_take_either_wording_and_hyphens():
+    from scout.chat_eval import Item, has_phrase, score
+
+    assert has_phrase("cross era|across eras", "A cross-era comparison is rough.")
+    assert has_phrase("not measured|never measured", "He was never measured.")
+    assert not has_phrase("archetype", "He is a legend.")
+    item = Item(
+        "N06", "suggested", "is R9 in the data", ["Ronaldo Nazário"], [], [], "", ["archetype"]
+    )
+    good = {"answer": "Ronaldo Nazário is held only as an archetype."}
+    assert score(item, good, set(), None)["passed"]
+    bad = score(item, {"answer": "Ronaldo Nazário is a legend."}, set(), None)
+    assert not bad["passed"]
+    assert '"archetype"' in bad["why"]

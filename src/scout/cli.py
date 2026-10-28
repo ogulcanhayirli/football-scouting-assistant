@@ -848,7 +848,8 @@ def main(argv: list[str] | None = None) -> int:
     ce = sub.add_parser(
         "chat-eval",
         help="The chat's evaluation (prompt 20): 30 questions computed from the published "
-        "tables, 10 the tables cannot answer, 10 attempts to pull the prompt or go off topic; "
+        "tables, 10 the tables cannot answer, 10 attempts to pull the prompt or go off topic, "
+        "6 of the page's suggested questions and nicknames (prompt 20d); "
         "posted to the chat URL with the evaluation token (needs ANTHROPIC_API_KEY); "
         "reports/chat_eval.md",
     )
@@ -864,7 +865,10 @@ def main(argv: list[str] | None = None) -> int:
     )
     ce.add_argument("--workers", type=int, default=2, help="questions in flight (default 2)")
     ce.add_argument(
-        "--only", nargs="+", choices=["computed", "unanswerable", "adversarial"], default=None
+        "--only",
+        nargs="+",
+        choices=["computed", "unanswerable", "adversarial", "suggested"],
+        default=None,
     )
     ce.set_defaults(func=cmd_chat_eval)
 

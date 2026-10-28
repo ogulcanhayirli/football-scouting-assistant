@@ -295,12 +295,19 @@ def test_the_ask_tab_is_off_without_a_chat_url():
 def test_the_ask_tab_gets_the_url_and_the_caps_from_the_config():
     from types import SimpleNamespace
 
+    from scout.chat.prompt import SUGGESTED
     from scout.config import ChatConfig
     from scout.site import chat_block
 
     url = "https://abc.lambda-url.eu-central-1.on.aws/"
     block = chat_block(SimpleNamespace(chat=ChatConfig(url=url)))
-    assert block == {"url": url, "model": "Claude Sonnet 5.5", "max_chars": 500, "per_hour": 20}
+    assert block == {
+        "url": url,
+        "model": "Claude Sonnet 5.5",
+        "max_chars": 500,
+        "per_hour": 20,
+        "suggested": list(SUGGESTED),
+    }
     html = render({**_data(), "chat": block})
     payload = json.loads(
         re.search(r'id="data">(.*?)</script>', html, re.S).group(1).replace("<\\/", "</")
@@ -313,3 +320,21 @@ def test_the_ask_tab_gets_the_url_and_the_caps_from_the_config():
     assert "JSON.stringify({ warm: true })" in html
     assert "The first answer can take up to 30 seconds." in html
     assert "var SLOW_MS = 5000;" in html
+
+
+def test_the_page_opens_on_the_chat_with_suggestions_and_follow_ups():
+    from scout.chat.prompt import SUGGESTED
+
+    html = render({**_data(), "seasons": {"first": 2015, "count": 11}})
+    # Prompt 20d: the Ask tab comes first and opens when the page has no hash;
+    # the data tabs follow the "Explore the data" hint.
+    tabs = re.search(r'<div class="tabs".*?</div>', html, re.S).group(0)
+    assert tabs.index('data-tab="ask"') < tabs.index("Explore the data") < tabs.index("candidates")
+    assert 'ask: !location.hash || location.hash === "#ask"' in html
+    # The welcome says what the chat knows and does not; questions send themselves.
+    assert "What it knows." in html
+    assert "What it does not know." in html
+    assert "function followUps(results, asked)" in html
+    assert "ask(b.dataset.q)" in html
+    assert len(SUGGESTED) == 4
+    assert "Who plays most like R9 today?" in SUGGESTED

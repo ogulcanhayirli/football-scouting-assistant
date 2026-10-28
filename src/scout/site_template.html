@@ -215,6 +215,18 @@ tr.sim td { padding: 0 10px 12px; }
 #ar-card .sources { margin: 8px 0 0; padding-left: 18px; color: var(--muted); font-size: 13px; }
 .credit img, footer img.logo { height: 26px; vertical-align: middle; background: #fff; padding: 3px 6px; border-radius: 6px; margin-right: 8px; }
 .ask-line { color: var(--muted); font-size: 13.5px; margin: 0 0 12px; max-width: 100ch; }
+.explore { align-self: center; color: var(--muted); font-size: 13px; margin-left: 10px; padding-left: 12px; border-left: 1px solid var(--line); }
+.welcome { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; box-shadow: var(--shadow); margin: 0 0 12px; max-width: 100ch; }
+.welcome h2 { font-size: 18px; margin: 0 0 6px; }
+.welcome p { margin: 6px 0 0; }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 12px; }
+.chips button {
+  font: inherit; font-size: 14px; text-align: left; border: 1px solid var(--accent); background: var(--accent-soft);
+  color: var(--accent); border-radius: 999px; padding: 7px 14px; cursor: pointer; max-width: 100%;
+}
+.chips button:disabled { opacity: .5; cursor: wait; }
+.chips.follow { margin: 10px 0 0; }
+.chips.follow button { font-size: 13px; padding: 5px 12px; }
 #ask-log { display: grid; gap: 10px; margin: 0 0 12px; }
 .msg { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; box-shadow: var(--shadow); max-width: 100ch; }
 .msg.you { background: var(--accent-soft); border-color: transparent; justify-self: end; }
@@ -242,6 +254,9 @@ footer p { margin: 6px 0; max-width: 100ch; }
 @media (max-width: 760px) {
   .wrap { padding: 16px 16px 40px; }
   header h1 { font-size: 21px; }
+  .explore { flex-basis: 100%; margin: 4px 0 0; padding: 0; border: 0; }
+  .chips button { width: 100%; }
+  #ask-form { grid-template-columns: 1fr; }
   .controls { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .controls input, .controls select { width: 100%; }
   .controls input[type="checkbox"] { width: auto; }
@@ -280,12 +295,13 @@ footer p { margin: 6px 0; max-width: 100ch; }
   </details>
 
   <div class="tabs" role="tablist">
+    <button class="tab" role="tab" id="tab-ask" data-tab="ask">Ask</button>
+    <span class="explore">Explore the data:</span>
     <button class="tab" role="tab" id="tab-candidates" data-tab="candidates">Candidates <span class="n"></span></button>
     <button class="tab" role="tab" id="tab-bargains" data-tab="bargains">Bargains <span class="n"></span></button>
     <button class="tab" role="tab" id="tab-similar" data-tab="similar">Similar players</button>
     <button class="tab" role="tab" id="tab-greats" data-tab="greats">Measured greats</button>
     <button class="tab" role="tab" id="tab-archetypes" data-tab="archetypes">Archetypes</button>
-    <button class="tab" role="tab" id="tab-ask" data-tab="ask">Ask</button>
   </div>
 
   <div id="tables">
@@ -389,6 +405,12 @@ footer p { margin: 6px 0; max-width: 100ch; }
   </section>
 
   <section id="ask" hidden>
+    <div class="welcome">
+      <h2>Ask about the players</h2>
+      <p id="ask-knows"></p>
+      <p id="ask-not"></p>
+    </div>
+    <div class="chips" id="ask-suggest" aria-label="Suggested questions"></div>
     <p class="label">Answers are built only from the tables shown on this page.</p>
     <p class="ask-line" id="ask-line"></p>
     <div id="ask-log" aria-live="polite"></div>
@@ -529,7 +551,7 @@ footer p { margin: 6px 0; max-width: 100ch; }
     similar: location.hash === "#similar",
     greats: location.hash === "#greats",
     archetypes: location.hash === "#archetypes",
-    ask: location.hash === "#ask",
+    ask: !location.hash || location.hash === "#ask",  // the page opens on the chat (prompt 20d)
     list: "prime",
     shown: PAGE,
     sort: { candidates: { key: "order", dir: 1 }, bargains: { key: "rank", dir: 1 } }
@@ -670,6 +692,7 @@ footer p { margin: 6px 0; max-width: 100ch; }
     $("greats").hidden = !state.greats;
     $("archetypes").hidden = !state.archetypes;
     $("ask").hidden = !state.ask;
+    $("howto").hidden = state.ask;  // the welcome says what the chat holds
   }
 
   // Similar players (prompt 18): data/similar.json, loaded on first use
@@ -1099,8 +1122,62 @@ footer p { margin: 6px 0; max-width: 100ch; }
     $("ask-line").textContent = on
       ? D.chat.model + " looks the answer up in the candidates, bargains, similar players and the written reports with four tools; every number it gives must come from what it looked up, shown under each answer (From the tables). A prototype: at most " + D.chat.max_chars + " characters a question and " + D.chat.per_hour + " questions an hour."
       : "";
+    welcome();
+    chips($("ask-suggest"), on ? D.chat.suggested || [] : []);
     if (!on) $("ask-status").textContent = "The chat is not switched on yet.";
-    else { warmChat(); $("ask-q").focus(); }
+    else warmChat();
+  }
+
+  // The welcome and the suggested questions (prompt 20d)
+
+  function welcome() {
+    var dates = Object.keys(D.feature_dates).sort(), S = D.seasons;
+    var span = S ? " and " + words(S.count) + " seasons, " + S.first + "/" + String(S.first + 1).slice(-2) + " to " + D.season_label : "";
+    $("ask-knows").innerHTML = "<b>What it knows.</b> The " + D.tracked + " leagues tracked" + span +
+      ": the candidates and their calibrated chances, the bargains, who plays like whom (today's players, measured greats such as Messi and Xavi, and legends such as Ronaldo Nazário and Zidane described from the record) and a written report on each player. Every number it gives comes from the tables shown on this page, and each answer shows what it looked up.";
+    $("ask-not").innerHTML = "<b>What it does not know.</b> No injury news, no fixtures or results, no wages, fees or rumours, and nothing after the data dates: players as they stood on " +
+      day(dates[dates.length - 1]) + ", market values up to " + day(D.valuation_end) +
+      (D.so_far_date ? ", clubs and the season so far up to " + day(D.so_far_date) : "") + ".";
+  }
+  function chips(box, questions) {
+    box.innerHTML = questions.map(function (q) {
+      return '<button type="button" data-q="' + esc(q) + '">' + esc(q) + "</button>";
+    }).join("");
+    box.hidden = !questions.length;
+  }
+  var NO_ARTICLE = ["La Liga", "Serie", "Ligue", "Liga", "Major League", "Brasileirão", "Segunda", "J1"];
+  function inLeague(league) {
+    return NO_ARTICLE.some(function (p) { return league.indexOf(p) === 0; }) ? "in " + league : "in the " + league;
+  }
+  // Two or three questions to ask next, from what the answer looked up: the
+  // first player returned (his card, who plays like him) and the league asked.
+  function followUps(results, asked) {
+    var out = [], first = null, league = null, table = null, legend = null, label = null;
+    function add(q) { if (q && q !== asked && out.indexOf(q) < 0 && out.length < 3) out.push(q); }
+    (results || []).forEach(function (r) {
+      var o = r.result || {}, input = r.input || {}, names = [];
+      if (o.rows) names = o.rows.map(function (x) { return x.player; });
+      else if (o.nearest) names = o.nearest.map(function (x) { return x.player; });
+      else if (o.found && o.player) names = [o.player];
+      if (!first && names.length) first = names[0];
+      if (input.league) league = input.league;
+      if (r.tool === "search_players") table = input.table;
+      if (o.candidate && !league) league = o.candidate.league;
+      if (o.bargain && !league) league = o.bargain.league;
+      if (o.archetype && o.archetype.archetype) legend = o.archetype.archetype;
+      if (o.query && o.query.archetype) legend = legend || o.query.archetype;
+      if (o.label) label = o.label;
+    });
+    if (legend && !first) add("Who plays most like " + legend + " today?");
+    if (first) {
+      add("Tell me about " + first);
+      add("Who plays most like " + first + " today?");
+    }
+    if (legend) add("How far can I trust an archetype?");
+    else if (league && table && table.indexOf("bargains") === 0) add("Who has the best step up chance " + inLeague(league) + "?");
+    else if (league) add("Show me bargains " + inLeague(league));
+    else if (label) add("How rough is a comparison across eras?");
+    return out;
   }
   function paragraphs(text) {
     return String(text).split(/\n{2,}/).map(function (p) {
@@ -1141,11 +1218,14 @@ footer p { margin: 6px 0; max-width: 100ch; }
   }
   function sendQuestion(e) {
     e.preventDefault();
-    var q = $("ask-q").value.trim();
-    if (!q || chat.busy) return;
+    ask($("ask-q").value.trim());
+  }
+  function ask(q) {
+    if (!q || chat.busy || !(D.chat && D.chat.url)) return;
     if (q.length > D.chat.max_chars) { $("ask-status").textContent = "Please keep your question under " + D.chat.max_chars + " characters."; return; }
     chat.busy = true;
-    $("ask-send").disabled = true;
+    busy(true);
+    document.querySelectorAll("#ask-log .follow").forEach(function (b) { b.remove(); });
     $("ask-status").textContent = "Looking it up in the tables.";
     var slow = setTimeout(function () {
       $("ask-status").textContent = "Looking it up in the tables. The first answer can take up to 30 seconds.";
@@ -1164,7 +1244,11 @@ footer p { margin: 6px 0; max-width: 100ch; }
     }).then(function (b) {
       clearTimeout(slow);
       var answered = b.outcome === "answered";
-      say("Answer", paragraphs(b.answer || "Sorry, no answer came back.") + fromTables(b.tool_results), answered ? "" : "capped");
+      var next = answered ? followUps(b.tool_results, q) : [];
+      var follow = next.length ? '<div class="chips follow" aria-label="Ask next">' + next.map(function (x) {
+        return '<button type="button" data-q="' + esc(x) + '">' + esc(x) + "</button>";
+      }).join("") + "</div>" : "";
+      say("Answer", paragraphs(b.answer || "Sorry, no answer came back.") + fromTables(b.tool_results) + follow, answered ? "" : "capped");
       if (answered) chat.history.push({ role: "user", content: q }, { role: "assistant", content: b.answer });
       $("ask-status").textContent = "";
     }).catch(function (err) {
@@ -1173,8 +1257,12 @@ footer p { margin: 6px 0; max-width: 100ch; }
       $("ask-status").textContent = "";
     }).then(function () {
       chat.busy = false;
-      $("ask-send").disabled = false;
+      busy(false);
     });
+  }
+  function busy(on) {
+    $("ask-send").disabled = on;
+    document.querySelectorAll("#ask .chips button").forEach(function (b) { b.disabled = on; });
   }
 
   // The fixed text
@@ -1294,6 +1382,10 @@ footer p { margin: 6px 0; max-width: 100ch; }
   ["ar-age-min", "ar-age-max"].forEach(function (id) { $(id).addEventListener("input", arDraw); });
   $("ar-pool").addEventListener("change", arDraw);
   $("ask-form").addEventListener("submit", sendQuestion);
+  $("ask").addEventListener("click", function (e) {
+    var b = e.target.closest(".chips button");
+    if (b && !b.disabled) ask(b.dataset.q);
+  });
   $("ask-q").addEventListener("input", function () { $("ask-count").textContent = $("ask-q").value.length + " / " + ((D.chat && D.chat.max_chars) || 500); });
   $("ask-q").addEventListener("keydown", function (e) {
     if (e.key === "Enter" && !e.shiftKey) sendQuestion(e);

@@ -26,7 +26,10 @@
   (no greats are shown without it);
 * the Ask tab (prompt 20): the chat's Function URL (``chat.url`` of the
   config) and its caps, for the page to call; without a URL the tab says the
-  chat is not switched on. The chat Lambda reads this page's data block and
+  chat is not switched on. Since prompt 20d it is the first tab and opens by
+  default, with a welcome, four suggested questions and follow ups built
+  from each answer's tool results; the data tabs sit under "Explore the
+  data". The chat Lambda reads this page's data block and
   the downloads, never anything else (``scout.chat.data``);
 * ``data/reports.json`` (prompt 19): each player's written report when the
   stored one (``scout reports``) still matches today's fact sheet, else his
@@ -217,8 +220,11 @@ def page_data(
     greats: bool = False,
     reports: dict | None = None,
     chat: dict | None = None,
+    first_season: int | None = None,
 ) -> dict:
-    """Everything the page shows, as plain JSON values."""
+    """Everything the page shows, as plain JSON values; ``first_season`` is
+    the earliest season of the similar players data, for the Ask tab's
+    welcome (prompt 20d)."""
     season = int(cand["season"].max())
     through = season - HORIZON_SEASONS
     cand = cand.assign(flag_keys=flag_keys(cand["flags"]))
@@ -247,6 +253,9 @@ def page_data(
         "greats": greats,
         "reports": {k: v for k, v in (reports or {"available": False}).items() if k != "rows"},
         "chat": chat or {"url": None},
+        "seasons": (
+            {"first": first_season, "count": season - first_season + 1} if first_season else None
+        ),
         "candidates": _records(cand, [*CANDIDATE_COLUMNS, "flag_keys"]),
         "bargains": _records(barg, [*BARGAIN_COLUMNS, "flag_keys"]),
         "dictionary": _records(words, ["table", "column", "meaning"]),
@@ -446,14 +455,17 @@ def similar_data(
 
 
 def chat_block(settings) -> dict:
-    """What the Ask tab needs: the URL, the model's name and the caps it shows."""
+    """What the Ask tab needs: the URL, the model's name, the caps it shows and
+    the suggested questions under its welcome (prompt 20d)."""
     from scout.chat.guard import CAPS
+    from scout.chat.prompt import SUGGESTED
 
     return {
         "url": settings.chat.url,
         "model": settings.chat.model,
         "max_chars": CAPS.max_chars,
         "per_hour": CAPS.messages_per_hour,
+        "suggested": list(SUGGESTED),
     }
 
 
@@ -496,6 +508,7 @@ def build_site(
     latest = newest["value_date"].max()
     greats, info, logo = _greats_inputs(processed)
     greats_ready = all(x is not None for x in (greats, info, logo))
+    vectors, current, tested = _similar_inputs(processed)
     data = page_data(
         cand,
         barg,
@@ -510,6 +523,7 @@ def build_site(
         greats=greats_ready,
         reports=reports,
         chat=chat_block(settings),
+        first_season=int(vectors["season"].min()) if vectors is not None and len(vectors) else None,
     )
     out_dir.mkdir(parents=True, exist_ok=True)
     page = out_dir / "index.html"
@@ -529,7 +543,6 @@ def build_site(
     written.append(target)
     if not reports["available"]:
         log.warning("site: no written reports; run `scout reports` (the panels say so)")
-    vectors, current, tested = _similar_inputs(processed)
     names = league_names(settings)
     calendar = [lg.key for lg in settings.leagues if lg.calendar_year]
     great_block = greats_data(greats, info, names) if greats_ready else {"available": False}

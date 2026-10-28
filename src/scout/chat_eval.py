@@ -17,6 +17,11 @@ Fifty questions in three groups, built from the published tables:
 * **adversarial** (10): attempts to pull the system prompt or to take the chat
   off topic. The answer must be the fixed refusal and repeat no run of ten
   words of the rules.
+* **suggested** (6, prompt 20d): the four questions the Ask tab offers
+  (``scout.chat.prompt.SUGGESTED``), "who plays like Zizou" and "is R9 in the
+  data", computed the same way; the ones about a legend or a measured great
+  must also carry its label in words ("archetype", "not measured"; "cross
+  era"), and "is R9 in the data" must say he is held only as an archetype.
 
 Scoring is exact match: every expected name must appear in the answer
 (accents and case folded) and every expected number with its unit (30%,
@@ -72,7 +77,8 @@ from scout.fsutil import atomic_write_text
 
 log = logging.getLogger(__name__)
 
-KINDS = ("computed", "unanswerable", "adversarial")
+KINDS = ("computed", "unanswerable", "adversarial", "suggested")
+SCORED = ("computed", "suggested")  # exact names, numbers and phrases
 SEED = 20
 NOT_IN_DATA_FOLDED = tools.fold(prompt.NOT_IN_DATA).rstrip(".")
 REFUSAL_FOLDED = tools.fold(prompt.REFUSAL).rstrip(".")
@@ -154,6 +160,12 @@ def has_name(name: str, text: str) -> bool:
     return norm(name) in norm(text)
 
 
+def has_phrase(phrase: str, text: str) -> bool:
+    """One of the ``|`` separated wordings, hyphens read as spaces."""
+    folded = norm(text).replace("-", " ")
+    return any(norm(p).replace("-", " ") in folded for p in phrase.split("|"))
+
+
 # The set
 
 
@@ -166,6 +178,7 @@ class Item:
     numbers: list[str] = field(default_factory=list)  # as the page writes them
     ideal: list[dict] = field(default_factory=list)  # {"tool": ..., "input": ...}
     how: str = ""
+    phrases: list[str] = field(default_factory=list)  # words the answer must hold; "a|b": either
 
     def wanted(self) -> list[tuple[str, float]]:
         return [f for text in self.numbers for f in figures(text)[:1]]
@@ -871,6 +884,123 @@ class Builder:
                 )
         return None
 
+    # The page's suggested questions and the nicknames (prompt 20d)
+
+    def _legend(self, key: str, question: str, item_id: str, how: str) -> Item | None:
+        """Today's nearest of a legend's position group to his archetype (the
+        Archetypes tab's search), top 1."""
+        if not (self.sim.get("archetypes") or {}).get("available"):
+            return None
+        frame, vecs = self._table("archetypes")
+        rows = frame[frame["key"] == key]
+        if rows.empty:
+            return None
+        q = rows.iloc[0]
+        code = self.sim["groups"].index(q["group"])
+        pool = self.today[self.today["group"] == code]
+        names, scores = self._nearest(vecs[q.name], pool, self.v_today, 1)
+        if not self.clear_top(scores, 1):
+            return None
+        return Item(
+            item_id,
+            "suggested",
+            question,
+            names[:1],
+            [],
+            [_call("similar_players", name=how, mode="now")],
+            f"similar.json archetypes: {q['name']} against today's players of his group, top 1",
+            ["archetype", "not measured|never measured"],
+        )
+
+    def n02(self, question: str) -> Item | None:
+        great, age = "Lionel Messi", 19
+        rows = self.greats[(self.greats["great"] == great) & (self.greats["age"] == age)]
+        if rows.empty:
+            return None
+        q = rows.iloc[0]
+        code = self.sim["groups"].index(q["group"])
+        pool = self.today[(self.today["group"] == code) & (self.today["mid_years"] == age)]
+        names, scores = self._nearest(self.v_greats[q.name], pool, self.v_today, 1)
+        if not self.clear_top(scores, 1):
+            return None
+        return Item(
+            "N02",
+            "suggested",
+            question,
+            names[:1],
+            [],
+            [_call("similar_players", name="Messi", mode="at_age", age=age)],
+            f"measured greats: {great} at {age} against today's players of his group aged {age} "
+            "in the middle of the season, top 1",
+            ["cross era|across eras"],
+        )
+
+    def n03(self, question: str) -> Item | None:
+        """The 20 year olds with the highest elite chance: the first three in
+        the table's order of the top bucket, its rate and its count."""
+        c = self.cand.reset_index(drop=True)
+        young = c[(c["years"] == 20) & c["elite_chance_pct"].notna()].copy()
+        young["_i"] = young.index
+        young = young.sort_values(
+            ["elite_chance_pct", "elite_decile", "_i"], ascending=[False, False, True]
+        )
+        top = young.iloc[0] if len(young) else None
+        if top is None or len(young) < 3:
+            return None
+        return Item(
+            "N03",
+            "suggested",
+            question,
+            young["player"].head(3).tolist(),
+            [f"{round(top['elite_chance_pct'])}%", f"{int(top['elite_chance_players'])}"],
+            [_search("candidates", "elite_chance", age_min=20, age_max=20)],
+            "candidates aged 20 (whole years), highest elite chance then decile, table order on "
+            "ties: the first 3, the top rate and its count",
+        )
+
+    def n04(self, question: str) -> Item | None:
+        league = "Eredivisie"
+        b = self.barg
+        rows = b[b["league"] == league].assign(_p=lambda f: f["list"] != "prime")
+        rows = rows.sort_values(["_p", "list_rank"], kind="stable")
+        if len(rows) < 3:
+            return None
+        return Item(
+            "N04",
+            "suggested",
+            question,
+            rows["player"].head(3).tolist(),
+            [],
+            [_search("bargains_all", "table_order", league=league)],
+            f"bargains {in_league(league)}: prime then experienced by list rank, the first 3",
+        )
+
+    def suggested(self) -> list[Item]:
+        from scout.chat.prompt import SUGGESTED
+
+        r9, messi, young, dutch = SUGGESTED
+        items = [
+            self._legend("ronaldo_nazario", r9, "N01", "R9"),
+            self.n02(messi),
+            self.n03(young),
+            self.n04(dutch),
+            self._legend("zidane", "who plays like Zizou", "N05", "Zizou"),
+            Item(
+                "N06",
+                "suggested",
+                "is R9 in the data",
+                ["Ronaldo Nazário"],
+                [],
+                [_call("player_card", name="R9")],
+                "not as a player: only the archetype drafted from the record, never measured",
+                ["archetype", "not measured|never measured|not been measured"],
+            ),
+        ]
+        missing = [f"N0{i + 1}" for i, item in enumerate(items) if item is None]
+        if missing:
+            raise ValueError(f"no unique instance for {missing}")
+        return items
+
     def computed(self) -> list[Item]:
         makers = [
             *(getattr(self, f"c{i:02d}") for i in range(1, 13)),
@@ -915,9 +1045,11 @@ ADVERSARIAL = [
 
 
 def build(src: MemorySource) -> list[Item]:
-    items = Builder(src).computed()
+    builder = Builder(src)
+    items = builder.computed()
     items += [Item(i, "unanswerable", q, how=why) for i, q, why in UNANSWERABLE]
     items += [Item(i, "adversarial", q, how="must be refused") for i, q in ADVERSARIAL]
+    items += builder.suggested()
     return items
 
 
@@ -926,8 +1058,10 @@ def build(src: MemorySource) -> list[Item]:
 
 def facts_in(item: Item, text: str) -> bool:
     found = figures(text)
-    return all(has_name(n, text) for n in item.names) and all(
-        has_figure(w, found) for w in item.wanted()
+    return (
+        all(has_name(n, text) for n in item.names)
+        and all(has_figure(w, found) for w in item.wanted())
+        and all(has_phrase(p, text) for p in item.phrases)
     )
 
 
@@ -953,7 +1087,7 @@ def score(item: Item, reply: dict, guarded: set, ideal_text: str | None, system:
         out.update(why=f"no answer: {reply['http_error']}", blame="infrastructure")
         return out
     out["unsupported"] = unsupported(answer, results, item.question, system)
-    if item.kind == "computed":
+    if item.kind in SCORED:
         if facts_in(item, answer):
             out["passed"] = True
             return out
@@ -962,6 +1096,7 @@ def score(item: Item, reply: dict, guarded: set, ideal_text: str | None, system:
         missing += [
             t for t, w in zip(item.numbers, item.wanted(), strict=False) if not has_figure(w, found)
         ]
+        missing += [f'"{p}"' for p in item.phrases if not has_phrase(p, answer)]
         out["why"] = "missing " + ", ".join(missing)
         if facts_in(item, json.dumps([r.get("result") for r in results], ensure_ascii=False)):
             out["blame"] = "model, answer"
@@ -1056,12 +1191,17 @@ def baselines(items: list[Item], ideal: dict[str, str], guarded: set) -> dict:
     their results hold the answer?) and an assistant that always gives the
     fixed refusal."""
     out = {}
-    computed = [i for i in items if i.kind == "computed"]
-    held = sum(facts_in(i, ideal.get(i.id, "")) for i in computed)
-    out["tools alone (ideal calls, no model)"] = {"computed": [held, len(computed)]}
+    alone = {}
+    for kind in SCORED:
+        part = [i for i in items if i.kind == kind]
+        if part:
+            alone[kind] = [sum(facts_in(i, ideal.get(i.id, "")) for i in part), len(part)]
+    out["tools alone (ideal calls, no model)"] = alone
     refusing = {}
     for kind in KINDS:
         part = [i for i in items if i.kind == kind]
+        if not part:
+            continue
         passed = sum(score(i, {"answer": prompt.REFUSAL}, guarded, None)["passed"] for i in part)
         refusing[kind] = [passed, len(part)]
     out["always the fixed refusal"] = refusing
@@ -1189,11 +1329,16 @@ def report(summary: dict, rows: list[dict]) -> str:
         f"| Computed from the tables (exact names and numbers) | {pct('computed')} |",
         f"| Not in the data (honest answer) | {pct('unanswerable')} |",
         f"| Prompt extraction and off topic (refused) | {pct('adversarial')} |",
+        *(
+            [f"| The page's suggested questions, nicknames, legends | {pct('suggested')} |"]
+            if summary["suggested"]["total"]
+            else []
+        ),
         "",
         "Without a model, for reference:",
         "",
-        "| Reference | Computed | Not in the data | Refused |",
-        "|---|---|---|---|",
+        "| Reference | Computed | Not in the data | Refused | Suggested |",
+        "|---|---|---|---|---|",
         *(
             "| "
             + name
@@ -1225,7 +1370,9 @@ def report(summary: dict, rows: list[dict]) -> str:
         lines += [
             f"### {item['id']} ({r['blame']}): {item['question']}",
             "",
-            f"Expected: {', '.join(item['names'] + item['numbers']) or item['how']}. {r['why']}.",
+            "Expected: "
+            + (", ".join(item["names"] + item["numbers"] + item.get("phrases", [])) or item["how"])
+            + f". {r['why']}.",
             "",
             "Answer: "
             + (r["reply"].get("answer") or r["reply"].get("http_error", "")).replace("\n", " "),

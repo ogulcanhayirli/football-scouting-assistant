@@ -134,7 +134,7 @@ uv run python scripts/repair_names.py [--dry-run]  # the adapter's name repair o
 $C statsbomb download                        # StatsBomb open data, once: La Liga 2004/05 to 2020/21, Premier League 2003/04
 $C statsbomb build                           # data/processed/statsbomb/player_match_stats/, checked by the contract
 $C greats                                    # mapping check against API Football, the peer group correction and its test, peer group vectors, the greats' table, reports/greats.md (after embed and lists)
-$C chat-eval [--dry-run | --local] [--url URL] [--site URL_OR_DIR] [--only computed unanswerable adversarial]  # prompt 20: the chat's 50 questions against chat.url (needs SCOUT_CHAT_CLAUDE_KEY or ANTHROPIC_API_KEY; the evaluation token skips the visitor caps, own cap 5 USD a day), reports/chat_eval.md; --dry-run builds the set from the published files and checks the tools, no model called
+$C chat-eval [--dry-run | --local] [--url URL] [--site URL_OR_DIR] [--only computed unanswerable adversarial suggested]  # prompt 20: the chat's 56 questions (50, plus 6 of prompt 20d) against chat.url (needs SCOUT_CHAT_CLAUDE_KEY or ANTHROPIC_API_KEY; the evaluation token skips the visitor caps, own cap 5 USD a day), reports/chat_eval.md; --dry-run builds the set from the published files and checks the tools, no model called
 $C archetypes                                # reload and check archetypes/*/*.yaml, their vectors and today's nearest, the calibration, reports/archetypes.md (after embed and greats, before site; the weekly run calls it)
 ```
 
@@ -234,7 +234,7 @@ through the native API, and model only regular players (450+ minutes).
 | Greats correction (prompt 18c) | `greats` | a StatsBomb season held for Barcelona lands next to the same player's API Football season (top five, 2016/17 to 2020/21) | the uncorrected thin peer group | top five hit rate, median rank, players better and worse |
 | Archetypes (prompt 18c) | `archetypes` | drafted percentiles against the measured ones for six players drafted blind | a draft of 50 on every trait | share within 15 points (the owner's rule: most), mean gap; the real season's rank when searched with the draft |
 | Scout reports (prompts 19, 19c) | `reports` | a report whose every number is on its fact sheet as the kind of number its words say, every name on the sheet, and no claim the sheet's order or fields refute (the check in code), then the judge's faithful (each span with the field it contradicts, checked in code), hedging and readability | the explanation written by rule (shown whenever the check still fails) | share passing on the first try and after two retries, checkable judge verdicts on 50 a week, the judge against the hand sorting (`judge/sorting.csv`, `--judge-test`), the owner's agreement with the judge on 20 (`judge/agreement.csv`); cost per run |
-| Chat (prompt 20, decision 11) | `chat-eval` | 30 questions whose names and numbers are computed from the published tables, 10 the tables cannot answer, 10 attempts to pull the prompt or go off topic | the ideal tool call run in code (it holds every expected answer: the tools agree with pandas on all 30) | exact match pass rate per group; each failure put down to the model's answer, its tool use or the tools; numbers found in no tool result; the run's cost |
+| Chat (prompt 20, decision 11) | `chat-eval` | 30 questions whose names and numbers are computed from the published tables, 10 the tables cannot answer, 10 attempts to pull the prompt or go off topic; since prompt 20d 6 more (`suggested`: the page's four suggested questions, "who plays like Zizou", "is R9 in the data"), computed the same way and also needing the label's words ("archetype", "not measured"; "cross era") | the ideal tool call run in code (it holds every expected answer: the tools agree with pandas on all 30) | exact match pass rate per group; each failure put down to the model's answer, its tool use or the tools; numbers found in no tool result; the run's cost |
 | Riser (decision 3) | `scouting` | one season ability: both next seasons 20 above the best of this and last season and at the 70th percentile or better; half of team minutes now | `rank_rate` | as above, plus top 50 precision per season against the base rate |
 
 `scouting` also estimates league strength from players who changed leagues
@@ -384,6 +384,11 @@ October 2026, from MODELS.md and `reports/`:
   answered: a visitor whose address changes per connection is bound only
   by the day and month caps (Open questions). The cap test spent about
   0.07 USD of the visitors' day.
+  Prompt 20d (28 October): nicknames, the legends' archetypes and the
+  greats' labels in the chat, six questions added (N01 to N06). On the
+  tables of 28 October the ideal tool calls hold every expected answer
+  (computed 30 of 30, suggested 6 of 6, `--dry-run`); the run with the
+  model was not made: the session had no Claude key (Open questions).
 * Bargains (19 October, 37 leagues, seasons 2015 to 2023, experienced 30 to
   33): the top 50 gained value far more often than matched peers (prime
   63.2% against 43.3%, experienced 11.0% against 4.5%), but moved to a club
@@ -467,7 +472,30 @@ makes every number come from a tool result, opens an unanswerable question
 with "The tables on this page do not answer that." and refuses anything
 else with one fixed sentence; an answer that repeats ten words of the rules
 is replaced by that refusal in code, as is tool call markup written as text
-(prompt 20b). Caps (`src/scout/chat/guard.py`): 20
+(prompt 20b). **Prompt 20d (28 October):** the Ask tab is the first tab
+and opens when the address has no `#` part (old `#candidates` links still
+work); the data tabs follow an "Explore the data" hint, and the "how to
+read this" box shows on the data tabs only. Above the box a welcome says
+what the chat knows (the leagues tracked, the seasons of the similar
+players data from the page's `seasons` field, every number from the
+tables) and does not (no injury news, fixtures, wages, fees or rumours,
+nothing after the data dates); under it the four questions of `SUGGESTED`
+(`src/scout/chat/prompt.py`, passed by `chat_block`) send themselves when
+tapped, and each answer ends with two or three follow ups built from its
+tool results (`followUps`: his card and who plays like the first player
+returned, bargains or step up in the league asked, how far to trust an
+archetype). `player_card` and `similar_players` read a whole name through
+`NICKNAMES` (`src/scout/chat/tools.py`: R9, Il Fenomeno, CR7, La Pulga,
+Zizou, Il Maestro, Rio and the obvious surnames; a surname shared with a
+player of today goes to the legend and the result lists him under
+`also_on_page`) before any search. A legend held only as an archetype (the
+eight legends; the calibration drafts never) gets today's nearest of his
+group as the Archetypes tab finds them, with `label` "archetype from the
+record, not measured", the calibration verdict and, from `player_card`,
+his era, review status and strongest traits; a measured great carries
+"measured, cross era comparison is rough"; rule 9 of the system prompt
+makes the model say the label in one short sentence (both labels are left
+out of the leak guard). Caps (`src/scout/chat/guard.py`): 20
 messages an hour per IP (salted hash), 1 USD a day and 5 USD a month from
 the usage fields, 500 characters, all with a fixed polite reply; the Claude
 Console workspace's spend limit is the hard backstop. Since prompt 20b the
@@ -620,7 +648,7 @@ detail stays in `reports/scouting.md`, `reports/moves.md`,
 * The thin peer group's correction and archetypes for players without data, with a blind calibration: **done 25 October (prompt 18c); the archetypes await the owner's review.**
 * Generated scout reports with a faithfulness check and a weekly judge: **built 25 October (prompt 19); first real run 25 October (94% template, on length); length handling fixed in prompt 19b (run 9: 8 of 2,734 on the template); the judge's verdicts sorted, the check typed, the judge made checkable, the reports made stable and slow batches carried over in prompt 19c (28 October).**
 * January window forecast, published mid December and scored in February.
-* A capped chat over the two tables: **built and deployed 26 October (prompt 20)**; evaluated in process (28 of 30, 10 of 10, 10 of 10); the two fixes, a faster cold start and the 5 minute warm ping deployed 27 October (prompt 20b: 30 of 30, 10 of 10, 10 of 10); run through the Function URL on 28 October (prompt 20c): 30 of 30, 10 of 10, 10 of 10, 0.26 USD.
+* A capped chat over the two tables: **built and deployed 26 October (prompt 20)**; evaluated in process (28 of 30, 10 of 10, 10 of 10); the two fixes, a faster cold start and the 5 minute warm ping deployed 27 October (prompt 20b: 30 of 30, 10 of 10, 10 of 10); run through the Function URL on 28 October (prompt 20c): 30 of 30, 10 of 10, 10 of 10, 0.26 USD; the page opens on the chat with suggested questions and follow ups, and the chat knows the legends by their nicknames (prompt 20d, 28 October; the model run of the six new questions awaits the key).
 * A matchup report before any match model.
 
 ## AWS
@@ -745,7 +773,7 @@ Owner decisions of 2026-10-16. Each one line; details in the code and docs once 
 8. Ability score version 2 is built from per 90 stats with minutes shrinkage, without the match rating, and replaces version 1 only if it is more stable year to year and predicts the targets at least as well. Rule set on 19 October: more stable, and elite and step up AUC within 0.005 of version 1 or better; else the most stable version that passes. **Outcome (19 October): adopted.** Stability 0.858 against 0.503, elite AUC 0.881 against 0.880, step up 0.927 against 0.925; `--strength v2` is the default (MODELS.md, `reports/ability.md`).
 9. Serving stack (revised narrowly by decision 11: one Lambda for the chat only): no Lambda, API Gateway, DynamoDB or Bedrock agent; a weekly GitHub Actions run publishes Parquet, CSV and one static HTML page to S3 static hosting. **Built 21 October (prompt 15):** see AWS above and docs/DEPLOY.md; the page is live and the stored models are in S3 (23 October); the weekly run waits for the owner's setup (IAM user, secrets and variables).
 10. Embeddings and similar players (prompt 18, 24 October 2026). Style vectors: the version 2 per 90 inputs and the on pitch shares of the team's shots, dribbles, passes and duels, shrunk by minutes (empirical Bayes per measure and position group, one season), standardised within position group and season, with the level taken out (both ability percentiles regressed out of each measure's mean and spread within position group and season); cosine on them is the baseline. Learned: one hidden layer of 128 to 48 dimensions, InfoNCE with the same player in consecutive seasons as the positive pair and the other players of the same position group and season as negatives, settings chosen on 2021 to 2022, tested on 2023 to 2025 after training to 2022, refit on 2015 to 2025 for `stored/embedding.json`. **Outcome: adopted** (identity retrieval 19.9% against 13.2%, every position group). The replacement check is weak support only (1.52% against 0.65% at random). No vector database: a numpy search over all vectors takes 0.5 ms. MODELS.md, `reports/embeddings.md`.
-11. The chat (prompt 20, 26 October 2026, the owner's prompt). A prototype Ask tab: one AWS Lambda in Python with a Function URL (no API Gateway) in its own stack `ScoutChat`, reading the published files from the site bucket and keeping them in memory; the Claude key as an environment variable set at deploy time from the deploying environment (a NoEcho parameter), never written to a file; reserved concurrency 2, held back on 26 October because the account's Lambda limit is 10 (that limit is the cap until the quota increase is granted; a TODO in `chat_stack.py` restores it). Claude Sonnet 5.5, effort medium, prompt caching on the system prompt and the tool definitions, four strict tools (search_players, player_card, similar_players, how_to_read), at most six tool calls a turn, no streaming. Every number from a tool result; the data's dates in the system prompt; a plain "not in the data" answer when the tables cannot answer. Caps: 20 messages an hour per IP, 1 USD a day and 5 USD a month from the usage fields in a small S3 object, 500 characters, a fixed polite refusal on any cap; the system prompt is never revealed; the Console spend limit is the hard backstop. The page stays static; decision 9 is revised for this Lambda only. An evaluation of 50 questions decides whether the prototype works (`scout chat-eval`). **Built and deployed 26 October; evaluated in process: computed 28 of 30, not in the data 10 of 10, refused 10 of 10, 0.34 USD (Open questions).** **Prompt 20b (27 October, the owner's yes to redeploy):** the filters declared in the order the model writes them, rule 3's sentence out of the leak guard, tool markup never shown, 1,024 MB, the reads during the SDK import, a warm request from the page, and the 5 minute EventBridge warm ping (deployed once the owner added the rights to `scout-cfn-exec`); in process again: 30 of 30, 10 of 10, 10 of 10, 0.28 USD. **Through the Function URL (prompt 20c, 28 October):** 30 of 30, 10 of 10, 10 of 10, 0.26 USD; the per visitor cap and the leak guard behaved (Models).
+11. The chat (prompt 20, 26 October 2026, the owner's prompt). A prototype Ask tab: one AWS Lambda in Python with a Function URL (no API Gateway) in its own stack `ScoutChat`, reading the published files from the site bucket and keeping them in memory; the Claude key as an environment variable set at deploy time from the deploying environment (a NoEcho parameter), never written to a file; reserved concurrency 2, held back on 26 October because the account's Lambda limit is 10 (that limit is the cap until the quota increase is granted; a TODO in `chat_stack.py` restores it). Claude Sonnet 5.5, effort medium, prompt caching on the system prompt and the tool definitions, four strict tools (search_players, player_card, similar_players, how_to_read), at most six tool calls a turn, no streaming. Every number from a tool result; the data's dates in the system prompt; a plain "not in the data" answer when the tables cannot answer. Caps: 20 messages an hour per IP, 1 USD a day and 5 USD a month from the usage fields in a small S3 object, 500 characters, a fixed polite refusal on any cap; the system prompt is never revealed; the Console spend limit is the hard backstop. The page stays static; decision 9 is revised for this Lambda only. An evaluation of 50 questions decides whether the prototype works (`scout chat-eval`). **Built and deployed 26 October; evaluated in process: computed 28 of 30, not in the data 10 of 10, refused 10 of 10, 0.34 USD (Open questions).** **Prompt 20b (27 October, the owner's yes to redeploy):** the filters declared in the order the model writes them, rule 3's sentence out of the leak guard, tool markup never shown, 1,024 MB, the reads during the SDK import, a warm request from the page, and the 5 minute EventBridge warm ping (deployed once the owner added the rights to `scout-cfn-exec`); in process again: 30 of 30, 10 of 10, 10 of 10, 0.28 USD. **Through the Function URL (prompt 20c, 28 October):** 30 of 30, 10 of 10, 10 of 10, 0.26 USD; the per visitor cap and the leak guard behaved (Models). **Prompt 20d (28 October, the owner's yes to redeploy):** the page opens on the Ask tab with a welcome, suggested questions and follow ups; nicknames, the legends' archetypes and the greats' labels in the chat; six questions added to the evaluation.
 
 ## Open questions
 
@@ -761,6 +789,15 @@ Settle them with the owner rather than guessing.
   stored key kept): the two fixes (C06, C11), 1,024 MB and the warm request;
   then tool markup never shown; then the warm ping. Weekly run 12, started
   by hand, publishes the page's part. Still open:
+  * **Prompt 20d's evaluation with the model is not run.** The session
+    (28 October) had no `SCOUT_CHAT_CLAUDE_KEY`, so only `--dry-run` ran:
+    the 56 ideal tool calls hold every expected answer (30 of 30, 6 of
+    6). With the key added back: `scout chat-eval --local` (about 0.30
+    USD); the existing 50 must still pass and the six new ones are the
+    test of the nicknames and the labels. `ScoutChat` was redeployed the
+    same day without `--parameters` (the stored key kept); a warm request
+    loaded the tables of 28 October. The "ten seasons" of the requested
+    welcome is written from the data: 11 seasons, 2015/16 to 2025/26.
   * **The run against the URL: done 28 October** (prompt 20c, Models),
     once the owner allowed `*.lambda-url.eu-central-1.on.aws`: 30 of 30,
     10 of 10, 10 of 10, 0.26 USD. One finding is the owner's call: the per

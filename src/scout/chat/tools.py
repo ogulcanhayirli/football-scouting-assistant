@@ -14,8 +14,14 @@ age"; the middle of the season age for the measured greats).
 * ``player_card``: every fact the page shows for one player, the written
   report included;
 * ``similar_players``: the ten nearest of his position group today, or of
-  today's players to him (or to a measured great) at an age;
+  today's players to him (or to a measured great) at an age, or to the
+  archetype of a legend drafted from the record (prompt 20d);
 * ``how_to_read``: the dictionary entry of a column and what it cannot say.
+
+Both player tools read a name through ``NICKNAMES`` first (prompt 20d), so
+R9, CR7, Zizou or La Pulga reach the player, great or archetype the page
+holds, and an answer about a great or an archetype carries its label
+(``GREATS_LABEL``, ``ARCHETYPE_LABEL``).
 
 Every schema is strict (``additionalProperties: false``), with optional
 fields left out of ``required`` rather than nullable, under the API's limit
@@ -67,6 +73,71 @@ MONTHS = [
     "December",
 ]
 WORDS = ["no", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten"]
+# The labels a comparison with a legend carries into the answer (prompt 20d).
+ARCHETYPE_LABEL = "archetype from the record, not measured"
+GREATS_LABEL = "measured, cross era comparison is rough"
+# Nicknames and the obvious surnames of the greats and the legends, folded
+# (``fold``), against the name the page holds them under. A whole question
+# name is looked up, never a part of it, so "R. Messi" stays himself. A
+# surname shared with a player of today (Maldini, Zidane) goes to the
+# legend; the tools then name the players of today it also matches.
+NICKNAMES = {
+    "r9": "Ronaldo Nazário",
+    "il fenomeno": "Ronaldo Nazário",
+    "o fenomeno": "Ronaldo Nazário",
+    "fenomeno": "Ronaldo Nazário",
+    "the phenomenon": "Ronaldo Nazário",
+    "ronaldo nazario": "Ronaldo Nazário",
+    "ronaldo r9": "Ronaldo Nazário",
+    "brazilian ronaldo": "Ronaldo Nazário",
+    "cr7": "Cristiano Ronaldo",
+    "cristiano": "Cristiano Ronaldo",
+    "la pulga": "Lionel Messi",
+    "pulga": "Lionel Messi",
+    "leo messi": "Lionel Messi",
+    "messi": "Lionel Messi",
+    "zizou": "Zinedine Zidane",
+    "zidane": "Zinedine Zidane",
+    "il maestro": "Andrea Pirlo",
+    "pirlo": "Andrea Pirlo",
+    "rio": "Rio Ferdinand",
+    "ferdinand": "Rio Ferdinand",
+    "maldini": "Paolo Maldini",
+    "baresi": "Franco Baresi",
+    "cruyff": "Johan Cruyff",
+    "cruijff": "Johan Cruyff",
+    "gullit": "Ruud Gullit",
+    "xavi hernandez": "Xavi",
+    "iniesta": "Andrés Iniesta",
+    "henry": "Thierry Henry",
+    "titi": "Thierry Henry",
+    "puyol": "Carles Puyol",
+    "pique": "Gerard Piqué",
+    "busquets": "Sergio Busquets",
+    "busi": "Sergio Busquets",
+    "buffon": "Gianluigi Buffon",
+    "gigi": "Gianluigi Buffon",
+    "gigi buffon": "Gianluigi Buffon",
+    "chiellini": "Giorgio Chiellini",
+    "kante": "N'Golo Kanté",
+    "modric": "Luka Modrić",
+    "kroos": "Toni Kroos",
+    "de bruyne": "Kevin De Bruyne",
+    "kdb": "Kevin De Bruyne",
+    "lewandowski": "Robert Lewandowski",
+    "lewy": "Robert Lewandowski",
+    "suarez": "Luis Suárez",
+    "el pistolero": "Luis Suárez",
+    "bergkamp": "Dennis Bergkamp",
+    "the iceman": "Dennis Bergkamp",
+    "vieira": "Patrick Vieira",
+    "pires": "Robert Pirès",
+    "van dijk": "Virgil van Dijk",
+    "vvd": "Virgil van Dijk",
+    "sergio ramos": "Sergio Ramos",
+    "dani alves": "Dani Alves",
+    "ney": "Neymar",
+}
 
 
 # Formatting, as the page does it
@@ -467,6 +538,22 @@ def find(t: Tables, name: str, club: str | None = None, pool=None) -> list[dict]
     return sorted(found, key=lambda p: (_rank(p), p["name"]))
 
 
+def resolve(name: str) -> str:
+    """The name the page holds for a nickname or a legend's surname, else the
+    name as asked."""
+    key = re.sub(r"\s+", " ", fold(name).replace("'", "").replace("\u2019", "")).strip()
+    return NICKNAMES.get(key, name)
+
+
+def _also(t: Tables, asked: str, meant: str, pool=None) -> list[str]:
+    """Players of the page the name as asked also matches, when a nickname
+    took it elsewhere (Maldini: Daniel Maldini of today)."""
+    if fold(asked) == fold(meant):
+        return []
+    found = [p for p in (pool if pool is not None else people(t)).values()]
+    return sorted({p["name"] for p in found if name_score(asked, p["name"]) >= 2})[:MAX_ROWS]
+
+
 def _club_names(p: dict) -> list[str]:
     names = [p.get("club")]
     for key in ("candidates", "bargains"):
@@ -519,13 +606,30 @@ def report_of(t: Tables, player_id: int) -> dict:
 
 
 def player_card(t: Tables, args: dict) -> dict:
-    found = find(t, args["name"], args.get("club"))
-    greats = sorted({g["great"] for g in t.similar.greats if name_score(args["name"], g["great"])})
+    asked = args["name"]
+    name = resolve(asked)
+    found = find(t, name, args.get("club"))
+    greats = sorted({g["great"] for g in t.similar.greats if name_score(name, g["great"])})
+    legend = _archetype_match(t.similar, name)
     if not found:
+        if legend is not None:
+            out = {
+                "found": False,
+                "archetype": archetype_card(t, legend),
+                "label": ARCHETYPE_LABEL,
+                "note": "not in the tables and never measured: the page holds him only as an "
+                "archetype, his style drafted from the historical record; similar_players finds "
+                "today's players nearest to it",
+            }
+            also = _also(t, asked, name)
+            if also:
+                out["also_on_page"] = also
+            return out
         if greats:
             return {
                 "found": False,
                 "measured_greats": greats,
+                "label": GREATS_LABEL,
                 "note": "not in the tables; he is one of the measured greats, so only "
                 "similar_players (mode at_age) can compare today's players with him",
             }
@@ -535,6 +639,8 @@ def player_card(t: Tables, args: dict) -> dict:
     p = found[0]
     tags = t.meta.get("tags", {})
     out: dict = {"found": True, "player": p["name"], "player_id": p["id"]}
+    if name != asked:
+        out["nickname"] = f"{asked} read as {name}"
     out["in_tables"] = [k for k in ("candidates", "bargains") if k in p]
     if "candidates" in p:
         out["candidate"] = candidate_view(p["candidates"], detail=True)
@@ -552,6 +658,39 @@ def player_card(t: Tables, args: dict) -> dict:
     if greats:
         out["measured_greats"] = greats
     return out
+
+
+def _archetype_match(sim, name: str) -> dict | None:
+    """The legend an asked name means (the calibration drafts are players we
+    measure, so they are never a target)."""
+    legends = [a for a in sim.archetypes if a.get("kind") == "legends"]
+    scored = [(name_score(name, a["name"]), a) for a in legends]
+    best = max((s for s, _ in scored), default=0)
+    hits = [a for s, a in scored if s == best and s >= 2]
+    return hits[0] if len(hits) == 1 else None
+
+
+def archetype_card(t: Tables, a: dict) -> dict:
+    """What the Archetypes tab shows for a legend, in brief."""
+    info = a.get("details") or {}
+    raw = t.similar.raw.get("archetypes") or {}
+    names = raw.get("trait_names") or {}
+    traits = sorted(info.get("traits") or [], key=lambda x: -x[1])[:3]
+    calibration = raw.get("calibration") or {}
+    return {
+        "archetype": a["name"],
+        "position_group": a["group"],
+        "era": info.get("era"),
+        "ability_pct_from_the_drafted_traits": a.get("ability"),
+        "status": "reviewed by the owner"
+        if info.get("reviewed")
+        else "drafted from the historical record, not yet reviewed by the owner",
+        "strongest_traits": [
+            {"trait": names.get(k, k), "percentile": round(v), "why": why} for k, v, why in traits
+        ],
+        "how_far_to_trust_it": ("" if calibration.get("calibrated") else "illustrative only: ")
+        + str(calibration.get("text", "")),
+    }
 
 
 # similar_players
@@ -632,11 +771,15 @@ def similar_players(t: Tables, args: dict) -> dict:
             f"player's other season is among his five nearest {js_round(tested['learned'] * 100)}%"
             " of the time, so treat the list as a shortlist."
         )
+    asked = args["name"]
+    name = resolve(asked)
+    args = {**args, "name": name}
     mode = args["mode"]
+    legend = _archetype_match(sim, name)
     if mode == "at_age":
         if args.get("age") is None:
             return {"error": "mode at_age needs the age to compare at"}
-        great = _great_match(sim, args["name"])
+        great = _great_match(sim, name)
         if great:
             return {**_like_great(t, great, int(args["age"])), "caveat": caveat}
     everyone = people(t)
@@ -644,14 +787,35 @@ def similar_players(t: Tables, args: dict) -> dict:
         pool = {pid: p for pid, p in everyone.items() if "today" in p}
     else:
         pool = {pid: p for pid, p in everyone.items() if "today" in p or "seasons" in p}
-    found = find(t, args["name"], args.get("club"), pool)
+    found = find(t, name, args.get("club"), pool)
+    if not found and legend is not None:
+        out = {**_like_archetype(t, legend, args), "caveat": caveat}
+        if mode == "at_age":
+            out["note"] = (
+                "an archetype has no seasons by age: it describes his style in "
+                f"{(legend.get('details') or {}).get('era')}"
+            )
+        also = _also(t, asked, name, pool)
+        if also:
+            out["also_on_page"] = also
+        return out
     if not found:
-        held = find(t, args["name"], args.get("club"))
+        held = find(t, name, args.get("club"))
         if held:
             return {
                 "found": False,
                 "note": "he has no style vector this season (it needs 450 league minutes "
                 "with match statistics); try mode at_age",
+            }
+        great = _great_match(sim, name)
+        if great:
+            ages = sorted(g["age"] for g in sim.greats if g["great"] == great)
+            return {
+                "found": False,
+                "measured_great": great,
+                "ages_held": ages,
+                "note": "a measured great is compared as he was at an age: ask again with mode "
+                "at_age and one of the ages held",
             }
         return {"found": False, "note": "no player of that name is held on this page"}
     if len(found) > 1:
@@ -674,13 +838,20 @@ def similar_players(t: Tables, args: dict) -> dict:
                 continue
             rows.append(o)
         found_rows = _nearest(q, rows, sim.scale)
-        return {
+        out = {
             "query": _sim_view(q, sim),
             "pool": "today's players of his position group"
             + ("" if rows else "; none match these filters"),
             "nearest": _listed(found_rows, sim.scale, t),
             "caveat": caveat,
         }
+        great = _great_match(sim, name)
+        if great:
+            out["measured_great"] = (
+                f"{great} is also a measured great: mode at_age compares today's players with "
+                "him as he was at an age"
+            )
+        return out
     age = int(args["age"])
     seasons = [*p.get("seasons", []), *([p["today"]] if "today" in p else [])]
     q = sorted(seasons, key=lambda o: (abs(math.floor(o["age"]) - age), o["season"]))[0]
@@ -746,6 +917,7 @@ def _like_great(t: Tables, great: str, age: int) -> dict:
         "season",
         "nearest": _listed(_nearest(q, pool, sim.scale), sim.scale, t, "age_mid", elite=True),
         "greats_label": (sim.raw.get("greats") or {}).get("label"),
+        "label": GREATS_LABEL,
     }
     if q["thin"]:
         out["note"] = (
@@ -753,6 +925,36 @@ def _like_great(t: Tables, great: str, age: int) -> dict:
             "average, so these neighbours say little"
         )
     return out
+
+
+def _like_archetype(t: Tables, a: dict, args: dict) -> dict:
+    """Today's ten nearest of the legend's position group (the Archetypes
+    tab's search: ages in the middle of the season)."""
+    sim = t.similar
+    groups = sim.raw["groups"]
+    rows = []
+    for o in sim.today:
+        if groups[o["group"]] != a["group"]:
+            continue
+        age = math.floor(o["age_mid"])
+        if args.get("age_min") is not None and age < args["age_min"]:
+            continue
+        if args.get("age_max") is not None and age > args["age_max"]:
+            continue
+        if args.get("league") and fold(o.get("league_name")) != fold(args["league"]):
+            continue
+        if args.get("min_ability_pct") is not None and o["ability"] < args["min_ability_pct"]:
+            continue
+        rows.append(o)
+    card = archetype_card(t, a)
+    return {
+        "query": {k: card[k] for k in ("archetype", "position_group", "era", "status")},
+        "pool": f"today's players of his position group ({a['group'].replace('_', ' ')})"
+        + ("" if rows else "; none match these filters"),
+        "nearest": _listed(_nearest(a, rows, sim.scale), sim.scale, t, "age_mid", elite=True),
+        "label": ARCHETYPE_LABEL,
+        "how_far_to_trust_it": card["how_far_to_trust_it"],
+    }
 
 
 # how_to_read
@@ -888,7 +1090,9 @@ def definitions(t: Tables) -> list[dict]:
                 "are matched loosely): his rows in candidates and bargains with chances, flags, "
                 "value, fair value, ability, club today, the season so far, the explanation and "
                 "his written scout report. A player outside both tables but in the similar "
-                "players data gets what that data holds. Several matches come back as a list."
+                "players data gets what that data holds; a measured great or a legend held only "
+                "as an archetype says so. Nicknames (R9, CR7, Zizou, La Pulga) are understood: "
+                "pass the name as asked. Several matches come back as a list."
             ),
             "strict": True,
             "input_schema": _schema(
@@ -907,7 +1111,10 @@ def definitions(t: Tables) -> list[dict]:
                 "optional age, league and ability filters. mode at_age: today's players a year "
                 "either side of that age nearest to his season at that age; for a measured "
                 "great (Lionel Messi, Xavi, Thierry Henry and others) today's players of that "
-                f"age in the middle of the season, with their elite chance. {SIMILAR_ORDER}"
+                "age in the middle of the season, with their elite chance. For a legend we hold "
+                "no data for (Ronaldo Nazário, Zinedine Zidane, Andrea Pirlo and others) today's "
+                "players nearest to his archetype, drafted from the record. Nicknames (R9, CR7, "
+                f"Zizou, La Pulga) are understood: pass the name as asked. {SIMILAR_ORDER}"
             ),
             "strict": True,
             "input_schema": _schema(
@@ -930,8 +1137,8 @@ def definitions(t: Tables) -> list[dict]:
                 "What a column or topic of the page means (its dictionary entry) and what it "
                 "cannot tell: how the chances were measured, their limits, the dates. Topics: "
                 "elite_chance, step_up_chance, big_move_chance, fall_back_risk, flags, value, "
-                "fair_value, ability, bargains, rising, season_so_far, similar, greats, reports, "
-                "explanation, dates."
+                "fair_value, ability, bargains, rising, season_so_far, similar, greats, "
+                "archetypes, reports, explanation, dates."
             ),
             "strict": True,
             "input_schema": _schema(

@@ -414,6 +414,63 @@ them: `search_players`, `player_card`, `similar_players`, `how_to_read`
 (`src/scout/chat/`). The answer comes back with the tool results it was built
 from, which the page shows under it ("From the tables").
 
+### The page opens on the chat, and the chat knows the legends (prompt 20d)
+
+Since 28 October 2026 the Ask tab is the page's first tab and opens when the
+address has no `#` part; the data tabs follow a visible "Explore the data"
+hint, and `#candidates`, `#bargains` and the other old links still open
+their tab. The "how to read this" box is hidden on the Ask tab (the welcome
+says what the chat holds) and shown on every data tab.
+
+* **The welcome** says what the assistant knows (the leagues tracked and
+  the seasons of the similar players data, 2015/16 to the newest; the
+  page's `seasons` field) and what it does not (no injury news, no
+  fixtures or results, no wages, fees or rumours, nothing after the
+  feature date, the valuation end and the pull day).
+* **Four suggested questions** under it send themselves when tapped
+  (`SUGGESTED` in `src/scout/chat/prompt.py`, passed to the page by
+  `chat_block`): "Who plays most like R9 today?", "Who looks like Messi did
+  at 19?", "Which 20 year olds have the best chance of becoming elite?",
+  "Show me bargains in the Eredivisie".
+* **Follow ups:** after each answer, two or three questions built from its
+  tool results (`followUps` in the page): "Tell me about" and "Who plays
+  most like ... today?" for the first player returned, then "Show me
+  bargains in" the league asked, or the best step up chance there after a
+  bargains search, or "How far can I trust an archetype?" after a legend.
+  "From the tables" stays under every answer. On a phone the chips take the
+  full width and the box stacks above the button.
+* **Nicknames** (`NICKNAMES` in `src/scout/chat/tools.py`): `player_card`
+  and `similar_players` read a whole name through the table before any
+  search (R9, Il Fenomeno for Ronaldo Nazário; CR7 for Cristiano Ronaldo;
+  La Pulga for Messi; Zizou; Il Maestro; Rio; KDB, VVD, Lewy and the
+  obvious surnames). A surname a player of today shares (Maldini, Zidane)
+  goes to the legend, and the result names the players of today it also
+  matches (`also_on_page`).
+* **Legends:** a name the page holds only as an archetype (the eight
+  legends; the six calibration drafts are measured players and never a
+  target) gets today's ten nearest of his position group, as the
+  Archetypes tab finds them, with the label "archetype from the record,
+  not measured" and the calibration verdict; `player_card` returns the
+  archetype's era, review status and three strongest drafted traits. A
+  measured great carries "measured, cross era comparison is rough", and a
+  great asked "now" points to `mode at_age` with the ages held. Rule 9 of
+  the system prompt makes the model say the label in one short sentence;
+  the leak guard leaves both labels out, like the two fixed replies.
+* **Evaluation:** six questions more (`suggested`, N01 to N06): the four
+  above, "who plays like Zizou" and "is R9 in the data", whose answer must
+  name Ronaldo Nazário and say "archetype" and "not measured" (or "never
+  measured"); the legend and great questions must carry their label's
+  words. On the tables of 28 October the ideal tool calls hold every
+  expected answer (30 of 30 computed, 6 of 6 suggested; `--dry-run`). The
+  run with the model needs the key in the session (`SCOUT_CHAT_CLAUDE_KEY`),
+  which this session did not have: `scout chat-eval --local`, or through
+  the URL, about 0.30 USD for the 56.
+
+Redeployed on 28 October 2026 with the owner's yes, without
+`--parameters` (the stored key kept); a warm request then loaded the tables
+of 28 October in 6.9 s. The page's part goes out with the next weekly run
+(started by hand that day).
+
 ```
  page (Ask tab) ── POST {message, history} ──► Function URL (CORS: the site only)
                                                   │

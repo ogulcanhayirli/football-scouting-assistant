@@ -7,7 +7,8 @@ which S3 does not undo for an SDK reader, so ``read`` unpacks them):
 * ``data/candidates.csv`` and ``data/bargains.csv``: the two tables;
 * ``data/dictionary.csv``: one sentence per column;
 * ``data/similar.json``: today's players, the earlier seasons of players
-  once in the top 500 and the measured greats, with their vectors;
+  once in the top 500, the measured greats and the archetypes of legends
+  drafted from the record (prompt 20d), with their vectors;
 * ``data/reports.json``: each player's written report, or the note that the
   explanation written by rule is shown;
 * ``index.html``: only its data block is read, for what the page says around
@@ -150,6 +151,7 @@ class Similar:
     today: list[dict] = field(default_factory=list)
     history: list[dict] = field(default_factory=list)
     greats: list[dict] = field(default_factory=list)
+    archetypes: list[dict] = field(default_factory=list)
 
     @property
     def available(self) -> bool:
@@ -195,6 +197,12 @@ def parse_similar(d: dict) -> Similar:
         sim.greats = _rows(greats, d, int8(greats["vectors"]))
         for o in sim.greats:
             o["group_name"] = o["group"]
+    arche = d.get("archetypes") or {}
+    if arche.get("available"):
+        sim.archetypes = _rows(arche, d, int8(arche["vectors"]))
+        for o in sim.archetypes:
+            o["group_name"] = o["group"]
+            o["details"] = (arche.get("details") or {}).get(o["key"], {})
     return sim
 
 
