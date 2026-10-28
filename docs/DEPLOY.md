@@ -430,6 +430,20 @@ prefixes the weekly run may already write, so its IAM policy needs no
 change. A Lambda deployed before the first page with `players.json` still
 loads (the file is optional) and knows the two lists only.
 
+### A bargain is priced below fair value (prompt 20g)
+
+`scout lists` adds `below_fair_value` to the bargains table (CSV and
+Parquet, in `processed/lists/` and the site's `data/`); no new file and no
+new prefix, so no IAM change. The page and the chat read it, and both fall
+back to `value_to_fair < 1` on a table published before it. The chat's
+tools and system prompt changed (`include_above_fair`, `bargain_verdict`,
+rule 11), so `ScoutChat` needs a redeploy (without `--parameters`: the
+stored key is kept) before the chat says it; until then the deployed
+function answers as before from the new files. The next weekly run
+rewrites the reports of the 1,094 ranked players priced above fair value
+(their fact sheet line now reads "Value ranking"), about 0.16 USD of writer
+tokens on top of the usual run.
+
 ### The page opens on the chat, and the chat knows the legends (prompt 20d)
 
 Since 28 October 2026 the Ask tab is the page's first tab and opens when the

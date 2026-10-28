@@ -23,18 +23,19 @@ tables (one report a player, also when he is in both):
   sign or unit) must match a number of the fact sheet within the rounding the
   report wrote it with and, since prompt 19c, of the kind its words say (a
   chance's rate, a share of fair value, of minutes, a percentile...); a
-  similar player's number only where he is named, a rate with the count of
-  its own chance. Every proper noun must be a name of the fact sheet (no
-  first name added to an initial), only the first similar player may be
-  called the closest, cheap and dear must follow the fair value ratio, and
-  the season so far stays out; the length must be 90 to 170 words (prompt 19b: the first real run
-  held 120 to 150 and sent 94% of the players to the template, nearly all
-  for a few words over). A failing report goes back to the writer with the
-  violations, its word count and the cut needed, at most twice; after that
-  the template explanation of ``scout.explain`` is shown and the failure is
-  logged (``failures.jsonl``). A player whose report ended on the template
-  is asked for again on the next run, once (``template_runs``), then not
-  until the prompt version or the writer model changes.
+  similar player's number only where he is named, a rate with the count of its
+  own chance. Every proper noun must be a name of the fact sheet (no first
+  name added to an initial), only the first similar player may be called the
+  closest, cheap and dear must follow the fair value ratio, the word bargain
+  only for a player priced below his fair value (prompt 20g), and the season
+  so far stays out; the length must be 90 to 170 words (prompt 19b: the first
+  real run held 120 to 150 and sent 94% of the players to the template, nearly
+  all for a few words over). A failing report goes back to the writer with the
+  violations, its word count and the cut needed, at most twice; after that the
+  template explanation of ``scout.explain`` is shown and the failure is logged
+  (``failures.jsonl``). A player whose report ended on the template is asked
+  for again on the next run, once (``template_runs``), then not until the
+  prompt version or the writer model changes.
 * **Judge.** Once in ``judge_min_days`` (6) a sample of reports not judged
   before (``judge_sample``, 50) goes to Claude Sonnet 5.5 with the sheet's
   field names and a structured output: faithful, every unsupported span with
@@ -165,6 +166,7 @@ LABEL_KEYS = {
     "Club today": "club_today",
     "Value rank": "value_rank",
     "Bargain list": "bargain_list",
+    "Value ranking": "bargain_list",  # on the bargains ranking above fair value (prompt 20g)
     "Market value": "market_value",
     "Fair value (our model)": "fair_value",
     "Ability": "ability",
@@ -440,13 +442,20 @@ def sheet_for(
         listed = "prime list (29 and under)" if barg["list"] == "prime" else "experienced list"
         if barg["list"] != "prime":
             listed = "experienced list (30 to 33)"
-        facts.append(
-            Fact(
-                "Bargain list",
-                f"{listed}, #{int(barg['list_rank']):,}",
-                (Num(float(barg["list_rank"]), tag="rank"),),
+        rank = (Num(float(barg["list_rank"]), tag="rank"),)
+        if below_fair_value(barg):
+            facts.append(Fact("Bargain list", f"{listed}, #{int(barg['list_rank']):,}", rank))
+        else:
+            # Prompt 20g: a bargain is priced below his fair value; the rest of
+            # the ranking is not called one.
+            facts.append(
+                Fact(
+                    "Value ranking",
+                    f"{listed} of the ranking by value against fair value, "
+                    f"#{int(barg['list_rank']):,}; priced above his fair value, so not a bargain",
+                    rank,
+                )
             )
-        )
     value, fair = row.get("value_eur"), row.get("fair_value_eur")
     if _present(value):
         facts.append(Fact("Market value", money(float(value)), (Num(float(value), "eur"),)))
@@ -544,6 +553,13 @@ def sheet_for(
         template=template,
         priority=priority,
     )
+
+
+def below_fair_value(barg) -> bool:
+    """A bargain: a player of the bargains ranking priced below his fair value
+    (prompt 20g; lists built before it carry only the ratio)."""
+    flag = barg.get("below_fair_value")
+    return bool(flag) if _present(flag) else float(barg["value_to_fair"]) < 1
 
 
 def fact_sheets(
@@ -1005,6 +1021,8 @@ CLOSEST = re.compile(r"\b(closest|nearest|most similar|most alike)\b", re.IGNORE
 SO_FAR = re.compile(r"\bso far\b|\bseason in progress\b", re.IGNORECASE)
 SEASON_LABEL = re.compile(r"\b20\d\d/\d\d\b")
 CHEAP = re.compile(r"\b(cheaply|below)\b", re.IGNORECASE)
+BARGAIN = re.compile(r"\bbargains?\b", re.IGNORECASE)
+NO_BARGAIN = re.compile(r"\bno bargains?\b", re.IGNORECASE)  # "he is no bargain"
 DEAR = re.compile(r"\b(dearly|above)\b", re.IGNORECASE)
 CHANCE_WORDS = {
     "elite_chance": ("elite", "100 most valuable"),
@@ -1054,6 +1072,7 @@ def claim_violations(report: str, sheet: FactSheet, said: list[Num]) -> list[str
                 )
         out += _chance_pairs(text, sheet, [n for n in said if start <= n.at < end], start)
         out += _direction(text, sheet)
+        out += bargain_violations(text, sheet)
     if sheet.fact("season_so_far") is None and SO_FAR.search(report):
         out.append(
             "the report mentions the season so far, which is not in the fact sheet (the page "
@@ -1103,6 +1122,30 @@ def _unnegated(pattern: re.Pattern, text: str) -> re.Match | None:
         if not set(before[-3:]) & {"not", "never", "neither", "nor", "than", "isn't", "wasn't"}:
             return m
     return None
+
+
+def bargain_violations(text: str, sheet: FactSheet) -> list[str]:
+    """The word bargain only for a player priced below his fair value (prompt
+    20g): a sheet without a fair value ratio under 100% calls nobody one."""
+    word = _unnegated(BARGAIN, NO_BARGAIN.sub(" ", text))
+    if word is None:
+        return []
+    ratio = next(
+        (n.value for n in sheet.numbers() if n.kind == "fair_ratio" and n.field == "fair_value"),
+        None,
+    )
+    if ratio is not None and ratio < 100:
+        return []
+    why = "no fair value" if ratio is None else f"a market value {round(ratio)}% of his fair value"
+    return [
+        f'the report says "{word.group(0)}", but he has {why}: only a player priced below his '
+        "fair value is called a bargain"
+    ]
+
+
+def calls_a_bargain(report: str, sheet: FactSheet) -> bool:
+    """A report breaks the bargain rule in one of its sentences."""
+    return any(bargain_violations(report[a:b], sheet) for a, b in sentences(report))
 
 
 def _direction(text: str, sheet: FactSheet) -> list[str]:
@@ -1260,6 +1303,8 @@ and "bottom" so many percent are written as the sheet writes them.
 first one is the closest.
 - Bargain list: players whose market value is low against their fair value; the prime list is
 the younger one, the experienced list the older one.
+- Value ranking: he is on the ranking by value against fair value but priced above his fair
+value, so he is not a bargain; never call him one.
 - Not rated: the table gives no rate there. Say so if it matters, with the sheet's own
 condition he does not meet (his rank or his age) if you give a reason; invent no other.
 """
@@ -2039,7 +2084,9 @@ def plan(
     template is asked for again on the next run, sheet changed or not, until
     ``template_runs`` runs in a row ended so under this prompt version and
     writer model; then it is kept (the page shows the explanation written by
-    rule) until the prompt or the model changes, not retried every week."""
+    rule) until the prompt or the model changes, not retried every week. A
+    kept report that calls a player priced at or above his fair value a
+    bargain is written again (prompt 20g)."""
     keep, todo = {}, []
     by_id = {}
     if not stored.empty:
@@ -2050,6 +2097,8 @@ def plan(
             todo.append(sheet)
             continue
         unchanged = str(old["status"]) == "passed" and str(old["fact_hash"]) == sheet.hash(model)
+        if unchanged and calls_a_bargain(str(old.get("report") or ""), sheet):
+            unchanged = False  # a stored report calling him a bargain (prompt 20g)
         given_up = _template_runs(old, model) >= template_runs
         if unchanged or given_up:
             keep[sheet.player_id] = old

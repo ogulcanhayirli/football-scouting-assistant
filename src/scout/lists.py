@@ -9,7 +9,10 @@
   rows when they are valued below #2,000 (or have no value), with the
   chances blank: those were never measured there (prompt 14).
 * **bargains**: the prime and experienced lists of ``scout.bargains`` with
-  the shared flags, the explanation and the two context tags.
+  the shared flags, the explanation and the two context tags. The lists
+  rank every eligible player by value against fair value; only a player
+  priced below his fair value (``below_fair_value``, prompt 20g) is called
+  a bargain, the rest are on the ranking but not bargains.
 * **players** (prompt 20f, ``scout.players``): every player with a league
   minute in the newest season, the two lists' players among them, with why
   he is on no list.
@@ -159,6 +162,10 @@ DICTIONARY = {
         "the model's price.",
         "value_to_fair_pct": "That ratio as a percentile among listed players of his position "
         "group (1 is the cheapest); the lists are sorted by it.",
+        "below_fair_value": "True when his market value is below his fair value (value_to_fair "
+        "under 1): only such a player is called a bargain. The lists rank every eligible player "
+        "by value against fair value, also those priced above it, who are on the ranking but "
+        "not bargains.",
         "contract_expiry": "When his contract ends, from the Transfermarkt snapshot, shown only "
         "when it ends after the snapshot date.",
         "flag_count": "How many warning flags he raises: low minutes, injured, value falling.",
@@ -433,6 +440,7 @@ def bargains_table(lists: dict[str, pd.DataFrame], leagues: dict[str, str]) -> p
                     "fair_value_eur": frame["predicted"].round(-3),
                     "value_to_fair": frame["ratio"].round(3),
                     "value_to_fair_pct": frame["ratio_pct"].round(1),
+                    "below_fair_value": frame["ratio"].round(3) < 1,
                     "contract_expiry": frame["contract_expiry"],
                     "flag_count": frame["flag_count"],
                     "flags": frame["flags"],
@@ -911,6 +919,9 @@ def run_lists(settings) -> Path:
     cand, barg, tables = season_tables(
         inputs, features, rows, profiles, snapshot, leagues, outcomes=outcomes
     )
+    from scout.contracts.schemas import BARGAINS_TABLE, validate
+
+    barg = validate(BARGAINS_TABLE, barg)
     season = int(cand["season"].max())
     through = season - HORIZON_SEASONS
     old_tables = candidates.realized_tables(outcomes, through=through, window=None)

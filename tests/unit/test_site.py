@@ -113,7 +113,39 @@ def test_page_data_carries_the_window_dates_and_both_tables():
     candidate = dict(zip(data["candidates"]["columns"], data["candidates"]["rows"][1], strict=True))
     assert candidate["fair_value_eur"] is None  # missing is null, never NaN
     assert data["fall_back"] == [{"flags": "1", "pct": 20, "players": 418}]
+    assert bargain["below_fair_value"] is True  # 0.5 of fair: a bargain (prompt 20g)
+    assert data["below_fair"] == {
+        "prime": {"below": 1, "ranked": 1},
+        "experienced": {"below": 0, "ranked": 0},
+    }
     json.dumps(data, allow_nan=False)
+
+
+def test_the_bargains_open_on_the_players_below_fair_value():
+    dear = _bargains().assign(value_to_fair=1.4, below_fair_value=False)
+    data = page_data(
+        _candidates(),
+        pd.concat([_bargains().assign(below_fair_value=True), dear.assign(list_rank=2)]),
+        dictionary(),
+        rising=set(),
+        feature_dates={"2026-06-30": ["epl"]},
+        valuation_end=pd.Timestamp("2026-06-12"),
+        latest_value_date=None,
+        built=pd.Timestamp("2026-10-28"),
+        forecasts=[],
+        tracked=37,
+    )
+    assert data["below_fair"]["prime"] == {"below": 1, "ranked": 2}
+    html = render(_data())
+    assert "allBargains: false" in html
+    assert (
+        'if (state.tab === "bargains" && !state.allBargains && !o.below_fair_value) return false;'
+        in html
+    )
+    assert '"show all " + n.ranked.toLocaleString("en")' in html
+    assert "above fair value, not a bargain" in html
+    assert "only a player priced below his fair value is called a bargain" in html  # how to read
+    assert "A bargain is a player priced below his fair value" in html  # what it knows
 
 
 def test_the_page_embeds_the_data_so_no_text_can_end_the_script():
@@ -407,7 +439,8 @@ def test_the_data_sections_open_from_one_row_of_links_with_their_counts():
     )
     assert 'class="n"' not in nav  # no counts in the links
     # The counts are in the section headings.
-    assert 'DATA[state.tab].length.toLocaleString("en") + " players</span>"' in html
+    assert 'DATA.candidates.length.toLocaleString("en") + " players</span>"' in html
+    assert "' players below fair value, <span class=\"n\">of '" in html  # prompt 20g
     for heading in ("Similar players", "Measured greats", "Archetypes", "All players"):
         assert f"<h2>{heading} <span" in body
     # Hidden until a link is clicked, and the how to read box starts collapsed.

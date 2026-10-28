@@ -14,7 +14,15 @@ from __future__ import annotations
 import re
 
 from scout.chat.data import Tables
-from scout.chat.tools import ARCHETYPE_LABEL, GREATS_LABEL, day, fold, whole, with_vector
+from scout.chat.tools import (
+    ARCHETYPE_LABEL,
+    GREATS_LABEL,
+    below_fair,
+    day,
+    fold,
+    whole,
+    with_vector,
+)
 
 REFUSAL = (
     "I can only help with questions about the players and numbers in the scouting tables on "
@@ -87,6 +95,10 @@ def system_prompt(t: Tables) -> tuple[str, str]:
     """The prompt as (facts, rules): ``rules`` is the part ``leaks`` guards."""
     meta, d = t.meta, dates(t.meta)
     prime = sum(1 for o in t.bargains if o.get("list") == "prime")
+    below = {
+        name: sum(1 for o in t.bargains if o.get("list") == name and below_fair(o))
+        for name in ("prime", "experienced")
+    }
     pool = meta.get("elite_pool", {})
     greats = sorted({g["great"] for g in t.similar.greats})
     legends = sorted(a["name"] for a in t.similar.archetypes if a.get("kind") == "legends")
@@ -119,7 +131,9 @@ elite pool is #{pool.get("from")} to #{whole(pool.get("to", 0))} by value and
 {pool.get("max_age")} or under.
 * Bargains: {whole(prime)} prime (29 and under) and {whole(len(t.bargains) - prime)} experienced
 (30 to 33) regular players ranked by market value against the fair value model, the
-cheapest first; the lists hold every such player, also those priced above their fair value.
+cheapest first; the ranking holds every such player, also those priced above their fair
+value. Only a player priced below his fair value is a bargain: {whole(below["prime"])} prime
+and {whole(below["experienced"])} experienced.
 * Similar players: style vectors for {whole(len(t.similar.today))} players of today, the
 earlier seasons since 2015 of players once in the top 500 by value, and {len(greats)} measured
 greats ({", ".join(greats)}).{held}
@@ -170,6 +184,11 @@ the tool writes it. Never answer him with "{NOT_IN_DATA}", which is only for pla
 tools do not find and for what the data never holds. A chance shown as "not computed" is
 blank for the reason the tool gives: say that reason, never a number. If the tool says the
 name was read as a close spelling, name the player it found.
+11. Call a player a bargain only when a tool result says bargain yes (priced below his fair
+value). A player on the bargains ranking priced above his fair value is not a bargain: say
+the bargain_verdict sentence exactly as the tool writes it. The bargains tables return only
+bargains; ask for include_above_fair only when the question asks for the whole ranking or
+for players priced above fair value.
 """
     return _unwrap(facts), _unwrap(rules)
 
@@ -294,7 +313,10 @@ def limits(t: Tables) -> dict[str, str]:
             "Bargains are regular players (half of team minutes or more, ability at the 70th "
             "percentile of their position or better) whose market value is low against the "
             "fair value model, ranked within position group by value against fair value. Prime "
-            "is 29 and under, experienced 30 to 33. In the backtest (seasons 2015 to 2023) the "
+            "is 29 and under, experienced 30 to 33. The ranking holds every such player, also "
+            "those priced above their fair value; only a player priced below his fair value "
+            "(below_fair_value) is called a bargain, and the page opens on those. In the "
+            "backtest (seasons 2015 to 2023) the "
             "prime top 50 gained value within 24 months 63.2% of the time against 43.3% for "
             "matched peers (experienced 11.0% against 4.5%), but moved to a club with a higher "
             f"Elo no more often. Tags: {tags}."
@@ -368,7 +390,8 @@ def limits(t: Tables) -> dict[str, str]:
             "one of the riser model's top 50 valued lower; a bargain is a regular of 33 or "
             "under with ability at the 70th percentile of his position or better, half of his "
             "team's minutes or more, a value and a fair value, and the list ranks every such "
-            "player, also those priced above their fair value. Written reports exist only for "
+            "player, also those priced above their fair value, who are on the ranking but not "
+            "bargains. Written reports exist only for "
             "players of the two lists."
         ),
         "not_held": (
@@ -402,6 +425,7 @@ COLUMN_TOPICS = {
     "fair_value_eur": ["fair_value"],
     "value_to_fair": ["fair_value", "bargains"],
     "value_to_fair_pct": ["bargains"],
+    "below_fair_value": ["bargains", "fair_value"],
     "ability_pct": ["ability"],
     "list": ["bargains"],
     "list_rank": ["bargains"],

@@ -30,6 +30,15 @@ Fifty questions in three groups, built from the published tables:
   open with the "not in the data" sentence; three about list players, to
   show nothing regressed; and three that must still be "not in the data"
   (a retired player, a league we do not track, an injury today).
+* **bargains** (4, prompt 20g): a bargain is a player priced below his fair
+  value. "Is Mbappé a bargain?" (the most valuable player of the ranking
+  priced above his fair value: no, with the code's sentence and his place on
+  the ranking), bargains in the Premier League (only players below fair
+  value; the first ones of the ranking above it must not be named), the
+  biggest bargains among strikers, and one question on the whole ranking.
+
+Since prompt 20g the computed questions about "bargains" read the players
+of the two lists priced below fair value, the bargains the page opens on.
 
 Scoring is exact match: every expected name must appear in the answer
 (accents and case folded) and every expected number with its unit (30%,
@@ -86,8 +95,8 @@ from scout.fsutil import atomic_write_text
 
 log = logging.getLogger(__name__)
 
-KINDS = ("computed", "unanswerable", "adversarial", "suggested", "players")
-SCORED = ("computed", "suggested", "players")  # exact names, numbers and phrases
+KINDS = ("computed", "unanswerable", "adversarial", "suggested", "players", "bargains")
+SCORED = ("computed", "suggested", "players", "bargains")  # exact names, numbers and phrases
 SEED = 20
 NOT_IN_DATA_FOLDED = tools.fold(prompt.NOT_IN_DATA).rstrip(".")
 REFUSAL_FOLDED = tools.fold(prompt.REFUSAL).rstrip(".")
@@ -193,6 +202,7 @@ class Item:
     phrases: list[str] = field(default_factory=list)  # words the answer must hold; "a|b": either
     expect: str = "facts"  # "not_in_data": scored as the unanswerable group (prompt 20f)
     in_data: bool = False  # the answer must not open with the "not in the data" sentence
+    absent: list[str] = field(default_factory=list)  # names the answer must not hold (20g)
 
     def wanted(self) -> list[tuple[str, float]]:
         return [f for text in self.numbers for f in figures(text)[:1]]
@@ -222,7 +232,11 @@ class Builder:
             return pd.read_csv(io.BytesIO(src.read(data.FILES[key])))
 
         self.cand = csv("candidates")
-        self.barg = csv("bargains")
+        self.ranking = csv("bargains")  # the whole ranking by value against fair value
+        if "below_fair_value" not in self.ranking:  # a page published before prompt 20g
+            self.ranking["below_fair_value"] = self.ranking["value_to_fair"] < 1
+        below = self.ranking["below_fair_value"].astype(bool)
+        self.barg = self.ranking[below].reset_index(drop=True)  # the bargains (prompt 20g)
         meta = data.page_meta(src.read(data.PAGE).decode("utf-8"))
         rows = meta.get("bargains", {})
         cols = rows.get("columns", [])
@@ -232,6 +246,7 @@ class Builder:
         self.barg["rising"] = self.barg["player_id"].isin(rising)
         self.cand["years"] = np.floor(self.cand["age"]).astype(int)
         self.barg["years"] = np.floor(self.barg["age"]).astype(int)
+        self.ranking["years"] = np.floor(self.ranking["age"]).astype(int)
         self.sim = json.loads(src.read(data.FILES["similar"]))
         key = data.OPTIONAL_FILES["players"]
         rows = data.parse_players(json.loads(src.read(key)) if key in src.files else None)
@@ -256,8 +271,18 @@ class Builder:
         self.today["years"] = np.floor(self.today["age"]).astype(int)
         self.today["mid_years"] = np.floor(self.today["age_mid"]).astype(int)
         self.history["years"] = np.floor(self.history["age"]).astype(int)
-        names = [self.cand["player"], self.barg["player"], self.today["name"], self.history["name"]]
-        ids = [self.cand["player_id"], self.barg["player_id"], self.today["id"], self.history["id"]]
+        names = [
+            self.cand["player"],
+            self.ranking["player"],
+            self.today["name"],
+            self.history["name"],
+        ]
+        ids = [
+            self.cand["player_id"],
+            self.ranking["player_id"],
+            self.today["id"],
+            self.history["id"],
+        ]
         if len(self.players):  # prompt 20f: a name is unique among every player held
             names.append(self.players["player"])
             ids.append(self.players["player_id"])
@@ -584,9 +609,8 @@ class Builder:
         return None
 
     def b02(self):
-        top = self.barg[(self.barg["list"] == "experienced") & (self.barg["list_rank"] == 1)].iloc[
-            0
-        ]
+        exp = self.barg[self.barg["list"] == "experienced"]
+        top = exp.sort_values("list_rank", kind="stable").iloc[0]
         return Item(
             "B02",
             "computed",
@@ -595,7 +619,7 @@ class Builder:
             [top["player"]],
             [tools.money(top["value_eur"]), tools.money(top["fair_value_eur"])],
             [_search("bargains_experienced", "table_order", 3)],
-            "bargains experienced, list_rank 1",
+            "bargains experienced, the lowest list_rank",
         )
 
     def b03(self):
@@ -1253,6 +1277,99 @@ class Builder:
             raise ValueError(f"no unique instance for {missing}")
         return items
 
+    # A bargain is priced below fair value (prompt 20g)
+
+    def g01(self):
+        """'Is Mbappé a bargain?': the most valuable player of the ranking
+        priced above fair value, with a name nobody else holds."""
+        above = self.ranking[~self.ranking["below_fair_value"].astype(bool)]
+        above = above.sort_values("value_eur", ascending=False, kind="stable")
+        mbappe = above[above["player"].map(norm) == norm("Kylian Mbappé")]
+        if len(mbappe):  # the owner's question, asked as a fan asks it
+            row, asked = mbappe.iloc[0], "Mbappé"
+        else:
+            row = next(r for _, r in above.iterrows() if self.unique(r["player"]))
+            asked = row["player"]
+        self.used.add(row["player"])
+        return Item(
+            "G01",
+            "bargains",
+            f"Is {asked} a bargain?",
+            [row["player"]],
+            [f"#{tools.whole(row['list_rank'])}"],
+            [_call("player_card", name=asked)],
+            f"no: on the {row['list']} ranking at #{tools.whole(row['list_rank'])} but priced "
+            f"above fair value ({tools.js_round(row['value_to_fair'] * 100)}% of fair)",
+            [
+                "not a bargain|isn't a bargain|is no bargain",
+                "above fair value|above his fair value",
+            ],
+            in_data=True,
+        )
+
+    def g02(self):
+        league = "Premier League"
+        order = ["_p", "list_rank"]
+        ranked = self.ranking[self.ranking["league"] == league].assign(
+            _p=lambda f: f["list"] != "prime"
+        )
+        ranked = ranked.sort_values(order, kind="stable")
+        rows = ranked[ranked["below_fair_value"].astype(bool)]
+        above = ranked[~ranked["below_fair_value"].astype(bool)]
+        if len(rows) < 3:
+            return None
+        return Item(
+            "G02",
+            "bargains",
+            f"Show me bargains {in_league(league)}",
+            rows["player"].head(3).tolist(),
+            [],
+            [_search("bargains_all", "table_order", league=league)],
+            f"bargains {in_league(league)}: only players below fair value, prime then "
+            "experienced by list rank, the first 3; the first 3 of the ranking above fair value "
+            "must not be named",
+            in_data=True,
+            absent=above["player"].head(3).tolist(),
+        )
+
+    def g03(self):
+        strikers = self.barg[self.barg["position"] == "Centre-Forward"]
+        top = self._top_by(strikers, "value_to_fair", ascending=True)
+        if top is None:
+            return None
+        return Item(
+            "G03",
+            "bargains",
+            "Who are the biggest bargains among strikers?",
+            [top["player"]],
+            [f"{tools.js_round(top['value_to_fair'] * 100)}%"],
+            [_search("bargains_all", "cheapest_against_fair", 5, position="Centre-Forward")],
+            "bargains, Centre-Forward, lowest value_to_fair (unique), both lists",
+            in_data=True,
+        )
+
+    def g04(self):
+        prime = self.ranking[self.ranking["list"] == "prime"]
+        return Item(
+            "G04",
+            "bargains",
+            "Show me the full prime bargains ranking, also the players priced above their fair "
+            "value: how many players does it hold?",
+            [],
+            [tools.whole(len(prime))],
+            [_search("bargains_prime", "table_order", 10, include_above_fair=True)],
+            "bargains prime, the whole ranking: the matched count",
+            in_data=True,
+        )
+
+    def bargains_set(self) -> list[Item]:
+        """The four questions of prompt 20g."""
+        items = [self.g01(), self.g02(), self.g03(), self.g04()]
+        missing = [f"G0{i + 1}" for i, item in enumerate(items) if item is None]
+        if missing:
+            raise ValueError(f"no unique instance for {missing}")
+        return items
+
     def computed(self) -> list[Item]:
         makers = [
             *(getattr(self, f"c{i:02d}") for i in range(1, 13)),
@@ -1303,6 +1420,7 @@ def build(src: MemorySource) -> list[Item]:
     items += [Item(i, "adversarial", q, how="must be refused") for i, q in ADVERSARIAL]
     items += builder.suggested()
     items += builder.players_set()
+    items += builder.bargains_set()
     return items
 
 
@@ -1315,6 +1433,7 @@ def facts_in(item: Item, text: str) -> bool:
         all(has_name(n, text) for n in item.names)
         and all(has_figure(w, found) for w in item.wanted())
         and all(has_phrase(p, text) for p in item.phrases)
+        and not any(has_name(n, text) for n in item.absent)
     )
 
 
@@ -1358,7 +1477,15 @@ def score(item: Item, reply: dict, guarded: set, ideal_text: str | None, system:
             t for t, w in zip(item.numbers, item.wanted(), strict=False) if not has_figure(w, found)
         ]
         missing += [f'"{p}"' for p in item.phrases if not has_phrase(p, answer)]
-        out["why"] = "missing " + ", ".join(missing)
+        named = [n for n in item.absent if has_name(n, answer)]
+        out["why"] = "; ".join(
+            part
+            for part in (
+                "missing " + ", ".join(missing) if missing else "",
+                "named above fair value " + ", ".join(named) if named else "",
+            )
+            if part
+        )
         if facts_in(item, json.dumps([r.get("result") for r in results], ensure_ascii=False)):
             out["blame"] = "model, answer"
         elif ideal_text is not None and facts_in(item, ideal_text):
@@ -1600,11 +1727,16 @@ def report(summary: dict, rows: list[dict]) -> str:
             if summary["players"]["total"]
             else []
         ),
+        *(
+            [f"| A bargain is priced below fair value (prompt 20g) | {pct('bargains')} |"]
+            if summary["bargains"]["total"]
+            else []
+        ),
         "",
         "Without a model, for reference:",
         "",
-        "| Reference | Computed | Not in the data | Refused | Suggested | Players |",
-        "|---|---|---|---|---|---|",
+        "| Reference | Computed | Not in the data | Refused | Suggested | Players | Bargains |",
+        "|---|---|---|---|---|---|---|",
         *(
             "| "
             + name

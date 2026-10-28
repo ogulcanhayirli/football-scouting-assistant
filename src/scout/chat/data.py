@@ -272,6 +272,8 @@ def load(source: Source) -> Tables:
     rising = _rising_bargains(meta)
     for row in bargains:
         row["rising"] = row["player_id"] in rising
+        if row.get("below_fair_value") is None:  # a page published before prompt 20g
+            row["below_fair_value"] = row["value_to_fair"] < 1
     for key in ("candidates", "bargains", "dictionary"):
         meta.pop(key, None)  # the CSV files are the tables
     return Tables(

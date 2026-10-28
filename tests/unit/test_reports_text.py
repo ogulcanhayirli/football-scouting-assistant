@@ -338,6 +338,44 @@ def test_cheap_is_below_fair_value_and_dear_above(sheets):
                     sheets[1]).passed  # fmt: skip
 
 
+def test_a_player_above_fair_value_is_on_the_ranking_not_a_bargain_list():
+    dear = _bargains().assign(value_to_fair=1.5, value_to_fair_pct=48.0, list_rank=550)
+    ben = rt.fact_sheets(_candidates(), dear, _neighbours(), LEAGUES)[1]
+    assert "Bargain list" not in ben.text
+    assert (
+        "Value ranking: prime list (29 and under) of the ranking by value against fair value, "
+        "#550; priced above his fair value, so not a bargain"
+    ) in ben.text
+    assert ben.fact("bargain_list").label == "Value ranking"
+    flagged = dear.assign(below_fair_value=False)
+    assert rt.fact_sheets(_candidates(), flagged, _neighbours(), LEAGUES)[1].text == ben.text
+    assert "never call him one" in rt.WRITER_INSTRUCTIONS
+
+
+def test_the_word_bargain_only_for_a_player_below_fair_value(sheets):
+    said = GOOD.replace(
+        "He raises no warning flags.", "He raises no warning flags and is a bargain."
+    )
+    assert rt.check(said, sheets[1]).violations == [
+        'the report says "bargain", but he has a market value 139% of his fair value: only a '
+        "player priced below his fair value is called a bargain"
+    ]
+    for fine in ("is not a bargain", "is no bargain"):
+        report = GOOD.replace(
+            "He raises no warning flags.", f"He raises no warning flags and {fine}."
+        )
+        assert rt.check(report, sheets[1]).passed
+    assert rt.bargain_violations("He is on the prime bargain list at #1.", sheets[2]) == []
+
+
+def test_a_kept_report_that_calls_a_dear_player_a_bargain_is_written_again(sheets):
+    sheet = sheets[1]
+    same = _stored("passed", 0, fact_hash=sheet.hash(CFG.writer_model))
+    assert len(rt.plan([sheet], same.assign(report=GOOD), CFG.writer_model)[0]) == 0
+    bad = same.assign(report=GOOD + " He is a bargain on the prime list.")
+    assert len(rt.plan([sheet], bad, CFG.writer_model)[0]) == 1
+
+
 def test_the_season_so_far_and_other_seasons_stay_out_of_the_report(sheets):
     report = GOOD.replace(
         "He raises no warning flags.", "He raises no warning flags. So far in 2026/27 he is fit."

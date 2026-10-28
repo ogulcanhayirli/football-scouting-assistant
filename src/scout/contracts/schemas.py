@@ -576,12 +576,51 @@ PLAYERS_TABLE = DataFrameSchema(
 )
 
 
+# The bargains table (``scout.lists``): the prime and experienced lists rank
+# every eligible player by value against fair value; only a player priced
+# below his fair value is called a bargain (prompt 20g).
+
+
+def _below_fair(df: pd.DataFrame) -> pd.Series:
+    return df["below_fair_value"].astype(bool) == (df["value_to_fair"] < 1)
+
+
+def _one_rank_per_place(df: pd.DataFrame) -> bool:
+    return not df.duplicated(["list", "list_rank"]).any()
+
+
+BARGAINS_TABLE = DataFrameSchema(
+    {
+        "season": Column(int, Check.in_range(2000, 2100)),
+        "list": Column(str, Check.isin(["prime", "experienced"])),
+        "list_rank": Column(int, Check.ge(1)),
+        "player_id": Column("Int64", Check.gt(0)),
+        "player": Column(str, Check.str_length(min_value=1)),
+        "age": Column(float, Check.in_range(14, 34)),
+        "value_eur": Column(float, Check.gt(0)),
+        "fair_value_eur": Column(float, Check.ge(0)),
+        "value_to_fair": Column(float, Check.gt(0)),
+        "value_to_fair_pct": Column(float, Check.in_range(0, 100)),
+        "below_fair_value": Column(bool),
+    },
+    checks=[
+        NAMES_REPAIRED,
+        Check(_below_fair, name="below_fair_value", error="below_fair_value is value_to_fair < 1"),
+        Check(_one_rank_per_place, name="one_rank_per_place", error="a list rank used twice"),
+    ],
+    strict=False,  # the present (club today, season so far) joins later
+    coerce=False,
+    name="bargains_table",
+)
+
+
 def validate(schema: DataFrameSchema, frame: pd.DataFrame) -> pd.DataFrame:
     """Validate lazily so one run reports every violation, not just the first."""
     return schema.validate(frame, lazy=True)
 
 
 __all__ = [
+    "BARGAINS_TABLE",
     "COACH_SPELLS",
     "CURRENT_CLUB",
     "FIXTURE_EVENTS",

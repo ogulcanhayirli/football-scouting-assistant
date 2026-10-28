@@ -20,7 +20,10 @@ The result is **two tables**, published once a week with one static page:
   position or better whose market value is low against the fair value model,
   in two lists: prime (29 and under, 1,249 players) and experienced (30 to
   33, 353 players), with the same flags and explanation and two context tags
-  (on loan, stale value).
+  (on loan, stale value). The lists rank every eligible player by value
+  against fair value; only a player priced below his fair value is called
+  a bargain (`below_fair_value`, decision 12: 341 prime and 167
+  experienced on 28 October), and the page opens on those.
 
 The page also answers **who plays like him** (decision 10): every player
 has a "Similar players" panel with the ten nearest of his position group

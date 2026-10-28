@@ -30,7 +30,9 @@ minutes; for a regular player it is the very row the lists read
   position or better, half of his team's minutes or more and both a value
   and a fair value. The bargains list ranks every such player, also those
   priced above their fair value, so "value above fair value" is never a
-  reason.
+  reason here; a player on that ranking priced above his fair value is on
+  the list but not a bargain (``below_fair_value`` of the bargains table,
+  prompt 20g), which the chat says from his bargains row.
 * ``report_available``: the page shows a written report for him (only
   players of the two lists get one). ``scout lists`` sets it from the stored
   reports; ``scout site`` sets it again from the page's own ``reports.json``
@@ -126,7 +128,9 @@ DICTIONARY = {
     "(the flags behind the fall back risk).",
     "flags": "The raised flags, each with his own number, or none.",
     "in_candidates": "True when he is a row of the candidates table.",
-    "in_bargains": "True when he is a row of the bargains table (prime or experienced).",
+    "in_bargains": "True when he is a row of the bargains table (prime or experienced), "
+    "the ranking by value against fair value; he is a bargain only when his value_to_fair is "
+    "also under 1 (below_fair_value of that table).",
     "why_not_candidate": "For a player outside the candidates table, the one sentence that "
     "says why, from the table's rules (a regular ranked #101 to #2,000 by value, or one of "
     "the riser model's top 50 valued lower); blank for a candidate.",

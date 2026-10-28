@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+import pytest
 
 from scout.lists import (
     bargains_table,
@@ -156,6 +157,7 @@ def test_bargains_table_and_dictionary_agree():
     )
     out = bargains_table({"prime": frame.iloc[[0]], "experienced": frame.iloc[[1]]}, {})
     assert list(out.columns) == base_columns("bargains")
+    assert out["below_fair_value"].tolist() == [True, True]  # prompt 20g
     assert out["list"].tolist() == ["prime", "experienced"]
     assert out["position"].tolist() == ["Defender", "Left-Back"]
     words = dictionary()
@@ -191,3 +193,33 @@ def test_risers_valued_below_2000_are_added_with_the_chances_blank():
     ranked = out[out["value_rank"] <= 2000]
     assert ranked["step_up_decile"].value_counts().min() >= 189
     assert out.index[out["value_rank"] > 2000].min() > out.index[out["value_rank"] <= 2000].max()
+
+
+def test_a_bargain_is_priced_below_fair_value_and_the_contract_holds_it():
+    from pandera.errors import SchemaErrors
+
+    from scout.contracts.schemas import BARGAINS_TABLE, validate
+
+    ratio = pd.Series([0.4, 0.9995, 1.0, 1.36])
+    frame = pd.DataFrame(
+        {
+            "season": 2025,
+            "list": "prime",
+            "list_rank": [1, 2, 3, 4],
+            "player_id": pd.array([1, 2, 3, 4], dtype="Int64"),
+            "player": ["a", "b", "c", "Kylian Mbappé"],
+            "age": [22.0, 23.0, 24.0, 27.0],
+            "value_eur": [1e6, 2e6, 3e6, 180e6],
+            "fair_value_eur": [2.5e6, 2e6, 3e6, 132e6],
+            "value_to_fair": ratio.round(3),
+            "value_to_fair_pct": [1.0, 20.0, 30.0, 48.8],
+            "below_fair_value": ratio.round(3) < 1,
+        }
+    )
+    # 0.9995 shows as 1.0 (100% of fair): at fair value is not below it.
+    assert frame["below_fair_value"].tolist() == [True, False, False, False]
+    validate(BARGAINS_TABLE, frame)
+    with pytest.raises(SchemaErrors):
+        validate(BARGAINS_TABLE, frame.assign(below_fair_value=True))
+    with pytest.raises(SchemaErrors):
+        validate(BARGAINS_TABLE, frame.assign(list_rank=1))

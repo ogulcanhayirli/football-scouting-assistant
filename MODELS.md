@@ -1854,6 +1854,78 @@ the SDK import they overlap. Under the 1 s the owner allowed, so the table
 loads with the others rather than on the first players call. A name no one
 holds costs about 0.35 s more (the loose search over every name).
 
+## A bargain is priced below fair value (prompt 20g, 28 October 2026)
+
+The 20f report found that the bargains lists hold every eligible regular of
+33 or under ranked by value against fair value, so most of them are priced
+above it: on the tables of 28 October 908 of the 1,249 prime players
+(72.7%) and 185 of the 353 experienced (52.4%; R. Chávez sits at exactly
+100%), Kylian Mbappé at #550 of the prime list (136% of fair) and Erling
+Haaland at #735 (153%). The owner's decision (decision 12 in CLAUDE.md):
+the ranking stays as it is, since the reports, the registered forecasts and
+their scoring read it, but the word bargain is kept for a player whose
+market value is below his fair value. Nothing is recomputed.
+
+* **The flag.** `below_fair_value` in the bargains table: `value_to_fair`
+  (the published ratio, three decimals) under 1. 341 of 1,249 prime and
+  167 of 353 experienced players are bargains. The new contract
+  `BARGAINS_TABLE` holds the flag to the ratio and one player to each list
+  place; `scout lists` validates the table with it. The rebuilt candidates
+  and bargains are byte for byte those of the S3 copy apart from the new
+  column. The registered forecasts are not touched (a future freeze carries
+  the column).
+* **The page.** The Bargains section opens on the players below fair value
+  ("Bargains: 341 players below fair value, of 1,249 ranked by value
+  against fair value", per list) with a "show all 1,249" link for the rest
+  of the ranking, where a player above fair value reads "above fair value,
+  not a bargain" under his price; the Players section names such a player
+  "Value ranking, prime #550 (above fair value, not a bargain)". One
+  sentence in the section's how to read and one in "What it knows" say
+  what the ranking is.
+* **The chat.** `search_players` over a bargains table returns only the
+  bargains unless `include_above_fair` (declared right after `limit`) asks
+  for the whole ranking; each row says `bargain` yes or no, and the result
+  counts the players of the ranking it left out. `player_card` gives a
+  ranked player above fair value `bargain_verdict`, set in code: "on the
+  value ranking at #550 (prime list) but priced above fair value, so not a
+  bargain", and his row as `value_ranking`, never as `bargain`. The 20f
+  reason sentences for players on no list stay. Rule 11 of the system
+  prompt: call a player a bargain only when a tool result says bargain yes,
+  say the verdict sentence as written, and ask for the whole ranking only
+  when the question does. A bare "Mbappé" matched two players (Kylian and
+  E. Mbappé) and returned a choice; it is now read as Kylian Mbappé, with
+  E. Mbappé under `also_on_page`.
+* **The reports.** The writer's fact sheet called every ranked player's
+  line "Bargain list", and the label meanings told the writer that list
+  holds players "whose market value is low against their fair value"; 352
+  of the 1,094 stored reports of ranked players above fair value say
+  bargain (mostly "on the prime bargain list at #N"). The sheet line of such
+  a player now reads "Value ranking: prime list (29 and under) of the
+  ranking by value against fair value, #N; priced above his fair value, so
+  not a bargain", the label meanings say never to call him one, and the
+  check fails any report that calls a player at or above his fair value (or
+  without one) a bargain, unless negated ("not a bargain", "no bargain"). On
+  the stored reports the check flags exactly those 352 and none of the
+  other 2,381. The sheets of exactly the 1,094 ranked players above fair
+  value change, so the next weekly run rewrites 1,094 reports (writer about
+  0.16 USD by `scout reports --dry-run`) and keeps 1,640; `plan` also sends
+  back a kept report that breaks the rule (none today). The prompt version
+  stays 19.3: the sheets of the other players are unchanged and their
+  reports are reused. No report was rewritten in this session.
+* **The evaluation** gains a `bargains` group of four (G01 to G04, 72
+  questions in all): "Is Mbappé a bargain?" (no, with the ranking
+  sentence: "not a bargain", "above fair value" and his place #550),
+  "Show me bargains in the Premier League" (the first three bargains, and
+  none of the first three ranked players above fair value may be named),
+  "Who are the biggest bargains among strikers?" (the centre forward
+  cheapest against fair value, both lists) and the size of the whole prime
+  ranking (1,249). The computed questions about "bargains" (B01 to B08,
+  N04) now read the players below fair value, the bargains the page opens
+  on. On the tables of 28 October the ideal tool calls hold every expected
+  answer (`--dry-run`: computed 30 of 30, suggested 6 of 6, players 9 of 9,
+  bargains 4 of 4). The run with the model was not made: the session had
+  no `SCOUT_CHAT_CLAUDE_KEY` (CLAUDE.md, Open questions).
+
 ## Next
 
 1. The clean check above: tune on earlier seasons, score on later ones.

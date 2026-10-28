@@ -67,6 +67,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from scout.bargains import LISTS
 from scout.candidates import WINDOW
 from scout.flags import FLAGS, TAGS
 from scout.fsutil import atomic_write_text
@@ -139,6 +140,7 @@ BARGAIN_COLUMNS = [
     "fair_value_eur",
     "value_to_fair",
     "value_to_fair_pct",
+    "below_fair_value",
     "ability_pct",
     "minutes_share",
     "contract_expiry",
@@ -245,6 +247,12 @@ def page_data(
     barg = barg.assign(
         flag_keys=flag_keys(barg["flags"]), rising=barg["player_id"].isin(rising).to_numpy()
     )
+    flag = barg.get("below_fair_value")  # missing in lists built before prompt 20g
+    below_ratio = barg["value_to_fair"] < 1
+    barg["below_fair_value"] = (
+        below_ratio if flag is None else flag.fillna(below_ratio).astype(bool)
+    )
+    below = barg[barg["below_fair_value"].astype(bool)]
     return {
         "season": season,
         "season_label": f"{season}/{str(season + 1)[-2:]}",
@@ -272,6 +280,11 @@ def page_data(
         if players is not None
         else int(pd.concat([cand["league"], barg["league"]]).dropna().nunique()),
         "listed": int(pd.concat([cand["player_id"], barg["player_id"]]).nunique()),
+        # Bargains are the players of the two lists priced below fair value (prompt 20g).
+        "below_fair": {
+            name: {"below": int((below["list"] == name).sum()), "ranked": int(n)}
+            for name, n in barg["list"].value_counts().reindex(list(LISTS), fill_value=0).items()
+        },
         "tracked": tracked,
         "greats": greats,
         "reports": {k: v for k, v in (reports or {"available": False}).items() if k != "rows"},

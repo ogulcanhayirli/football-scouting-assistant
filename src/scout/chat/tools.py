@@ -11,11 +11,16 @@ age"; the middle of the season age for the measured greats).
 
 * ``search_players``: filters and a sort over one table, at most 10 rows
   and the number of players that matched; the players table (prompt 20f)
-  holds every player of the season, the two lists only theirs;
+  holds every player of the season, the two lists only theirs. Over the
+  bargains it keeps only the players priced below fair value, the
+  bargains, unless ``include_above_fair`` asks for the whole ranking
+  (prompt 20g);
 * ``player_card``: every fact the page shows for one player, the written
   report included; found in the candidates, then the bargains, then the
   players table, whose row says in sentences set by code why he is on no
-  list (``scout.players``);
+  list (``scout.players``); a player on the bargains ranking priced above
+  his fair value gets ``bargain_verdict``, the code's sentence that he is
+  not a bargain (``not_a_bargain``);
 * ``similar_players``: the ten nearest of his position group today, or of
   today's players to him (or to a measured great) at an age, or to the
   archetype of a legend drafted from the record (prompt 20d);
@@ -144,6 +149,10 @@ NICKNAMES = {
     "sergio ramos": "Sergio Ramos",
     "dani alves": "Dani Alves",
     "ney": "Neymar",
+    # A surname two players of today share, read as the one a fan means; the
+    # card names the other under also_on_page (prompt 20g: E. Mbappé).
+    "mbappe": "Kylian Mbappé",
+    "kylian": "Kylian Mbappé",
 }
 
 
@@ -283,11 +292,31 @@ def candidate_view(o: dict, detail: bool = False) -> dict:
     return out
 
 
+def below_fair(o: dict) -> bool:
+    """A bargain: a player of the bargains ranking priced below his fair value
+    (prompt 20g); a page published before the flag existed falls back to the
+    ratio it was set from."""
+    flag = o.get("below_fair_value")
+    return bool(flag) if flag is not None else o["value_to_fair"] < 1
+
+
+def not_a_bargain(o: dict) -> str:
+    """The code's sentence for a player of the bargains ranking priced above
+    his fair value, to be said as written."""
+    return (
+        f"on the value ranking at #{whole(o['list_rank'])} ({o.get('list')} list) but priced "
+        "above fair value, so not a bargain"
+    )
+
+
 def bargain_view(o: dict, tags: dict[str, str], detail: bool = False) -> dict:
     """A bargains row as the page shows it."""
     value, fair = o.get("value_eur"), o.get("fair_value_eur")
     cheapest = o.get("value_to_fair_pct")
     out = {
+        "bargain": "yes: priced below his fair value"
+        if below_fair(o)
+        else "no: priced above his fair value, so on the ranking but not a bargain",
         "list": o.get("list"),
         "list_rank": o.get("list_rank"),
         "player": o["player"],
@@ -356,13 +385,24 @@ def player_view(o: dict, detail: bool = False) -> dict:
             f"not computed: {o.get('big_move_chance_why_blank')}",
         ),
         "flags": o.get("flags") or "none",
-        "on_lists": [k for k in ("candidates", "bargains") if o.get(f"in_{k}")] or "none",
+        "on_lists": _on_lists(o),
     }
     if detail:
         out["ability_score"] = o.get("ability_score")
         out["value_date"] = day(o.get("value_date"))
         out["described_on"] = day(o.get("data_date"))
     return out
+
+
+def _on_lists(o: dict) -> list[str] | str:
+    out = ["candidates"] if o.get("in_candidates") else []
+    if o.get("in_bargains"):
+        ratio = o.get("value_to_fair")
+        above = ratio is not None and ratio >= 1
+        out.append(
+            "bargains ranking, priced above fair value: not a bargain" if above else "bargains"
+        )
+    return out or "none"
 
 
 def why_not(o: dict) -> list[str]:
@@ -460,6 +500,8 @@ def search_players(t: Tables, args: dict) -> dict:
     rules = t.meta.get("flags", {})
     rows = _table(t, table)
     applied = {}
+    bargains = table.startswith("bargains")
+    above = 0
 
     def keep(name: str, test: Callable[[dict], bool]) -> None:
         nonlocal rows
@@ -511,6 +553,13 @@ def search_players(t: Tables, args: dict) -> dict:
     ):
         if args.get(name) is not None:
             keep(name, lambda o, c=column, n=name: o.get(c) is not None and o[c] >= args[n])
+    if bargains and not args.get("include_above_fair"):
+        # Bargains are the players priced below fair value (prompt 20g); the rest
+        # of the ranking only when asked for.
+        above = sum(1 for o in rows if not below_fair(o))
+        rows = [o for o in rows if below_fair(o)]
+    elif bargains:
+        applied["include_above_fair"] = True
     ordered = _sorted(rows, how)
     tags = t.meta.get("tags", {})
 
@@ -536,6 +585,17 @@ def search_players(t: Tables, args: dict) -> dict:
     top = [value(o) for o in shown[:2]]
     if how != "table_order" and len(top) == 2 and top[0] is not None and top[0] == top[1]:
         out["tie_at_top"] = True
+    if bargains and not args.get("include_above_fair"):
+        out["bargains_only"] = (
+            f"only bargains, the players priced below fair value; {whole(above)} more of the "
+            "ranking match these filters but are priced above fair value (not bargains; "
+            "include_above_fair true shows the whole ranking)"
+        )
+    elif bargains:
+        out["whole_ranking"] = (
+            "the whole ranking by value against fair value; only rows with bargain yes, priced "
+            "below fair value, are bargains"
+        )
     if not ordered:
         out["note"] = "no player in this table matches these filters"
         if table != "players":
@@ -775,6 +835,9 @@ def player_card(t: Tables, args: dict) -> dict:
     out: dict = {"found": True, "player": p["name"], "player_id": p["id"]}
     if name != asked:
         out["nickname"] = f"{asked} read as {name}"
+        also = [n for n in _also(t, asked, name) if n != p["name"]]
+        if also:
+            out["also_on_page"] = also
     if p.get("loose"):
         out["spelling"] = f"no player is held as {asked}; the closest name held is {p['name']}"
     club = args.get("club")
@@ -787,8 +850,12 @@ def player_card(t: Tables, args: dict) -> dict:
     row = p.get("players")
     if "candidates" in p:
         out["candidate"] = candidate_view(p["candidates"], detail=True)
-    if "bargains" in p:
+    if "bargains" in p and below_fair(p["bargains"]):
         out["bargain"] = bargain_view(p["bargains"], tags, detail=True)
+    elif "bargains" in p:
+        # set by code, to be said as written (prompt 20g)
+        out["bargain_verdict"] = not_a_bargain(p["bargains"])
+        out["value_ranking"] = bargain_view(p["bargains"], tags, detail=True)
     if row is not None and out["in_tables"]:
         out["season_facts"] = {
             "nationality": row.get("nationality"),
@@ -1196,8 +1263,8 @@ def _schema(properties: dict, required: list[str]) -> dict:
 # description names it (prompt 20b: 15 of 15 calls kept every filter against
 # 9 of 15 without the sentence).
 SEARCH_ORDER = (
-    "Give the arguments in the order they are listed: table, sort_by, limit, then league or "
-    "club, position, flags, rising or moved, the ages, the minimums."
+    "Give the arguments in the order they are listed: table, sort_by, limit, include_above_fair, "
+    "then league or club, position, flags, rising or moved, the ages, the minimums."
 )
 SIMILAR_ORDER = (
     "Give the arguments in the order they are listed: name, mode, age, then league or club, "
@@ -1228,7 +1295,10 @@ def definitions(t: Tables) -> list[dict]:
                 "ranked #101 to #2,000 by value with elite, step up, big move chances and fall "
                 "back risk), bargains_prime (29 and under), bargains_experienced (30 to 33), "
                 "bargains_all (both lists); use a list only when the question is about it or "
-                "its chances. League is the league of the season the tables describe; age_min "
+                "its chances. The bargains tables return only bargains, players priced below "
+                "fair value, unless include_above_fair asks for the whole ranking by value "
+                "against fair value. League is the league of the season the tables describe; "
+                "age_min "
                 f"compares the exact age, age_max whole years. Flags: {flag_text}. "
                 f"{SEARCH_ORDER}"
             ),
@@ -1242,6 +1312,12 @@ def definitions(t: Tables) -> list[dict]:
                         "description": "; ".join(f"{k}: {v[2]}" for k, v in SORTS.items()),
                     },
                     "limit": {"type": "integer", "description": "rows to return, 1 to 10"},
+                    "include_above_fair": {
+                        "type": "boolean",
+                        "description": "bargains tables only: true for the whole ranking, also "
+                        "the players priced above fair value, who are not bargains; leave it out "
+                        "for bargains",
+                    },
                     "league": {"type": "string", "enum": leagues},
                     "club": {"type": "string", "description": "part of a club name"},
                     "position_group": {
@@ -1275,7 +1351,9 @@ def definitions(t: Tables) -> list[dict]:
                 "Every fact the page shows for one player found by name (accents, initials and "
                 "small misspellings are matched loosely): his rows in candidates and bargains "
                 "with chances, flags, value, fair value, ability, club today, the season so far, "
-                "the explanation and his written scout report. Any other player of the season "
+                "the explanation and his written scout report; a player on the bargains ranking "
+                "priced above fair value gets bargain_verdict, the sentence that he is not a "
+                "bargain. Any other player of the season "
                 "gets his row of the players table (club, minutes, ability, value, fair value, "
                 "flags, the chances where computed) and why_not_on_lists, the sentences that say "
                 "why he is on no list. A measured great or a legend held only as an archetype "

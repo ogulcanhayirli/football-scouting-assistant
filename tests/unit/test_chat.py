@@ -233,6 +233,8 @@ BARGAINS = [
     _barg(11, "Kees Cheap", 25.0, 2, "prime", "Eredivisie", 1e6, 2e6, pct=5.0, on_loan=True),
     _barg(2, "Kenan Yıldız", 20.4, 3, "prime", "Serie A", 60e6, 61e6, pct=60.0),
     _barg(12, "Vet Eran", 32.0, 1, "experienced", "Ligue 1", 1e6, 3e6),
+    # On the ranking but priced above fair value: not a bargain (prompt 20g).
+    _barg(13, "Dear Star", 26.0, 4, "prime", "La Liga", 90e6, 60e6, pct=48.0),
 ]
 DICTIONARY = [
     {"table": "candidates", "column": "elite_chance_pct", "meaning": "The share who became elite."},
@@ -484,7 +486,12 @@ def test_csv_values_are_typed(tables):
 
 def test_bargains_get_the_rising_tag_of_the_page(tables):
     rising = {o["player_id"]: o["rising"] for o in tables.bargains}
-    assert rising == {10: False, 11: False, 2: True, 12: False}
+    assert rising == {10: False, 11: False, 2: True, 12: False, 13: False}
+
+
+def test_a_page_before_the_flag_reads_it_from_the_ratio(tables):
+    below = {o["player_id"]: o["below_fair_value"] for o in tables.bargains}
+    assert below == {10: True, 11: True, 2: True, 12: True, 13: False}
 
 
 def test_similar_vectors_decode_to_signed_bytes(tables):
@@ -640,6 +647,63 @@ def test_bargain_tags_and_lists(tables):
         tables, {"table": "bargains_experienced", "sort_by": "table_order", "limit": 10}
     )
     assert [o["player"] for o in r["rows"]] == ["Vet Eran"]
+
+
+def test_the_bargains_tables_return_only_bargains_unless_asked(tables):
+    r = tools.search_players(
+        tables, {"table": "bargains_prime", "sort_by": "table_order", "limit": 10}
+    )
+    assert [o["player"] for o in r["rows"]] == ["Sabino", "Kees Cheap", "Kenan Yıldız"]
+    assert r["matched"] == 3
+    assert {o["bargain"] for o in r["rows"]} == {"yes: priced below his fair value"}
+    assert r["bargains_only"].startswith(
+        "only bargains, the players priced below fair value; 1 more"
+    )
+    r = tools.search_players(
+        tables,
+        {
+            "table": "bargains_prime",
+            "sort_by": "table_order",
+            "limit": 10,
+            "include_above_fair": True,
+        },
+    )
+    assert r["matched"] == 4
+    assert r["filters"] == {"include_above_fair": True}
+    dear = r["rows"][-1]
+    assert dear["player"] == "Dear Star"
+    assert dear["bargain"].startswith("no: priced above his fair value")
+    assert dear["price_against_fair"] == "150% of fair"
+    assert "whole ranking" in r["whole_ranking"]
+    # The other tables never take the flag.
+    r = tools.search_players(tables, {"table": "candidates", "sort_by": "table_order", "limit": 1})
+    assert "bargains_only" not in r
+
+
+def test_a_ranked_player_above_fair_value_is_not_a_bargain(tables):
+    card = tools.player_card(tables, {"name": "Dear Star"})
+    assert card["in_tables"] == ["bargains"]
+    assert "bargain" not in card
+    assert card["bargain_verdict"] == (
+        "on the value ranking at #4 (prime list) but priced above fair value, so not a bargain"
+    )
+    assert card["value_ranking"]["list_rank"] == 4
+    assert "bargain_verdict" not in tools.player_card(tables, {"name": "Sabino"})
+
+
+def test_mbappe_is_read_as_kylian():
+    assert tools.resolve("Mbappé") == "Kylian Mbappé"
+    assert tools.resolve("mbappe") == "Kylian Mbappé"
+    assert tools.resolve("E. Mbappé") == "E. Mbappé"
+
+
+def test_the_system_prompt_counts_the_bargains_and_keeps_the_word_for_them(tables):
+    facts, rules = prompt.system_prompt(tables)
+    assert "Only a player priced below his fair value is a bargain: 3 prime and 1 experienced." in (
+        facts
+    )
+    assert "11. Call a player a bargain only when a tool result says bargain yes" in rules
+    assert "bargain_verdict sentence exactly as the tool writes it" in rules
 
 
 def test_limit_is_clamped_and_ties_are_reported(tables):
@@ -1384,6 +1448,31 @@ def test_eval_builder_on_the_synthetic_site(tmp_path):
     assert in_league("Eredivisie") == "in the Eredivisie"
 
 
+def test_eval_bargain_questions_on_the_synthetic_site(tmp_path):
+    from scout.chat_eval import Builder, Item, facts_in, source
+
+    b = Builder(source(str(write_site(tmp_path))))
+    assert "Dear Star" not in set(b.barg["player"])  # the bargains are below fair value
+    assert "Dear Star" in set(b.ranking["player"])
+    g01 = b.g01()  # no Mbappé here: the most valuable player above fair value
+    assert g01.question == "Is Dear Star a bargain?"
+    assert g01.numbers == ["#4"]
+    t = data.load(data.FolderSource(tmp_path))
+    card = json.dumps(tools.player_card(t, g01.ideal[0]["input"]), ensure_ascii=False)
+    answer = (
+        "No. Dear Star is on the value ranking at #4 but priced above fair value, so not a bargain."
+    )
+    assert facts_in(g01, answer)
+    assert not facts_in(g01, "Dear Star is a bargain at #4.")
+    assert "not a bargain" in card
+    g04 = b.g04()
+    assert g04.numbers == ["4"]
+    assert tools.search_players(t, g04.ideal[0]["input"])["matched"] == 4
+    item = Item("G02", "bargains", "q", ["Sabino"], absent=["Dear Star"])
+    assert facts_in(item, "Sabino is one.")
+    assert not facts_in(item, "Sabino and Dear Star.")
+
+
 def test_eval_references_without_a_model(tables):
     from scout.chat_eval import Item, baselines
 
@@ -1755,6 +1844,15 @@ def test_a_name_held_only_at_another_club_says_so(everyone):
     assert card["club"] == (
         "no Rodri of Pro Vercelli is held; the player found plays for Manchester City"
     )
+
+
+def test_a_players_row_on_the_ranking_above_fair_is_not_called_a_bargain():
+    assert tools._on_lists({"in_bargains": True, "value_to_fair": 1.5}) == [
+        "bargains ranking, priced above fair value: not a bargain"
+    ]
+    assert tools._on_lists({"in_bargains": True, "value_to_fair": 0.5}) == ["bargains"]
+    assert tools._on_lists({"in_candidates": True}) == ["candidates"]
+    assert tools._on_lists({}) == "none"
 
 
 def test_search_players_over_the_players_table(everyone):

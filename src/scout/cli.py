@@ -849,7 +849,8 @@ def main(argv: list[str] | None = None) -> int:
         "chat-eval",
         help="The chat's evaluation (prompt 20): 30 questions computed from the published "
         "tables, 10 the tables cannot answer, 10 attempts to pull the prompt or go off topic, "
-        "6 of the page's suggested questions and nicknames (prompt 20d); "
+        "6 of the page's suggested questions and nicknames (prompt 20d), 12 on every player "
+        "(prompt 20f), 4 on what a bargain is (prompt 20g); "
         "posted to the chat URL with the evaluation token (needs ANTHROPIC_API_KEY); "
         "reports/chat_eval.md",
     )
@@ -867,7 +868,7 @@ def main(argv: list[str] | None = None) -> int:
     ce.add_argument(
         "--only",
         nargs="+",
-        choices=["computed", "unanswerable", "adversarial", "suggested"],
+        choices=["computed", "unanswerable", "adversarial", "suggested", "players", "bargains"],
         default=None,
     )
     ce.set_defaults(func=cmd_chat_eval)
