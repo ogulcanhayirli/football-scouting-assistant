@@ -246,6 +246,7 @@ def freeze(lists_dir: Path, scouting: pd.DataFrame, leagues: dict, folder: Path)
     cand = pd.read_csv(lists_dir / "candidates.csv")
     barg = pd.read_csv(lists_dir / "bargains.csv")
     words = pd.read_csv(lists_dir / "dictionary.csv")
+    words = words[words["table"].isin(TABLES)]  # the players table (prompt 20f) is not promised
     season = int(cand["season"].max())
     meta = meta_for(scouting, season, leagues, cand, barg, folder.name, "registered")
     folder.mkdir(parents=True)

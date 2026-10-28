@@ -10,6 +10,12 @@
   and the five season window; each player's club today and his season so
   far (prompt 16), as of the day of the last pull;
 * ``data/``: the same two tables as CSV and Parquet, and the dictionary;
+  since prompt 20f also the players table (``scout.players``: every player
+  of the newest season, with why he is on no list) as CSV and Parquet, and
+  as ``players.json`` (rows as lists, repeated texts as codes), which the
+  page's Players section loads when it opens or a name is searched, and
+  which the chat reads; its ``report_available`` is set again here from the
+  page's own reports;
 * ``data/similar.json`` (prompt 18): the similar players panel and search,
   loaded by the page only when they are opened: today's players and every
   earlier season of players once ranked in the top ``HISTORY_TOP`` by value,
@@ -42,8 +48,8 @@
   and the "how to read this" box the judge's numbers and, once the owner has
   recorded any, his agreement with the judge (``judge/agreement.csv``).
 
-Only the two tables, the dictionary, the similar players file and the logo
-are published, never raw match stats, API responses or StatsBomb data (the
+Only the three tables, the dictionary, the similar players file, the
+reports and the logo are published, never raw match stats, API responses or StatsBomb data (the
 greats are results computed from it). The rising tag of a
 bargain is the riser model's top 50 of ``scouting.parquet``
 (``scout.lists.rising_ids``), the same set the candidates table marks;
@@ -72,6 +78,7 @@ TEMPLATE = Path(__file__).with_name("site_template.html")
 PUBLISHED = ("candidates", "bargains")  # each as .csv and .parquet, plus dictionary.csv
 SIMILAR = "similar.json"  # in data/, next to the downloads
 REPORTS = "reports.json"  # in data/, next to the downloads
+PLAYERS = "players.json"  # in data/: the players table for the page's search and the chat
 LOGO = "statsbomb-logo.png"  # next to the page, only with the greats
 TITLE = "Football scouting assistant"  # the page's title and heading (prompt 20e)
 HISTORY_TOP = 500  # "looks like X at Y": every season of players once ranked this high
@@ -215,6 +222,7 @@ def page_data(
     barg: pd.DataFrame,
     words: pd.DataFrame,
     *,
+    players: pd.DataFrame | None = None,
     rising: set,
     feature_dates: dict[str, list[str]],
     valuation_end: pd.Timestamp,
@@ -229,7 +237,8 @@ def page_data(
 ) -> dict:
     """Everything the page shows, as plain JSON values; ``first_season`` is
     the earliest season of the similar players data, for the Ask tab's
-    welcome (prompt 20d)."""
+    welcome (prompt 20d). ``players`` is the players table (prompt 20f),
+    which the subtitle counts; without it the two lists are counted."""
     season = int(cand["season"].max())
     through = season - HORIZON_SEASONS
     cand = cand.assign(flag_keys=flag_keys(cand["flags"]))
@@ -255,9 +264,14 @@ def page_data(
         "so_far_date": _day(cand["so_far_date"].max()) if "so_far_date" in cand else None,
         "leagues": int(cand["league"].nunique()),
         # The subtitle's "Ask about N players across M leagues" (prompt 20e): every
-        # player with a card, the two tables together.
-        "players": int(pd.concat([cand["player_id"], barg["player_id"]]).nunique()),
-        "player_leagues": int(pd.concat([cand["league"], barg["league"]]).dropna().nunique()),
+        # player with a card, the players table since prompt 20f.
+        "players": len(players)
+        if players is not None
+        else int(pd.concat([cand["player_id"], barg["player_id"]]).nunique()),
+        "player_leagues": int(players["league"].nunique())
+        if players is not None
+        else int(pd.concat([cand["league"], barg["league"]]).dropna().nunique()),
+        "listed": int(pd.concat([cand["player_id"], barg["player_id"]]).nunique()),
         "tracked": tracked,
         "greats": greats,
         "reports": {k: v for k, v in (reports or {"available": False}).items() if k != "rows"},
@@ -496,7 +510,8 @@ def build_site(
     """``scout site``: ``index.html`` and the downloads in ``data/site/``."""
     from scout import reports_text
     from scout.forecast import feature_dates
-    from scout.lists import league_names, rising_ids
+    from scout.lists import league_names, rising_ids, write_tables
+    from scout.players import compact, report_flags
     from scout.providers.transfermarkt import TransfermarktValuationProvider
 
     processed = settings.paths.processed_dir
@@ -504,10 +519,13 @@ def build_site(
     out_dir = Path(out_dir) if out_dir else settings.paths.processed_dir.parent / "site"
     cand = pd.read_parquet(lists_dir / "candidates.parquet")
     barg = pd.read_parquet(lists_dir / "bargains.parquet")
+    players = pd.read_parquet(lists_dir / "players.parquet")
     words = pd.concat(
         [pd.read_csv(lists_dir / "dictionary.csv"), reports_text.dictionary()], ignore_index=True
     )
     reports = reports_text.page_reports(settings, cand, barg, agreement or reports_text.AGREEMENT)
+    # ``scout reports`` ran after ``scout lists``: the page's reports decide.
+    players = players.assign(report_available=report_flags(players["player_id"], reports))
     scouting = pd.read_parquet(processed / "models" / "scouting.parquet")
     season = int(cand["season"].max())
     newest = scouting[scouting["season"].astype(int) == season]
@@ -520,6 +538,7 @@ def build_site(
         cand,
         barg,
         words,
+        players=players,
         rising=rising_ids(scouting, season=season),
         feature_dates=feature_dates(scouting, season, league_names(settings)),
         valuation_end=tm.data_end(),
@@ -543,6 +562,12 @@ def build_site(
             target = downloads / f"{name}.{suffix}"
             shutil.copyfile(lists_dir / f"{name}.{suffix}", target)
             written.append(target)
+    written += write_tables({"players": players}, downloads)
+    target = downloads / PLAYERS
+    atomic_write_text(
+        target, json.dumps(compact(players), ensure_ascii=False, separators=(",", ":"))
+    )
+    written.append(target)
     words.to_csv(downloads / "dictionary.csv", index=False)
     written.append(downloads / "dictionary.csv")
     target = downloads / REPORTS

@@ -11,6 +11,11 @@ which S3 does not undo for an SDK reader, so ``read`` unpacks them):
   drafted from the record (prompt 20d), with their vectors;
 * ``data/reports.json``: each player's written report, or the note that the
   explanation written by rule is shown;
+* ``data/players.json`` (prompt 20f): every player of the newest season, the
+  two lists' players among them, with his minutes, ability, value, fair
+  value, flags and the sentences that say why he is on no list (rows as
+  lists, repeated texts as codes); a page published before it has none,
+  and the chat then knows the two lists only;
 * ``index.html``: only its data block is read, for what the page says around
   the tables (the dates, the five season window, the elite pool, the flag
   rules, the fall back buckets) and the bargains' rising tag, which the CSV
@@ -43,6 +48,7 @@ FILES = {
     "similar": "data/similar.json",
     "reports": "data/reports.json",
 }
+OPTIONAL_FILES = {"players": "data/players.json"}  # prompt 20f
 DATA_BLOCK = re.compile(r'<script type="application/json" id="data">(.*?)</script>', re.S)
 TEXT_COLUMNS = {
     "player",
@@ -206,6 +212,21 @@ def parse_similar(d: dict) -> Similar:
     return sim
 
 
+def parse_players(d: dict | None) -> list[dict]:
+    """``players.json`` as one dict per row, the coded texts decoded."""
+    if not d:
+        return []
+    texts, columns = d["texts"], d["columns"]
+    coded = [columns.index(c) for c in d.get("coded", [])]
+    out = []
+    for row in d["rows"]:
+        for i in coded:
+            if row[i] is not None:
+                row[i] = texts[row[i]]
+        out.append(dict(zip(columns, row, strict=True)))
+    return out
+
+
 @dataclass
 class Tables:
     """Everything the tools read."""
@@ -218,20 +239,34 @@ class Tables:
     reports: dict
     version: str = ""
     people: dict | None = None  # scout.chat.tools.people, built on first use
+    players: list[dict] = field(default_factory=list)  # prompt 20f
 
     @property
     def built(self) -> str:
         return str(self.meta.get("built", ""))
 
 
+def _optional(source: Source, key: str) -> bytes | None:
+    """An optional file's bytes, None when the published page has none."""
+    try:
+        return source.read(key)
+    except Exception as exc:  # S3's NoSuchKey or a missing local file
+        if type(exc).__name__ in ("NoSuchKey", "FileNotFoundError", "KeyError", "ClientError"):
+            return None
+        raise
+
+
 def load(source: Source) -> Tables:
-    """Read and parse every published file the chat uses; the six reads run
+    """Read and parse every published file the chat uses; the seven reads run
     at once (from S3 each is mostly waiting)."""
     version = source.version()
     keys = {"page": PAGE, **FILES}
-    with ThreadPoolExecutor(max_workers=len(keys)) as pool:
+    with ThreadPoolExecutor(max_workers=len(keys) + len(OPTIONAL_FILES)) as pool:
+        extra = {k: pool.submit(_optional, source, v) for k, v in OPTIONAL_FILES.items()}
         bodies = dict(zip(keys, pool.map(source.read, keys.values()), strict=True))
+        optional = {k: f.result() for k, f in extra.items()}
     text = {k: unpack(body).decode("utf-8") for k, body in bodies.items()}
+    players = optional["players"]
     meta = page_meta(text.pop("page"))
     bargains = parse_csv(text["bargains"])
     rising = _rising_bargains(meta)
@@ -247,6 +282,7 @@ def load(source: Source) -> Tables:
         similar=parse_similar(json.loads(text["similar"])),
         reports=json.loads(text["reports"]),
         version=version,
+        players=parse_players(json.loads(unpack(players)) if players else None),
     )
 
 

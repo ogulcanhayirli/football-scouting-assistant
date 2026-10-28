@@ -159,7 +159,8 @@ def test_bargains_table_and_dictionary_agree():
     assert out["list"].tolist() == ["prime", "experienced"]
     assert out["position"].tolist() == ["Defender", "Left-Back"]
     words = dictionary()
-    assert set(words["table"]) == {"candidates", "bargains"}
+    assert set(words["table"]) == {"candidates", "bargains", "players"}
+    assert set(dictionary(present=False)["table"]) == {"candidates", "bargains"}
     assert words["meaning"].str.len().gt(20).all()  # one plain sentence each
     assert not words["meaning"].str.contains("\n").any()
 

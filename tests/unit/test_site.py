@@ -155,7 +155,7 @@ def _site(tmp_path):
 def _lists(tmp_path):
     lists = tmp_path / "lists"
     lists.mkdir()
-    for name in ("candidates", "bargains", "dictionary"):
+    for name in ("candidates", "bargains", "players", "dictionary"):
         for suffix in ("csv", "parquet"):
             (lists / f"{name}.{suffix}").write_bytes(b"x")
     return lists
@@ -164,7 +164,7 @@ def _lists(tmp_path):
 def test_publish_sends_the_lists_and_the_page_and_nothing_else(tmp_path):
     s3 = FakeS3()
     lists, sent = publish(s3, "data-bucket", "site-bucket", _lists(tmp_path), _site(tmp_path))
-    assert len(lists.transferred) == 6
+    assert len(lists.transferred) == 8
     data_keys = {k for b, k in s3.objects if b == "data-bucket"}
     assert data_keys
     assert all(k.startswith(LISTS_PREFIX) for k in data_keys)
@@ -177,6 +177,11 @@ def test_publish_sends_the_lists_and_the_page_and_nothing_else(tmp_path):
     similar = s3.args[("site-bucket", "data/similar.json")]  # prompt 18, loaded on demand
     assert similar["ContentEncoding"] == "gzip"
     assert similar["ContentType"].startswith("application/json")
+    # Prompt 20f: the players table as CSV, Parquet and the compact JSON.
+    for key in ("data/players.csv", "data/players.parquet", "data/players.json"):
+        assert ("site-bucket", key) in s3.objects
+    assert s3.args[("site-bucket", "data/players.json")]["ContentEncoding"] == "gzip"
+    assert {"processed/lists/players.csv", "processed/lists/players.parquet"} <= data_keys
 
 
 def test_the_page_loads_the_similar_file_and_links_each_player():
@@ -326,7 +331,7 @@ def test_the_page_opens_on_the_chat_with_suggestions_and_follow_ups():
 
     html = render({**_data(), "seasons": {"first": 2015, "count": 11}})
     # Prompt 20d: the page opens on the chat when the address has no data section.
-    assert '["#candidates", "#bargains", "#similar", "#greats", "#archetypes"]' in html
+    assert '["#candidates", "#bargains", "#similar", "#greats", "#archetypes", "#players"]' in html
     # What it knows and does not; questions send themselves; follow ups.
     assert "What it knows." in html
     assert "What it does not know." in html
@@ -395,6 +400,7 @@ def test_the_data_sections_open_from_one_row_of_links_with_their_counts():
         ("similar", "Similar players"),
         ("greats", "Greats"),
         ("archetypes", "Archetypes"),
+        ("players", "Players"),
     ]
     assert nav.startswith(
         '<nav class="explore" id="explore" aria-label="Explore the data">Explore the data:'
@@ -402,7 +408,7 @@ def test_the_data_sections_open_from_one_row_of_links_with_their_counts():
     assert 'class="n"' not in nav  # no counts in the links
     # The counts are in the section headings.
     assert 'DATA[state.tab].length.toLocaleString("en") + " players</span>"' in html
-    for heading in ("Similar players", "Measured greats", "Archetypes"):
+    for heading in ("Similar players", "Measured greats", "Archetypes", "All players"):
         assert f"<h2>{heading} <span" in body
     # Hidden until a link is clicked, and the how to read box starts collapsed.
     assert '<div class="wide" id="data-area" hidden>' in body
@@ -417,6 +423,8 @@ def test_the_footer_keeps_every_download_and_credit():
         '<a href=\\"data/dictionary.csv\\">dictionary.csv</a>',
         '<a href=\\"data/candidates.parquet\\">candidates</a>',
         '<a href=\\"data/bargains.parquet\\">bargains</a>',
+        '<a href=\\"data/players.csv\\">players.csv</a>',
+        '<a href=\\"data/players.parquet\\">players</a>',
         "Sources: player statistics from API Football (api-football.com), used under the "
         "owner's subscription; raw responses are not published. ",
         "Market values and transfers from transfermarkt-datasets by dcaribou "
@@ -428,6 +436,54 @@ def test_the_footer_keeps_every_download_and_credit():
     ):
         assert line in html
     assert '<footer class="col" id="footer">' in html
+
+
+def test_the_subtitle_counts_the_players_table_when_there_is_one():
+    from scout.players import COLUMNS
+
+    players = pd.DataFrame({c: [None, None, None] for c in COLUMNS}).assign(
+        player_id=[1, 2, 3], player=["Alex", "Ben", "Carl"], league=["Serie A", "Süper Lig", "J1"]
+    )
+    data = page_data(
+        _candidates(),
+        _bargains(),
+        dictionary(),
+        players=players,
+        rising=set(),
+        feature_dates={"2026-06-30": ["Serie A"]},
+        valuation_end=pd.Timestamp("2026-06-12"),
+        latest_value_date=None,
+        built=pd.Timestamp("2026-10-28"),
+        forecasts=[],
+        tracked=37,
+    )
+    assert (data["players"], data["player_leagues"], data["listed"]) == (3, 3, 2)
+
+
+def test_the_players_section_loads_its_file_on_open_and_shows_fifty():
+    html = render(_data())
+    body = _body(html)
+    # Prompt 20f: loaded only when the section opens or a name is typed.
+    assert 'fetch("data/players.json")' in html
+    assert html.count('fetch("data/players.json")') == 1
+    assert '<input type="search" id="pl-q"' in body
+    assert "PL_SHOWN = 50" in html
+    heads = re.search(r'<table id="pl-table">.*?</thead>', body, re.S).group(0)
+    assert re.findall(r"<th>([^<]+)</th>", heads) == [
+        "Player",
+        "Age",
+        "Club",
+        "League",
+        "Position",
+        "Minutes",
+        "Ability",
+        "Value",
+        "Lists",
+    ]
+    # A player on neither list shows the code's reasons, as the chat does.
+    assert "[o.why_not_candidate, o.why_not_bargain]" in html
+    # The what it knows text says the lists are a part of all players.
+    assert '"The two lists hold " + int(D.listed) + " players' in html
 
 
 def test_the_style_is_one_system_font_and_follows_the_system_theme():

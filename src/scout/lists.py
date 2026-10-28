@@ -10,6 +10,9 @@
   chances blank: those were never measured there (prompt 14).
 * **bargains**: the prime and experienced lists of ``scout.bargains`` with
   the shared flags, the explanation and the two context tags.
+* **players** (prompt 20f, ``scout.players``): every player with a league
+  minute in the newest season, the two lists' players among them, with why
+  he is on no list.
 
 Flags and explanation come from one peer table (``scout.explain``), so the
 sentence and the flags of a player always quote the same numbers.
@@ -444,11 +447,15 @@ def bargains_table(lists: dict[str, pd.DataFrame], leagues: dict[str, str]) -> p
 
 
 def dictionary(present: bool = True) -> pd.DataFrame:
-    """One row per column; without ``present``, the columns of a past season's table."""
+    """One row per column; without ``present``, the columns of a past season's
+    two tables (the players table, prompt 20f, exists for the newest season only)."""
+    from scout.players import DICTIONARY as PLAYERS
+
+    tables = {**DICTIONARY, "players": PLAYERS} if present else DICTIONARY
     return pd.DataFrame(
         [
             {"table": table, "column": column, "meaning": meaning}
-            for table, columns in DICTIONARY.items()
+            for table, columns in tables.items()
             for column, meaning in columns.items()
             if present or column not in PRESENT_COLUMNS
         ]
@@ -873,6 +880,27 @@ def season_tables(
     return cand, bargains_table(lists, leagues), tables
 
 
+def all_players(
+    settings,
+    inputs: dict,
+    features: pd.DataFrame,
+    cand: pd.DataFrame,
+    barg: pd.DataFrame,
+    leagues: dict[str, str],
+) -> pd.DataFrame:
+    """The players table (prompt 20f, ``scout.players``), checked by its
+    contract; ``report_available`` from the reports stored so far."""
+    from scout import reports_text
+    from scout.contracts.schemas import PLAYERS_TABLE, validate
+    from scout.players import players_table
+
+    reports = reports_text.page_reports(settings, cand, barg)
+    table = players_table(
+        inputs["scouting"], features, inputs["fair_value"], cand, barg, leagues, reports
+    )
+    return validate(PLAYERS_TABLE, table)
+
+
 def run_lists(settings) -> Path:
     """``scout lists``: both tables, the dictionary and reports/candidates.md."""
     inputs = load(settings)
@@ -895,9 +923,19 @@ def run_lists(settings) -> Path:
     from scout.present import add_present
 
     cand, barg = add_present(settings, cand, barg, inputs["scouting"])
+    everyone = all_players(settings, inputs, features, cand, barg, leagues)
     out_dir = settings.paths.processed_dir / "lists"
-    write_tables({"candidates": cand, "bargains": barg, "dictionary": dictionary()}, out_dir)
-    log.info("lists: %d candidates, %d bargains in %s", len(cand), len(barg), out_dir)
+    write_tables(
+        {"candidates": cand, "bargains": barg, "players": everyone, "dictionary": dictionary()},
+        out_dir,
+    )
+    log.info(
+        "lists: %d candidates, %d bargains, %d players in %s",
+        len(cand),
+        len(barg),
+        len(everyone),
+        out_dir,
+    )
     path = write_report(
         cand,
         barg,

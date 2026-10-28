@@ -10,9 +10,12 @@ pools (his position group today; a year either side for "as he was at an
 age"; the middle of the season age for the measured greats).
 
 * ``search_players``: filters and a sort over one table, at most 10 rows
-  and the number of players that matched;
+  and the number of players that matched; the players table (prompt 20f)
+  holds every player of the season, the two lists only theirs;
 * ``player_card``: every fact the page shows for one player, the written
-  report included;
+  report included; found in the candidates, then the bargains, then the
+  players table, whose row says in sentences set by code why he is on no
+  list (``scout.players``);
 * ``similar_players``: the ten nearest of his position group today, or of
   today's players to him (or to a measured great) at an age, or to the
   archetype of a legend drafted from the record (prompt 20d);
@@ -21,7 +24,9 @@ age"; the middle of the season age for the measured greats).
 Both player tools read a name through ``NICKNAMES`` first (prompt 20d), so
 R9, CR7, Zizou or La Pulga reach the player, great or archetype the page
 holds, and an answer about a great or an archetype carries its label
-(``GREATS_LABEL``, ``ARCHETYPE_LABEL``).
+(``GREATS_LABEL``, ``ARCHETYPE_LABEL``). A name nobody holds is then read
+loosely (``fuzzy_score``: one or two letters off in each word), and the
+result says so (prompt 20f).
 
 Every schema is strict (``additionalProperties: false``), with optional
 fields left out of ``required`` rather than nullable, under the API's limit
@@ -34,6 +39,7 @@ import math
 import re
 import unicodedata
 from collections.abc import Callable
+from difflib import SequenceMatcher
 
 from scout.chat.data import Tables
 
@@ -56,7 +62,8 @@ POSITION_GROUPS = {
     "Centre-Forward": "centre_forward",
 }
 GROUPS = sorted(set(POSITION_GROUPS.values()))
-TABLES = ["candidates", "bargains_prime", "bargains_experienced", "bargains_all"]
+TABLES = ["players", "candidates", "bargains_prime", "bargains_experienced", "bargains_all"]
+FUZZY = 0.8  # a misspelt word must keep this much of the held one (difflib ratio)
 FLAG_KEYS = ["low_minutes", "injured", "value_falling"]
 MONTHS = [
     "January",
@@ -311,6 +318,58 @@ def bargain_view(o: dict, tags: dict[str, str], detail: bool = False) -> dict:
     return out
 
 
+def player_view(o: dict, detail: bool = False) -> dict:
+    """A players table row (prompt 20f) as the chat gives it: blank chances
+    with their reason, and the code's sentence for each list he is not on."""
+    rank = o.get("value_rank")
+    out = {
+        "player": o["player"],
+        "player_id": o["player_id"],
+        "age": years(o.get("age")),
+        "nationality": o.get("nationality"),
+        "position": o.get("position"),
+        "club": o.get("club"),
+        "league": o.get("league"),
+        "league_minutes": whole(o["minutes"]) if o.get("minutes") is not None else None,
+        "share_of_team_minutes": None
+        if o.get("minutes_share") is None
+        else f"{js_round(o['minutes_share'] * 100)}%",
+        "ability_pct": None if o.get("ability_pct") is None else js_round(o["ability_pct"]),
+        "value": money(o.get("value_eur")),
+        "value_rank": f"#{whole(rank)}" if rank is not None else "no value rank",
+        "fair_value": money(o.get("fair_value_eur"))
+        if o.get("fair_value_eur") is not None
+        else "no fair value (regular players with a value only)",
+        "price_against_fair": f"{js_round(o['value_to_fair'] * 100)}% of fair"
+        if o.get("value_to_fair") is not None
+        else None,
+        "elite_chance": chance(
+            o.get("elite_chance_pct"),
+            o.get("elite_chance_players"),
+            o.get("elite_decile"),
+            f"not computed: {o.get('elite_chance_why_blank')}",
+        ),
+        "big_move_chance": chance(
+            o.get("big_move_chance_pct"),
+            o.get("big_move_chance_players"),
+            o.get("big_move_decile"),
+            f"not computed: {o.get('big_move_chance_why_blank')}",
+        ),
+        "flags": o.get("flags") or "none",
+        "on_lists": [k for k in ("candidates", "bargains") if o.get(f"in_{k}")] or "none",
+    }
+    if detail:
+        out["ability_score"] = o.get("ability_score")
+        out["value_date"] = day(o.get("value_date"))
+        out["described_on"] = day(o.get("data_date"))
+    return out
+
+
+def why_not(o: dict) -> list[str]:
+    """The code's sentences for the lists a player is not on."""
+    return [o[k] for k in ("why_not_candidate", "why_not_bargain") if o.get(k)]
+
+
 # search_players
 
 SORTS: dict[str, tuple[Callable[[dict], float | None], bool, str]] = {
@@ -346,6 +405,7 @@ SORTS: dict[str, tuple[Callable[[dict], float | None], bool, str]] = {
     "fall_back_risk": (lambda o: o.get("fall_back_risk_pct"), True, "highest fall back risk first"),
     "ability": (lambda o: o.get("ability_pct"), True, "highest ability percentile first"),
     "so_far_minutes": (lambda o: o.get("so_far_minutes"), True, "most minutes this season first"),
+    "minutes": (lambda o: o.get("minutes"), True, "most league minutes in the season first"),
 }
 
 
@@ -369,7 +429,9 @@ def _bucket(o: dict, pct: str, decile: str) -> float | None:
 
 
 def _table(t: Tables, name: str) -> list[dict]:
-    if name == "candidates":
+    if name == "players":
+        rows = t.players
+    elif name == "candidates":
         rows = t.candidates
     elif name == "bargains_all":
         rows = sorted(t.bargains, key=lambda o: (o["list"] != "prime", o["list_rank"]))
@@ -388,7 +450,7 @@ def _sorted(rows: list[dict], how: str) -> list[dict]:
 
 
 def search_players(t: Tables, args: dict) -> dict:
-    table = args["table"]
+    table = args.get("table") or "players"
     if table not in TABLES:
         return {"error": f"table must be one of {TABLES}"}
     how = args.get("sort_by", "table_order")
@@ -424,7 +486,11 @@ def search_players(t: Tables, args: dict) -> dict:
         q = fold(args["club"])
         keep(
             "club",
-            lambda o: q in fold(o.get("club_at_forecast")) or q in fold(o.get("current_club")),
+            lambda o: (
+                q in fold(o.get("club_at_forecast"))
+                or q in fold(o.get("current_club"))
+                or q in fold(o.get("club"))
+            ),
         )
     if args.get("flags"):
         keep("flags", lambda o: set(args["flags"]) <= set(flag_keys(o.get("flags"), rules)))
@@ -438,6 +504,7 @@ def search_players(t: Tables, args: dict) -> dict:
             lambda o: bool(o.get("moved_since_forecast")) == args["moved_since_forecast"],
         )
     for name, column in (
+        ("min_minutes", "minutes"),
         ("min_ability_pct", "ability_pct"),
         ("min_elite_chance_pct", "elite_chance_pct"),
         ("min_step_up_chance_pct", "step_up_chance_pct"),
@@ -446,11 +513,12 @@ def search_players(t: Tables, args: dict) -> dict:
             keep(name, lambda o, c=column, n=name: o.get(c) is not None and o[c] >= args[n])
     ordered = _sorted(rows, how)
     tags = t.meta.get("tags", {})
-    view = (
-        (lambda o: candidate_view(o))
-        if table == "candidates"
-        else (lambda o: bargain_view(o, tags))
-    )
+
+    def view(o: dict) -> dict:
+        if table == "players":
+            return player_view(o)
+        return candidate_view(o) if table == "candidates" else bargain_view(o, tags)
+
     shown = ordered[:limit]
     out = {
         "table": table,
@@ -470,6 +538,8 @@ def search_players(t: Tables, args: dict) -> dict:
         out["tie_at_top"] = True
     if not ordered:
         out["note"] = "no player in this table matches these filters"
+        if table != "players":
+            out["note"] += "; the players table holds every player of the season"
     return out
 
 
@@ -496,22 +566,64 @@ def name_score(query: str, name: str) -> int:
     return 0
 
 
+def fuzzy_score(query: str, name: str, nt: list[str] | None = None) -> float:
+    """How well a misspelt name fits a held one, 0 when it does not: every
+    word of the query must be a held word one or two letters off (difflib
+    ratio of ``FUZZY`` or more), the last ones (the surnames) included, or
+    the first letter of a held initial ('Erling Halland' fits 'E. Haaland').
+    ``nt``: the held name's words, when already split."""
+    qt, nt = _tokens(query), nt if nt is not None else _tokens(name)
+    if not qt or not nt or len(qt) > len(nt):
+        return 0.0
+    surname = _spelling(qt[-1], nt[-1])
+    if surname < FUZZY:
+        return 0.0
+    scores = [surname]
+    for w in qt[:-1]:
+        best = max((1.0 if len(n) == 1 and w[0] == n else _spelling(w, n)) for n in nt[:-1] or nt)
+        if best < FUZZY:
+            return 0.0
+        scores.append(best)
+    return sum(scores) / len(scores)
+
+
+def _spelling(a: str, b: str) -> float:
+    """difflib's ratio of two words, 0 below ``FUZZY`` (cheap bounds first)."""
+    if a == b:
+        return 1.0
+    if abs(len(a) - len(b)) > 2 or len(a) < 4:
+        return 0.0
+    m = SequenceMatcher(None, a, b)
+    return m.ratio() if m.real_quick_ratio() >= FUZZY and m.quick_ratio() >= FUZZY else 0.0
+
+
 def people(t: Tables) -> dict[int, dict]:
-    """Every player the page shows, by id: in the tables, today's similar
-    players and the earlier seasons once in the top 500 (built once per
-    load)."""
+    """Every player the page shows, by id: in the tables, the players table,
+    today's similar players and the earlier seasons once in the top 500
+    (built once per load)."""
     if t.people is None:
         t.people = _people(t)
     return t.people
 
 
 def _people(t: Tables) -> dict[int, dict]:
+    people = _held(t)
+    for p in people.values():
+        p["words"] = _tokens(p["name"])  # for fuzzy_score, split once
+    return people
+
+
+def _held(t: Tables) -> dict[int, dict]:
     people: dict[int, dict] = {}
     for table, rows in (("candidates", t.candidates), ("bargains", t.bargains)):
         for o in rows:
             p = people.setdefault(o["player_id"], {"id": o["player_id"], "name": o["player"]})
             p.setdefault(table, o)
             p.setdefault("club", o.get("current_club") or o.get("club_at_forecast"))
+    for o in t.players:
+        p = people.setdefault(o["player_id"], {"id": o["player_id"], "name": o["player"]})
+        p["players"] = o
+        p.setdefault("club", o.get("club"))
     for o in t.similar.today:
         p = people.setdefault(o["id"], {"id": o["id"], "name": o["name"]})
         p["today"] = o
@@ -523,14 +635,22 @@ def _people(t: Tables) -> dict[int, dict]:
     return people
 
 
-def find(t: Tables, name: str, club: str | None = None, pool=None) -> list[dict]:
-    """The best matching players, the most valuable first."""
+def find(
+    t: Tables, name: str, club: str | None = None, pool=None, loose: bool = False
+) -> list[dict]:
+    """The best matching players, the most valuable first; with ``loose``,
+    a name no one holds is read as the closest misspelling (``fuzzy_score``),
+    and the players found carry ``loose: True``."""
     everyone = pool if pool is not None else people(t)
     scored = [(name_score(name, p["name"]), p) for p in everyone.values()]
     best = max((s for s, _ in scored), default=0)
+    fuzzy = best == 0 and loose
+    if fuzzy:
+        scored = [(fuzzy_score(name, p["name"], p.get("words")), p) for p in everyone.values()]
+        best = max((s for s, _ in scored), default=0)
     if best == 0:
         return []
-    found = [p for s, p in scored if s == best]
+    found = [{**p, "loose": True} if fuzzy else p for s, p in scored if s == best]
     if club:
         q = fold(club)
         narrowed = [p for p in found if any(q in fold(c) for c in _club_names(p))]
@@ -556,6 +676,8 @@ def _also(t: Tables, asked: str, meant: str, pool=None) -> list[str]:
 
 def _club_names(p: dict) -> list[str]:
     names = [p.get("club")]
+    if "players" in p:
+        names.append(p["players"].get("club"))
     for key in ("candidates", "bargains"):
         if key in p:
             names += [p[key].get("club_at_forecast"), p[key].get("current_club")]
@@ -568,6 +690,8 @@ def _rank(p: dict) -> float:
     for key in ("candidates", "bargains"):
         if key in p and p[key].get("value_rank") is not None:
             return p[key]["value_rank"]
+    if "players" in p and p["players"].get("value_rank") is not None:
+        return p["players"]["value_rank"]
     if "today" in p and p["today"].get("value_rank") is not None:
         return p["today"]["value_rank"]
     return 1e9
@@ -583,7 +707,12 @@ def _choices(found: list[dict]) -> dict:
             }
             for p in found[:MAX_ROWS]
         ],
-        "note": "several players match this name; ask which one, naming the club",
+        "note": "several players match this name; ask which one, naming the club"
+        + (
+            "; no name matched exactly, these are the closest spellings"
+            if found[0].get("loose")
+            else ""
+        ),
     }
 
 
@@ -594,7 +723,11 @@ def report_of(t: Tables, player_id: int) -> dict:
     r = t.reports
     row = (r.get("rows") or {}).get(str(player_id)) if r.get("available") else None
     if not row:
-        return {"kind": "none", "note": "no written report for him"}
+        return {
+            "kind": "none",
+            "note": "there is no written report for him: reports are written only for the "
+            "players of the candidates and bargains tables",
+        }
     if row[0] == "report":
         return {"kind": "written report", "text": row[1], "label": r.get("label")}
     return {
@@ -608,9 +741,10 @@ def report_of(t: Tables, player_id: int) -> dict:
 def player_card(t: Tables, args: dict) -> dict:
     asked = args["name"]
     name = resolve(asked)
-    found = find(t, name, args.get("club"))
     greats = sorted({g["great"] for g in t.similar.greats if name_score(name, g["great"])})
     legend = _archetype_match(t.similar, name)
+    exact = greats or legend is not None  # a great or a legend is never read loosely
+    found = find(t, name, args.get("club"), loose=not exact)
     if not found:
         if legend is not None:
             out = {
@@ -641,18 +775,43 @@ def player_card(t: Tables, args: dict) -> dict:
     out: dict = {"found": True, "player": p["name"], "player_id": p["id"]}
     if name != asked:
         out["nickname"] = f"{asked} read as {name}"
+    if p.get("loose"):
+        out["spelling"] = f"no player is held as {asked}; the closest name held is {p['name']}"
+    club = args.get("club")
+    if club and not any(fold(club) in fold(c) for c in _club_names(p)):
+        out["club"] = (
+            f"no {asked} of {club} is held; the player found plays for "
+            f"{', '.join(dict.fromkeys(_club_names(p)))}"
+        )
     out["in_tables"] = [k for k in ("candidates", "bargains") if k in p]
+    row = p.get("players")
     if "candidates" in p:
         out["candidate"] = candidate_view(p["candidates"], detail=True)
     if "bargains" in p:
         out["bargain"] = bargain_view(p["bargains"], tags, detail=True)
+    if row is not None and out["in_tables"]:
+        out["season_facts"] = {
+            "nationality": row.get("nationality"),
+            "league_minutes": whole(row["minutes"]),
+        }
+    elif row is not None:
+        out["player_row"] = player_view(row, detail=True)
+    if row is not None and why_not(row):
+        # set by code (scout.players), to be said as written
+        out["why_not_on_lists"] = why_not(row)
     if out["in_tables"]:
+        out["report"] = report_of(t, p["id"])
+    elif row is not None:
+        out["note"] = (
+            "on neither list: his row of the players table, which holds every player of the "
+            "season, is all the page holds on him"
+        )
         out["report"] = report_of(t, p["id"])
     else:
         o = p.get("today") or p["seasons"][-1]
         out["note"] = (
-            "not in the candidates or bargains tables; the page holds him only in the "
-            "similar players data"
+            "not in the candidates, bargains or players tables (no league minutes this "
+            "season); the page holds him only in the similar players data"
         )
         out["similar_data"] = _sim_view(o, t.similar)
     if greats:
@@ -787,7 +946,8 @@ def similar_players(t: Tables, args: dict) -> dict:
         pool = {pid: p for pid, p in everyone.items() if "today" in p}
     else:
         pool = {pid: p for pid, p in everyone.items() if "today" in p or "seasons" in p}
-    found = find(t, name, args.get("club"), pool)
+    exact = legend is not None or _great_match(sim, name) is not None
+    found = find(t, name, args.get("club"), pool, loose=not exact)
     if not found and legend is not None:
         out = {**_like_archetype(t, legend, args), "caveat": caveat}
         if mode == "at_age":
@@ -800,12 +960,20 @@ def similar_players(t: Tables, args: dict) -> dict:
             out["also_on_page"] = also
         return out
     if not found:
-        held = find(t, name, args.get("club"))
+        held = find(t, name, args.get("club"), loose=not exact)
         if held:
             return {
                 "found": False,
+                "player": held[0]["name"],
                 "note": "he has no style vector this season (it needs 450 league minutes "
-                "with match statistics); try mode at_age",
+                "with match statistics)"
+                + ("" if mode == "at_age" else "; try mode at_age")
+                + (
+                    f"; {whole(with_vector(t))} of the {whole(len(t.players))} players of the "
+                    "season have one"
+                    if t.players
+                    else ""
+                ),
             }
         great = _great_match(sim, name)
         if great:
@@ -821,6 +989,11 @@ def similar_players(t: Tables, args: dict) -> dict:
     if len(found) > 1:
         return _choices(found)
     p = found[0]
+    spelling = (
+        {"spelling": f"no player is held as {asked}; the closest name held is {p['name']}"}
+        if p.get("loose")
+        else {}
+    )
     if mode == "now":
         q = p["today"]
         rows = []
@@ -839,6 +1012,7 @@ def similar_players(t: Tables, args: dict) -> dict:
             rows.append(o)
         found_rows = _nearest(q, rows, sim.scale)
         out = {
+            **spelling,
             "query": _sim_view(q, sim),
             "pool": "today's players of his position group"
             + ("" if rows else "; none match these filters"),
@@ -863,6 +1037,7 @@ def similar_players(t: Tables, args: dict) -> dict:
         and age - 1 <= math.floor(o["age"]) <= age + 1
     ]
     out = {
+        **spelling,
         "query": _sim_view(q, sim),
         "pool": f"today's players of his position group aged {age - 1} to {age + 1}",
         "nearest": _listed(_nearest(q, rows, sim.scale), sim.scale, t),
@@ -871,6 +1046,12 @@ def similar_players(t: Tables, args: dict) -> dict:
     if math.floor(q["age"]) != age:
         out["note"] = f"he has no season at {age}; the nearest held is at {math.floor(q['age'])}"
     return out
+
+
+def with_vector(t: Tables) -> int:
+    """Players of the players table with a style vector this season."""
+    today = {o["id"] for o in t.similar.today}
+    return sum(1 for o in t.players if o["player_id"] in today)
 
 
 def _great_match(sim, name: str) -> str | None:
@@ -975,7 +1156,7 @@ def how_to_read(t: Tables, args: dict, limits: dict[str, str], topics: dict[str,
             if (table is None or r["table"] == table)
             and (want in fold(r["column"]) or fold(r["column"]) in want)
         ][:6]
-    keys = set()
+    keys = set(topics.get(want, []))
     for r in entries:
         keys.update(topics.get(r["column"], []))
     for topic in limits:
@@ -1029,7 +1210,7 @@ def definitions(t: Tables) -> list[dict]:
     and is sorted, so the definitions (and the prompt cache) stay the same
     until the tables change."""
     leagues = sorted(
-        {o["league"] for o in t.candidates + t.bargains if o.get("league")}
+        {o["league"] for o in t.candidates + t.bargains + t.players if o.get("league")}
         | set(t.similar.raw.get("leagues", []))
     )
     rules = t.meta.get("flags", {})
@@ -1040,12 +1221,16 @@ def definitions(t: Tables) -> list[dict]:
             "description": (
                 "Filter and sort one of the page's tables and return at most 10 rows, each with "
                 "the facts the page shows, plus 'matched', the number of players that pass the "
-                "filters (use it for 'how many' questions). Tables: candidates (players ranked "
-                "#101 to #2,000 by value with elite, step up, big move chances and fall back "
-                "risk), bargains_prime (29 and under), bargains_experienced (30 to 33), "
-                "bargains_all (both lists). League is the league of the season the tables "
-                "describe; age_min compares the exact age, age_max whole years. Flags: "
-                f"{flag_text}. {SEARCH_ORDER}"
+                "filters (use it for 'how many' questions). Tables: players (every player with "
+                "league minutes in the season, on a list or not: club, minutes, ability, value, "
+                "fair value, flags, the elite and big move chances where computed and why not; "
+                "use it for players in general and for any named player), candidates (players "
+                "ranked #101 to #2,000 by value with elite, step up, big move chances and fall "
+                "back risk), bargains_prime (29 and under), bargains_experienced (30 to 33), "
+                "bargains_all (both lists); use a list only when the question is about it or "
+                "its chances. League is the league of the season the tables describe; age_min "
+                f"compares the exact age, age_max whole years. Flags: {flag_text}. "
+                f"{SEARCH_ORDER}"
             ),
             "strict": True,
             "input_schema": _schema(
@@ -1076,6 +1261,7 @@ def definitions(t: Tables) -> list[dict]:
                     "moved_since_forecast": {"type": "boolean"},
                     "age_min": {"type": "integer"},
                     "age_max": {"type": "integer"},
+                    "min_minutes": {"type": "integer", "description": "league minutes"},
                     "min_ability_pct": {"type": "number"},
                     "min_elite_chance_pct": {"type": "number"},
                     "min_step_up_chance_pct": {"type": "number"},
@@ -1086,13 +1272,15 @@ def definitions(t: Tables) -> list[dict]:
         {
             "name": "player_card",
             "description": (
-                "Every fact the page shows for one player found by name (accents and initials "
-                "are matched loosely): his rows in candidates and bargains with chances, flags, "
-                "value, fair value, ability, club today, the season so far, the explanation and "
-                "his written scout report. A player outside both tables but in the similar "
-                "players data gets what that data holds; a measured great or a legend held only "
-                "as an archetype says so. Nicknames (R9, CR7, Zizou, La Pulga) are understood: "
-                "pass the name as asked. Several matches come back as a list."
+                "Every fact the page shows for one player found by name (accents, initials and "
+                "small misspellings are matched loosely): his rows in candidates and bargains "
+                "with chances, flags, value, fair value, ability, club today, the season so far, "
+                "the explanation and his written scout report. Any other player of the season "
+                "gets his row of the players table (club, minutes, ability, value, fair value, "
+                "flags, the chances where computed) and why_not_on_lists, the sentences that say "
+                "why he is on no list. A measured great or a legend held only as an archetype "
+                "says so. Nicknames (R9, CR7, Zizou, La Pulga) are understood: pass the name as "
+                "asked. Several matches come back as a list."
             ),
             "strict": True,
             "input_schema": _schema(
@@ -1138,13 +1326,16 @@ def definitions(t: Tables) -> list[dict]:
                 "cannot tell: how the chances were measured, their limits, the dates. Topics: "
                 "elite_chance, step_up_chance, big_move_chance, fall_back_risk, flags, value, "
                 "fair_value, ability, bargains, rising, season_so_far, similar, greats, "
-                "archetypes, reports, explanation, dates."
+                "archetypes, reports, explanation, players, dates."
             ),
             "strict": True,
             "input_schema": _schema(
                 {
                     "column": {"type": "string", "description": "a column name or a topic"},
-                    "table": {"type": "string", "enum": ["candidates", "bargains", "reports"]},
+                    "table": {
+                        "type": "string",
+                        "enum": ["players", "candidates", "bargains", "reports"],
+                    },
                 },
                 ["column"],
             ),

@@ -1766,6 +1766,94 @@ guard never fired. The deployed function behaves as the in process runs
 said. The per visitor cap stopped the 21st message over one connection;
 it keys on the address, which the session's proxy rotates (docs/DEPLOY.md).
 
+## Every player, not only the lists (prompt 20f, 28 October 2026)
+
+The page promised "Ask about 2,734 players": the two lists. A third
+published table, `players` (`src/scout/players.py`, written by `scout
+lists`), holds every player with a league minute in 2025/26: 18,931 players
+in 36 leagues (Uruguay has season totals for 2020 only; 5 rows the API gives
+no name are left out). Each row is the league row with most minutes, for a
+regular the very row the lists read. Ability, fair value and every chance
+exist for regulars only (450 league minutes or more), as in the models; a
+blank chance and a list a player is not on each carry a sentence set in
+code, from the rules as the code applies them.
+
+The owner's brief described the lists as "candidates (23 and under, past
+the riser floor) and bargains (value below fair value)". The code says
+otherwise, and the sentences follow the code: a candidate is a regular
+ranked #101 to #2,000 by value at any age (23 or under is the elite pool,
+which decides only the elite chance and the fall back risk), or one of the
+riser model's top 50 valued lower; a bargain is any regular of 33 or under
+with ability at the 70th percentile of his position or better, half of his
+team's minutes or more, a value and a fair value, ranked from the cheapest
+against fair value, so the list also holds players priced above it (72.7%
+of the prime list, 52.4% of the experienced). 68 of the 100 most valuable
+players are on the prime bargains list (Lamine Yamal #552, Kylian Mbappé
+#550, Erling Haaland #735). So "not a bargain: value above fair value" is
+never true and is never said; the reasons are, for example:
+
+| Who | Not a candidate | Not a bargain |
+|---|---|---|
+| Rodri (Manchester City, #98) | already among the 100 most valuable | under half of his team's league minutes |
+| a regular valued #5,000 at 35 | valued below #2,000 and not one of the riser model's top 50 | ability below the 70th percentile of his position and 34 or older |
+| a substitute with 200 minutes, no value | fewer than 450 league minutes this season, no value on record and not one of the riser model's top 50 | fewer than 450 league minutes this season and no value on record |
+
+The elite chance of a player outside the pool reads, for example, "not
+computed: older than 23 and already among the 100 most valuable".
+
+**Similar players below 450 minutes?** The style vectors need both ability
+percentiles to take the level out, and version 2 gives them to regulars
+only. `scripts/embedding_threshold.py --minutes 270` extends both
+percentiles (each season's version 2 score, with the stored fit, ranked
+against the regulars of its group and season; the regulars' own come out
+as stored) and reruns decision 10's identity test with the stored settings
+(top 5, trained to 2022, tested on 2023 to 2025):
+
+| From | Vectors | Method | All pairs | Regular pairs | Added pairs |
+|---|---|---|---|---|---|
+| 450 (as stored) | 93,474 | baseline | 13.2% of 33,016 | 13.2% | |
+| 450 (as stored) | 93,474 | learned | 19.9% of 33,016 | 19.9% | |
+| 270 | 103,119 | baseline | 11.5% of 37,526 | 12.4% | 4.6% of 4,510 |
+| 270 | 103,119 | learned | 17.5% of 37,526 | 19.0% | 6.4% of 4,510 |
+
+The test drops (the low minute seasons are found rarely and crowd the
+regulars' pools), so the threshold stays at 450 (the owner's rule): 11,908
+of the 18,931 players have a vector for "plays like him now"; the others
+get "no style vector this season" with that count.
+
+**The chat.** `search_players` takes `players` as a third table (first in
+its enum, the description says to use it for players in general and any
+named player) with a `min_minutes` filter and a `minutes` sort;
+`player_card` looks in the candidates, the bargains, then the players
+table, and gives a player on no list his row and `why_not_on_lists`, the
+code's sentences; rule 10 of the system prompt makes the model say them as
+written and keeps "The tables on this page do not answer that." for players
+the tools do not find and for what the data never holds. A name nobody
+holds is read loosely (every word one or two letters off, difflib ratio
+0.8 or more, an initial matching a first name), never for a great or a
+legend, and the card says which name it read; a name held only at another
+club than the one asked says so, and rule 4 counts it as not found.
+
+**The evaluation** gains a `players` group of 12 (E01 to E12, 68 questions
+in all): six on stars on no list (his card with the reason, who plays like
+him, "is he a bargain", the most valuable 27 year old in Ligue 1, a
+misspelt name, an elite chance the data does not compute for him), which
+fail if the answer says "not in the data"; three on list players; three
+that must still be "not in the data" (Michael Ballack, the Chinese Super
+League, an injury today). On the tables of 28 October the ideal tool calls
+hold every expected answer (`--dry-run`: 68 of 68). Holding every player
+changes which names are unique, so four computed questions now pick other
+players (P02, P03, P04, P06). The run with the model was not made: the
+session had no Claude key (CLAUDE.md, Open questions).
+
+**Cold start.** With the CPU held by cgroups to the 1,024 MB share (0.58 of
+a vCPU), parsing `players.json` (4.1 MB, 0.76 MB gzip encoded) takes about
+0.2 s and the larger name index about 0.1 s more: all the published files
+parse in 0.6 to 0.7 s against 0.4 to 0.6 s before, beside 2.1 to 2.4 s for
+the SDK import they overlap. Under the 1 s the owner allowed, so the table
+loads with the others rather than on the first players call. A name no one
+holds costs about 0.35 s more (the loose search over every name).
+
 ## Next
 
 1. The clean check above: tune on earlier seasons, score on later ones.

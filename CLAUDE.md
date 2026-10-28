@@ -109,7 +109,7 @@ $C moves                                     # big move model, current scores
 $C elo                                       # team Elo from cached fixtures, reports/elo.md
 $C scouting [--strength v2|transfer|elo|transfer_elo]  # league strength, ability, elite, step up, riser
 $C ability                                  # ability versions: stability, backtest (reports/ability.md)
-$C lists                                    # the two tables and reports/candidates.md; run after backtest, moves, scouting, forecast history
+$C lists                                    # the two tables, the players table (prompt 20f) and reports/candidates.md; run after backtest, moves, scouting, forecast history
 $C reports [--dry-run]                      # prompt 19: a written report per player (Claude Haiku 5.5, Message Batches), checked in code, 50 judged once in 6 days (Claude Sonnet 5.5); waits at most 20 minutes, a batch still running is collected next run (prompt 19c); after lists, before site; needs ANTHROPIC_API_KEY, else one log line and nothing
 $C reports --judge-test [--limit 20]        # prompt 19c: the judge on judge/sorting.csv (run 9's 24 unfaithful verdicts sorted by hand), reports/judge_test.md; about 0.05 USD; needs ANTHROPIC_API_KEY
 $C current [--as-of DAY] [--max-requests N]  # today's squads, transfers, season in progress (about 2,000 requests)
@@ -131,10 +131,11 @@ $C sync up | down [--dry-run] [--only raw|processed|reports|transfermarkt]
 uv run python scripts/run_extras.py          # sidelined, coaches, events (done 17 October)
 uv run python scripts/rebuild_match_seasons.py --from-s3 serie_b:2016  # re-parse partitions offline after an adapter repair
 uv run python scripts/repair_names.py [--dry-run]  # the adapter's name repair on processed partitions built before it (prompt 18b)
+uv run python scripts/embedding_threshold.py --minutes 270  # prompt 20f: the identity test with vectors below 450 minutes, reports/embedding_threshold.md (5 minutes)
 $C statsbomb download                        # StatsBomb open data, once: La Liga 2004/05 to 2020/21, Premier League 2003/04
 $C statsbomb build                           # data/processed/statsbomb/player_match_stats/, checked by the contract
 $C greats                                    # mapping check against API Football, the peer group correction and its test, peer group vectors, the greats' table, reports/greats.md (after embed and lists)
-$C chat-eval [--dry-run | --local] [--url URL] [--site URL_OR_DIR] [--only computed unanswerable adversarial suggested]  # prompt 20: the chat's 56 questions (50, plus 6 of prompt 20d) against chat.url (needs SCOUT_CHAT_CLAUDE_KEY or ANTHROPIC_API_KEY; the evaluation token skips the visitor caps, own cap 5 USD a day), reports/chat_eval.md; --dry-run builds the set from the published files and checks the tools, no model called
+$C chat-eval [--dry-run | --local] [--url URL] [--site URL_OR_DIR] [--only computed unanswerable adversarial suggested players]  # prompt 20: the chat's 68 questions (50, plus 6 of prompt 20d and 12 of prompt 20f) against chat.url (needs SCOUT_CHAT_CLAUDE_KEY or ANTHROPIC_API_KEY; the evaluation token skips the visitor caps, own cap 5 USD a day), reports/chat_eval.md; --dry-run builds the set from the published files and checks the tools, no model called
 $C archetypes                                # reload and check archetypes/*/*.yaml, their vectors and today's nearest, the calibration, reports/archetypes.md (after embed and greats, before site; the weekly run calls it)
 ```
 
@@ -187,7 +188,7 @@ bucket named by `$SCOUT_S3_BUCKET` (eu-central-1).
 | Written reports (prompt 19) | `data/processed/reports_text/` | `reports.parquet` (one row a player: fact sheet, its hash, the report or the template, source, status, attempts, the check's violations, the judge's verdict), `runs.jsonl` (each run's counts, tokens and cost), `verdicts.jsonl` (with the sheet each verdict read, since prompt 19c), `failures.jsonl`, `summary.json`, `dictionary.csv`, `pending.json` (batches a run left running, collected by the next, prompt 19c); written by `scout reports`, read by `scout site`, kept in S3 by `scout publish` (best effort; in S3 since run 9, 25 October). Runs 8 to 12 so far, prompt 19.2; 19.3 rewrites all once |
 | Chat state (prompt 20) | S3 `scout-chat-<account>` (private, retained), `state/chat.json` | the caps' counters: a salt, the hour's visitors as salted IP hashes with their message counts, USD today and this month (visitors and the evaluation apart), token totals; written by the chat Lambda with conditional writes; deployed 26 October 2026 |
 | Chat evaluation (prompt 20) | `reports/chat_eval_set.json`, `reports/chat_eval.md`, `reports/chat_eval.json` | the 50 questions with their expected names and numbers and ideal tool calls; each run's answers, scores and causes. Built from the published files (`chat.site_url`). First run 26 October, second (prompt 20b) 27 October, both in process (`--local`); third (prompt 20c) 28 October through the Function URL itself |
-| User facing tables | `data/processed/lists/` | `candidates`, `bargains` (Parquet, CSV), `dictionary.csv` (see Outputs) |
+| User facing tables | `data/processed/lists/` | `candidates`, `bargains`, `players` (prompt 20f: 18,931 rows on 28 October, every player with a league minute in 2025/26) (Parquet, CSV), `dictionary.csv` (see Outputs) |
 | Quota state, log | `data/state/` | |
 
 Coverage: 37 leagues in `configs/backfill.ultra.yaml`, seasons 2010 to 2025
@@ -234,7 +235,7 @@ through the native API, and model only regular players (450+ minutes).
 | Greats correction (prompt 18c) | `greats` | a StatsBomb season held for Barcelona lands next to the same player's API Football season (top five, 2016/17 to 2020/21) | the uncorrected thin peer group | top five hit rate, median rank, players better and worse |
 | Archetypes (prompt 18c) | `archetypes` | drafted percentiles against the measured ones for six players drafted blind | a draft of 50 on every trait | share within 15 points (the owner's rule: most), mean gap; the real season's rank when searched with the draft |
 | Scout reports (prompts 19, 19c) | `reports` | a report whose every number is on its fact sheet as the kind of number its words say, every name on the sheet, and no claim the sheet's order or fields refute (the check in code), then the judge's faithful (each span with the field it contradicts, checked in code), hedging and readability | the explanation written by rule (shown whenever the check still fails) | share passing on the first try and after two retries, checkable judge verdicts on 50 a week, the judge against the hand sorting (`judge/sorting.csv`, `--judge-test`), the owner's agreement with the judge on 20 (`judge/agreement.csv`); cost per run |
-| Chat (prompt 20, decision 11) | `chat-eval` | 30 questions whose names and numbers are computed from the published tables, 10 the tables cannot answer, 10 attempts to pull the prompt or go off topic; since prompt 20d 6 more (`suggested`: the page's suggested questions (three since prompt 20e) and the fourth it offered before, bargains in the Eredivisie, "who plays like Zizou", "is R9 in the data"), computed the same way and also needing the label's words ("archetype", "not measured"; "cross era") | the ideal tool call run in code (it holds every expected answer: the tools agree with pandas on all 30) | exact match pass rate per group; each failure put down to the model's answer, its tool use or the tools; numbers found in no tool result; the run's cost |
+| Chat (prompt 20, decision 11) | `chat-eval` | 30 questions whose names and numbers are computed from the published tables, 10 the tables cannot answer, 10 attempts to pull the prompt or go off topic; since prompt 20d 6 more (`suggested`: the page's suggested questions (three since prompt 20e) and the fourth it offered before, bargains in the Eredivisie, "who plays like Zizou", "is R9 in the data"), computed the same way and also needing the label's words ("archetype", "not measured"; "cross era"); since prompt 20f 12 more (`players`: six on stars on no list, which fail if the answer says "not in the data", three on list players, three that must still be "not in the data") | the ideal tool call run in code (it holds every expected answer: the tools agree with pandas on all 30) | exact match pass rate per group; each failure put down to the model's answer, its tool use or the tools; numbers found in no tool result; the run's cost |
 | Riser (decision 3) | `scouting` | one season ability: both next seasons 20 above the best of this and last season and at the 70th percentile or better; half of team minutes now | `rank_rate` | as above, plus top 50 precision per season against the base rate |
 
 `scouting` also estimates league strength from players who changed leagues
@@ -431,7 +432,27 @@ Decision 5: two user facing tables, written by `scout lists`
   94.2% and 92.2% have minutes this season. The past forecasts of
   `forecast history` never carry these columns.
 * `dictionary.csv`: one plain sentence per column of both tables (`DICTIONARY`
-  in `src/scout/lists.py`; a test checks every column has one).
+  in `src/scout/lists.py`; a test checks every column has one), and since
+  prompt 20f of the players table.
+* **`players`** (prompt 20f, `src/scout/players.py`, written by `scout
+  lists`, checked by `PLAYERS_TABLE`): one row per player with a league
+  minute in the newest season (18,931 in 36 leagues on 28 October; 5
+  nameless rows left out), the list players among them, each the league row
+  with most minutes (a regular's is the row the lists read): age,
+  nationality, position, club, league, minutes and share, ability score and
+  percentile (regulars only), value with date and rank, fair value and the
+  ratio (regulars with a value only), the elite and big move chances copied
+  from the candidates with `elite_chance_why_blank` and
+  `big_move_chance_why_blank`, the three flags, `in_candidates`,
+  `in_bargains`, `why_not_candidate` and `why_not_bargain` (one sentence
+  each, set in code from the rules as the code applies them: a candidate is
+  a regular ranked #101 to #2,000 at any age, or a riser valued lower; a
+  bargain any eligible regular of 33 or under, also one priced above his
+  fair value, so "value above fair value" is never a reason),
+  `report_available` (set again by `scout site` from the page's reports)
+  and `data_date`. `scout site` also writes `data/players.json` (codes for
+  the repeated texts) for the page and the chat. Never in the registered
+  forecasts: `scout forecast freeze` keeps the two tables' dictionary.
 
 **Written reports** (prompt 19, `src/scout/reports_text.py`): every player's
 panel ("Report and similar players") shows his report above the similar
@@ -512,7 +533,24 @@ sources sit in the footer, every link and credit kept. One system font, 16
 px on phones and 17 on desktop, a 720 px column (tables 1,100 px), one
 accent, light and dark from the system; the character counter shows from
 400 characters on; the suggested questions hide after the first question
-(the follow ups take over), and the conversation sits above the box. Caps (`src/scout/chat/guard.py`): 20
+(the follow ups take over), and the conversation sits above the box.
+**Prompt 20f (28 October): every player.** The subtitle counts the players
+table ("Ask about 18,931 players across 36 leagues"); a sixth link,
+Players, opens a section that loads `data/players.json` and searches it by
+name (at most 50 matches, the most valuable first: name, age, club, league,
+position, minutes, ability, value, lists, and for a player on neither list
+the code's reasons under him); the footer offers `players.csv` and its
+Parquet; "What it knows" says the lists hold 2,734 players and every other
+player has his row. The chat reads `players.json` with the other files
+(optional: an older page still loads); `search_players` takes `players`
+(first in its enum, for players in general and any named player) with
+`min_minutes` and a `minutes` sort; `player_card` looks in the candidates,
+the bargains, then the players table and returns a player on no list's row
+with `why_not_on_lists`; rule 10 makes the model say those sentences as
+written and never "not in the data" for a player the tools find; a name no
+one holds is read loosely (difflib 0.8 a word; never for a great or a
+legend) and the card names the spelling it read; a name held only at
+another club says so (rule 4: not found). Caps (`src/scout/chat/guard.py`): 20
 messages an hour per IP (salted hash), 1 USD a day and 5 USD a month from
 the usage fields, 500 characters, all with a fixed polite reply; the Claude
 Console workspace's spend limit is the hard backstop. Since prompt 20b the
@@ -665,7 +703,7 @@ detail stays in `reports/scouting.md`, `reports/moves.md`,
 * The thin peer group's correction and archetypes for players without data, with a blind calibration: **done 25 October (prompt 18c); the archetypes await the owner's review.**
 * Generated scout reports with a faithfulness check and a weekly judge: **built 25 October (prompt 19); first real run 25 October (94% template, on length); length handling fixed in prompt 19b (run 9: 8 of 2,734 on the template); the judge's verdicts sorted, the check typed, the judge made checkable, the reports made stable and slow batches carried over in prompt 19c (28 October).**
 * January window forecast, published mid December and scored in February.
-* A capped chat over the two tables: **built and deployed 26 October (prompt 20)**; evaluated in process (28 of 30, 10 of 10, 10 of 10); the two fixes, a faster cold start and the 5 minute warm ping deployed 27 October (prompt 20b: 30 of 30, 10 of 10, 10 of 10); run through the Function URL on 28 October (prompt 20c): 30 of 30, 10 of 10, 10 of 10, 0.26 USD; the page opens on the chat with suggested questions and follow ups, and the chat knows the legends by their nicknames (prompt 20d, 28 October; the model run of the six new questions awaits the key); the page made minimal, the chat alone in view and everything else one click away (prompt 20e, 28 October).
+* A capped chat over the two tables: **built and deployed 26 October (prompt 20)**; evaluated in process (28 of 30, 10 of 10, 10 of 10); the two fixes, a faster cold start and the 5 minute warm ping deployed 27 October (prompt 20b: 30 of 30, 10 of 10, 10 of 10); run through the Function URL on 28 October (prompt 20c): 30 of 30, 10 of 10, 10 of 10, 0.26 USD; the page opens on the chat with suggested questions and follow ups, and the chat knows the legends by their nicknames (prompt 20d, 28 October; the model run of the six new questions awaits the key); the page made minimal, the chat alone in view and everything else one click away (prompt 20e, 28 October); every player of the season, not only the two lists, in the chat and a Players section (prompt 20f, 28 October; the model run of the 12 new questions awaits the key; upload, deploy and publish await the owner's go).
 * A matchup report before any match model.
 
 ## AWS
@@ -757,6 +795,7 @@ src/scout/  config, secrets, ratelimit, storage, sync, athena, featurestore,
   candidates.py             decile chance tables, fall back pool and flag count rates
   bargains.py               bargains eligibility, ranking, backtest
   lists.py                  the two user facing tables, their dictionary, reports/candidates.md
+  players.py                the players table: every player of the season, why he is on no list (prompt 20f)
   reports_text.py           written reports: fact sheets, the check in code, Message Batches, the judge, the cost (prompt 19)
   site.py, site_template.html  the static page (scout site), with the Ask tab (prompt 20)
   chat/                     the chat Lambda (prompt 20): data (the published files), tools, prompt, guard (caps), agent (the loop, the cost), handler; standard library plus anthropic only
@@ -769,7 +808,8 @@ archetypes/ legends/ and calibration/: one YAML file per player, drafted, for th
 judge/      agreement.csv: the owner's yes or no on the weekly judge's verdicts (prompt 19), read by scout site;
             sorting.csv: run 9's 24 unfaithful verdicts sorted by hand (prompt 19c), read by scout reports --judge-test
 training/   SageMaker entry point and requirements
-scripts/    feasibility.py, run_extras.py, rebuild_match_seasons.py, run_expansion.py, repair_names.py
+scripts/    feasibility.py, run_extras.py, rebuild_match_seasons.py, run_expansion.py, repair_names.py,
+            embedding_threshold.py
 tests/      unit, contracts, fixtures (synthetic)
 infra/      CDK app (ScoutSite, ScoutChat with chat_bundle.py and chat/requirements.txt) and its tests; archive/ holds the retired stacks
 docs/       DEPLOY.md (the weekly run, secrets, IAM policy, cost), AWS_SETUP.md
@@ -806,6 +846,20 @@ Settle them with the owner rather than guessing.
   stored key kept): the two fixes (C06, C11), 1,024 MB and the warm request;
   then tool markup never shown; then the warm ping. Weekly run 12, started
   by hand, publishes the page's part. Still open:
+  * **Prompt 20f (28 October): the players table, built, tested, not yet
+    out.** Committed and pushed; nothing uploaded, deployed or published:
+    each waits for the owner's go (`sync up --only processed` for
+    `processed/lists/`, `ScoutChat` redeployed without `--parameters`, then
+    `scout publish` or weekly run). The evaluation with the model (68
+    questions, about 0.40 USD) needs `SCOUT_CHAT_CLAUDE_KEY` again; the
+    session had none, so only `--dry-run` ran (68 of 68 ideal calls hold
+    their answers). The owner's brief described the lists as "23 and under,
+    past the riser floor" and "value below fair value"; the code differs
+    (MODELS.md), and the reason sentences follow the code, so whether the
+    bargains list should drop the players priced above fair value (72.7% of
+    the prime list, 68 of the 100 most valuable players) is the owner's
+    call. Similar players keep the 450 minute threshold: the identity test
+    drops at 270 (learned 19.9% to 17.5%).
   * **Prompt 20d's evaluation with the model is not run.** The session
     (28 October) had no `SCOUT_CHAT_CLAUDE_KEY`, so only `--dry-run` ran:
     the 56 ideal tool calls hold every expected answer (30 of 30, 6 of
