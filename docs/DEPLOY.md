@@ -428,7 +428,9 @@ the chat reads with the other files. `scout publish` sends the three files
 (`SITE_FILES`) and the two list files (`LIST_FILES`): both inside the
 prefixes the weekly run may already write, so its IAM policy needs no
 change. A Lambda deployed before the first page with `players.json` still
-loads (the file is optional) and knows the two lists only.
+loads (the file is optional) and knows the two lists only; that holds since
+the fix of prompt 20h (below): before it, S3's AccessDenied for the missing
+file failed the load.
 
 ### A bargain is priced below fair value (prompt 20g)
 
@@ -442,7 +444,68 @@ stored key is kept) before the chat says it; until then the deployed
 function answers as before from the new files. The next weekly run
 rewrites the reports of the 1,094 ranked players priced above fair value
 (their fact sheet line now reads "Value ranking"), about 0.16 USD of writer
-tokens on top of the usual run.
+tokens on top of the usual run. Both went out on 28 October (prompt 20h,
+below): weekly run 16 rewrote 1,132 reports for 0.23 USD.
+
+### Shipping 20f and 20g (prompt 20h, 28 October 2026)
+
+With the owner's go, in this order: `processed/lists/` uploaded (6 files:
+the bargains, players and dictionary tables; a dry run after found nothing
+left), `ScoutChat` redeployed without `--parameters` (the stored key kept),
+the branch fast-forwarded onto `main`, weekly run 16 started by hand on
+`main` (success in 25 minutes, most of it the reports step's batches: 1,132
+written, 376 failing the check on the first try, 3 on the template, 0.23
+USD; published 20:06 UTC).
+
+**The first redeploy broke the chat for four minutes** (19:36 to 19:40
+UTC). The new code reads `data/players.json` as optional, and the live page
+did not have it yet. Without ListBucket on the site bucket, S3 answers a
+missing key with AccessDenied, which botocore raises as its own class named
+`AccessDenied` (a subclass of `ClientError`); `data._optional` compared the
+exact class name with `ClientError` and let it through, so every load
+failed and the warm request got HTTP 503. `_optional` now matches the class
+and its bases (a test with a denying source), and the fix was redeployed at
+once. Lesson for a later optional file: redeploy only after a page with the
+file is live, or test the load against the live bucket first (an unsigned
+S3 client reads the public site bucket as the function would).
+
+**The real cold start**, measured from the session through the Function URL
+with `{"warm": true}` right after the deploy (several at once, so some land
+on new instances; the reply's `seconds` is the load inside the handler,
+SDK import and the reads included):
+
+| Page | New instances | Load inside the function | Round trip | A warm instance |
+|---|---|---|---|---|
+| without `players.json` (19:40) | 3 | 5.0, 5.0, 7.1 s | 5.9, 5.9, 8.1 s | 0.45 s round trip |
+| with `players.json` (20:06) | 2 | 5.4, 7.5 s | 6.4, 8.4 s | 0.8 to 1.0 s round trip |
+
+So a new instance costs 5 to 8 seconds before the first model call, about
+twice the 2.4 s measured in a cgroup on 27 October (prompt 20b): the real
+S3 reads, the larger tables of 20f and Lambda's own share of the CPU. The
+round trip adds about a second to the load, so Lambda's own start (the 27
+MB bundle, the runtime) is small next to the load. The warm ping keeps one
+instance loaded; an instance started for a second visitor at the same time
+pays the load. An instance that already runs reads a republished page only
+at its next hourly check (`RELOAD_SECONDS`), so for up to an hour after a
+publish some answers come from the previous tables.
+
+**Three live questions**, asked once each through the Function URL as a
+visitor (the site's origin, no evaluation token) at 21:08 UTC, once every
+instance had read the page of 20:06; each took one tool call:
+
+| Question | Tool call | Inside the function | Round trip | Cost |
+|---|---|---|---|---|
+| Tell me about Rodri | `player_card` Rodri | 6.7 s | 7.7 s | 0.020 USD |
+| Is Mbappé a bargain? | `player_card` Mbappé | 4.3 s | 4.9 s | 0.007 USD |
+| Who plays most like R9 today? | `similar_players` R9, now | 5.5 s | 6.1 s | 0.010 USD |
+
+Rodri, on no list before 20f, is answered from his players row with the
+code's two reasons (already among the 100 most valuable; under half of his
+team's league minutes) and his blank chances' reasons; the answer
+breaks rule 8 with markdown bold ("**Ability:**"), which the page shows as
+asterisks. Mbappé gets the new verdict sentence word for word, R9 the
+archetype's label and today's nearest centre forwards. The answers in full
+are in CLAUDE.md (Open questions).
 
 ### The page opens on the chat, and the chat knows the legends (prompt 20d)
 
@@ -819,13 +882,25 @@ added it before 28 October; an environment change reaches only sessions
 started after it. Without it, use `--local` (the same code and files, not
 the deployed function).
 
-Results so far (the three runs, the same 50 questions):
+Results so far (the three runs of the same 50 questions, then the whole
+set of 72 of prompt 20h):
 
 | Run | Tables | Computed | Not in the data | Refused | Cost | Tool calls | Median, slowest |
 |---|---|---|---|---|---|---|---|
 | 26 October, in process | 26 October | 28 of 30 | 10 of 10 | 10 of 10 | 0.34 USD | 43 | |
 | 27 October, in process (prompt 20b) | 26 October | 30 of 30 | 10 of 10 | 10 of 10 | 0.28 USD | 35 | 3.3 s, 6.3 s |
 | 28 October, through the Function URL (prompt 20c) | 27 October | 30 of 30 | 10 of 10 | 10 of 10 | 0.26 USD | 33 | 3.4 s, 5.9 s |
+| 28 October, in process, 72 questions (prompt 20h, first run) | 28 October | 30 of 30 | 10 of 10 | 10 of 10 | 0.50 USD | 56 | 3.8 s, 16.0 s |
+| 28 October, in process, 72 questions (prompt 20h, after its two fixes) | 28 October | 30 of 30 | 10 of 10 | 10 of 10 | 0.35 USD | 57 | 3.4 s, 5.6 s |
+
+Both prompt 20h runs also passed suggested 6 of 6, players 12 of 12 and
+bargains 4 of 4 (72 of 72). The first run's cost and slowest answers are
+its cache writes (75,043 tokens written against 11,892 in the second).
+Reading every answer found what the scorer cannot see: "€1000k" for the 52
+bargains valued 999,999.9999999997 (float noise; the chat's `money` and
+the page's now write €1m) and a Mbappé answer opening with the fragment
+`bargain_verdict` was ("on the value ranking at #550 ... so not a
+bargain"; it is now a sentence with his name and "No:").
 
 The times are the turn's own seconds inside the function (the reply's
 `usage.seconds`); through the URL the 50 questions took 94 s with two in

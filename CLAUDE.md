@@ -187,7 +187,7 @@ bucket named by `$SCOUT_S3_BUCKET` (eu-central-1).
 | The page | `data/site/` | `index.html` (both tables embedded, 1.8 MB, 0.3 MB gzip on 24 October) and `data/` (the two tables as CSV and Parquet, `dictionary.csv`, `similar.json`); published to `scout-site-<account>` |
 | Written reports (prompt 19) | `data/processed/reports_text/` | `reports.parquet` (one row a player: fact sheet, its hash, the report or the template, source, status, attempts, the check's violations, the judge's verdict), `runs.jsonl` (each run's counts, tokens and cost), `verdicts.jsonl` (with the sheet each verdict read, since prompt 19c), `failures.jsonl`, `summary.json`, `dictionary.csv`, `pending.json` (batches a run left running, collected by the next, prompt 19c); written by `scout reports`, read by `scout site`, kept in S3 by `scout publish` (best effort; in S3 since run 9, 25 October). Runs 8 to 12 so far, prompt 19.2; 19.3 rewrites all once |
 | Chat state (prompt 20) | S3 `scout-chat-<account>` (private, retained), `state/chat.json` | the caps' counters: a salt, the hour's visitors as salted IP hashes with their message counts, USD today and this month (visitors and the evaluation apart), token totals; written by the chat Lambda with conditional writes; deployed 26 October 2026 |
-| Chat evaluation (prompt 20) | `reports/chat_eval_set.json`, `reports/chat_eval.md`, `reports/chat_eval.json` | the 50 questions with their expected names and numbers and ideal tool calls; each run's answers, scores and causes. Built from the published files (`chat.site_url`). First run 26 October, second (prompt 20b) 27 October, both in process (`--local`); third (prompt 20c) 28 October through the Function URL itself |
+| Chat evaluation (prompt 20) | `reports/chat_eval_set.json`, `reports/chat_eval.md`, `reports/chat_eval.json` | the 50 questions with their expected names and numbers and ideal tool calls; each run's answers, scores and causes. Built from the published files (`chat.site_url`). First run 26 October, second (prompt 20b) 27 October, both in process (`--local`); third (prompt 20c) 28 October through the Function URL itself; fourth and fifth (prompt 20h) 28 October in process, the whole set of 72 |
 | User facing tables | `data/processed/lists/` | `candidates`, `bargains`, `players` (prompt 20f: 18,931 rows on 28 October, every player with a league minute in 2025/26) (Parquet, CSV), `dictionary.csv` (see Outputs) |
 | Quota state, log | `data/state/` | |
 
@@ -390,6 +390,20 @@ October 2026, from MODELS.md and `reports/`:
   tables of 28 October the ideal tool calls hold every expected answer
   (computed 30 of 30, suggested 6 of 6, `--dry-run`); the run with the
   model was not made: the session had no Claude key (Open questions).
+  Prompt 20h (28 October): the whole set of 72 (20d's six, 20f's twelve,
+  20g's four) with the model, in process on the tables of 28 October:
+  computed 30 of 30, suggested 6 of 6, players 12 of 12, bargains 4 of 4,
+  not in the data 10 of 10, refused 10 of 10, for 0.50 USD (56 tool calls,
+  median 3.8 s, slowest 16.0 s: the cache writes of the first questions).
+  The scorer saw no failure; reading the answers found two: "€1000k" for
+  the 52 bargains valued 999,999.9999999997 (float noise), now €1m in the
+  chat's `money` and the page's, and the Mbappé answer opening with the
+  fragment the old `bargain_verdict` was. Run again after both: 72 of 72,
+  0.35 USD (57 tool calls, median 3.4 s, slowest 5.6 s), no number found
+  in no tool result. The real cold start, through the Function URL after
+  the deploy: 5.0 to 7.5 s of load inside the function (6 to 8.4 s round
+  trip, players.json included) against 0.8 to 1.0 s warm, about twice the
+  2.4 s of prompt 20b's cgroup measure (docs/DEPLOY.md).
 * Bargains (19 October, 37 leagues, seasons 2015 to 2023, experienced 30 to
   33): the top 50 gained value far more often than matched peers (prime
   63.2% against 43.3%, experienced 11.0% against 4.5%), but moved to a club
@@ -566,11 +580,13 @@ fair value reads "above fair value, not a bargain" under his price, and
 the Players section calls his place "Value ranking". `search_players` over
 a bargains table returns only bargains unless `include_above_fair` asks
 for the whole ranking (each row says `bargain` yes or no); `player_card`
-gives a ranked player above fair value `bargain_verdict` ("on the value
-ranking at #550 (prime list) but priced above fair value, so not a
-bargain", set in code) and his row as `value_ranking`; rule 11 keeps the
+gives a ranked player above fair value `bargain_verdict` ("No: Kylian
+Mbappé is on the value ranking at #550 (prime list) but priced above fair
+value, so not a bargain.", set in code; a sentence since prompt 20h) and his row as `value_ranking`; rule 11 keeps the
 word for bargain yes. "Mbappé" alone reads as Kylian Mbappé (E. Mbappé
-under `also_on_page`). Caps (`src/scout/chat/guard.py`): 20
+under `also_on_page`). 20f and 20g went out with weekly run 16 (started by
+hand on 28 October with the owner's go, prompt 20h; the live page then
+counted 18,931 players across 36 leagues). Caps (`src/scout/chat/guard.py`): 20
 messages an hour per IP (salted hash), 1 USD a day and 5 USD a month from
 the usage fields, 500 characters, all with a fixed polite reply; the Claude
 Console workspace's spend limit is the hard backstop. Since prompt 20b the
@@ -723,7 +739,7 @@ detail stays in `reports/scouting.md`, `reports/moves.md`,
 * The thin peer group's correction and archetypes for players without data, with a blind calibration: **done 25 October (prompt 18c); the archetypes await the owner's review.**
 * Generated scout reports with a faithfulness check and a weekly judge: **built 25 October (prompt 19); first real run 25 October (94% template, on length); length handling fixed in prompt 19b (run 9: 8 of 2,734 on the template); the judge's verdicts sorted, the check typed, the judge made checkable, the reports made stable and slow batches carried over in prompt 19c (28 October).**
 * January window forecast, published mid December and scored in February.
-* A capped chat over the two tables: **built and deployed 26 October (prompt 20)**; evaluated in process (28 of 30, 10 of 10, 10 of 10); the two fixes, a faster cold start and the 5 minute warm ping deployed 27 October (prompt 20b: 30 of 30, 10 of 10, 10 of 10); run through the Function URL on 28 October (prompt 20c): 30 of 30, 10 of 10, 10 of 10, 0.26 USD; the page opens on the chat with suggested questions and follow ups, and the chat knows the legends by their nicknames (prompt 20d, 28 October; the model run of the six new questions awaits the key); the page made minimal, the chat alone in view and everything else one click away (prompt 20e, 28 October); every player of the season, not only the two lists, in the chat and a Players section (prompt 20f, 28 October; the model run of the 12 new questions awaits the key; upload, deploy and publish await the owner's go); the word bargain kept for a player priced below fair value, on the page, in the chat and in the reports (prompt 20g, decision 12, 28 October; the same wait).
+* A capped chat over the two tables: **built and deployed 26 October (prompt 20)**; evaluated in process (28 of 30, 10 of 10, 10 of 10); the two fixes, a faster cold start and the 5 minute warm ping deployed 27 October (prompt 20b: 30 of 30, 10 of 10, 10 of 10); run through the Function URL on 28 October (prompt 20c): 30 of 30, 10 of 10, 10 of 10, 0.26 USD; the page opens on the chat with suggested questions and follow ups, and the chat knows the legends by their nicknames (prompt 20d, 28 October); the page made minimal, the chat alone in view and everything else one click away (prompt 20e, 28 October); every player of the season, not only the two lists, in the chat and a Players section (prompt 20f, 28 October); the word bargain kept for a player priced below fair value, on the page, in the chat and in the reports (prompt 20g, decision 12, 28 October); both evaluated with the model (72 of 72, 0.35 USD), deployed and published on 28 October (prompt 20h).
 * A matchup report before any match model.
 
 ## AWS
@@ -775,7 +791,10 @@ Prompt 20b added the EventBridge rule `scout-chat-warm` (every 5 minutes,
 `scout-cfn-exec` (the CloudShell block in docs/DEPLOY.md). Redeployed three
 times on 27 October 2026 (prompt 20b), always without `--parameters`, so the
 stored key was kept; the rule was read back through the CDK lookup role
-(the session user may not describe rules or stacks itself).
+(the session user may not describe rules or stacks itself). Redeployed
+twice on 28 October (prompt 20h), without `--parameters`: 20f and 20g,
+whose first load failed while the live page had no `players.json` (S3's
+AccessDenied, four minutes of HTTP 503), then the fix (docs/DEPLOY.md).
 `ScoutSite`
 (deployed 21 October): the bucket `scout-site-098499087060` with static
 website hosting and public read of objects (not listing), retained on
@@ -851,7 +870,7 @@ Owner decisions of 2026-10-16. Each one line; details in the code and docs once 
 9. Serving stack (revised narrowly by decision 11: one Lambda for the chat only): no Lambda, API Gateway, DynamoDB or Bedrock agent; a weekly GitHub Actions run publishes Parquet, CSV and one static HTML page to S3 static hosting. **Built 21 October (prompt 15):** see AWS above and docs/DEPLOY.md; the page is live and the stored models are in S3 (23 October); the weekly run waits for the owner's setup (IAM user, secrets and variables).
 10. Embeddings and similar players (prompt 18, 24 October 2026). Style vectors: the version 2 per 90 inputs and the on pitch shares of the team's shots, dribbles, passes and duels, shrunk by minutes (empirical Bayes per measure and position group, one season), standardised within position group and season, with the level taken out (both ability percentiles regressed out of each measure's mean and spread within position group and season); cosine on them is the baseline. Learned: one hidden layer of 128 to 48 dimensions, InfoNCE with the same player in consecutive seasons as the positive pair and the other players of the same position group and season as negatives, settings chosen on 2021 to 2022, tested on 2023 to 2025 after training to 2022, refit on 2015 to 2025 for `stored/embedding.json`. **Outcome: adopted** (identity retrieval 19.9% against 13.2%, every position group). The replacement check is weak support only (1.52% against 0.65% at random). No vector database: a numpy search over all vectors takes 0.5 ms. MODELS.md, `reports/embeddings.md`.
 11. The chat (prompt 20, 26 October 2026, the owner's prompt). A prototype Ask tab: one AWS Lambda in Python with a Function URL (no API Gateway) in its own stack `ScoutChat`, reading the published files from the site bucket and keeping them in memory; the Claude key as an environment variable set at deploy time from the deploying environment (a NoEcho parameter), never written to a file; reserved concurrency 2, held back on 26 October because the account's Lambda limit is 10 (that limit is the cap until the quota increase is granted; a TODO in `chat_stack.py` restores it). Claude Sonnet 5.5, effort medium, prompt caching on the system prompt and the tool definitions, four strict tools (search_players, player_card, similar_players, how_to_read), at most six tool calls a turn, no streaming. Every number from a tool result; the data's dates in the system prompt; a plain "not in the data" answer when the tables cannot answer. Caps: 20 messages an hour per IP, 1 USD a day and 5 USD a month from the usage fields in a small S3 object, 500 characters, a fixed polite refusal on any cap; the system prompt is never revealed; the Console spend limit is the hard backstop. The page stays static; decision 9 is revised for this Lambda only. An evaluation of 50 questions decides whether the prototype works (`scout chat-eval`). **Built and deployed 26 October; evaluated in process: computed 28 of 30, not in the data 10 of 10, refused 10 of 10, 0.34 USD (Open questions).** **Prompt 20b (27 October, the owner's yes to redeploy):** the filters declared in the order the model writes them, rule 3's sentence out of the leak guard, tool markup never shown, 1,024 MB, the reads during the SDK import, a warm request from the page, and the 5 minute EventBridge warm ping (deployed once the owner added the rights to `scout-cfn-exec`); in process again: 30 of 30, 10 of 10, 10 of 10, 0.28 USD. **Through the Function URL (prompt 20c, 28 October):** 30 of 30, 10 of 10, 10 of 10, 0.26 USD; the per visitor cap and the leak guard behaved (Models). **Prompt 20d (28 October, the owner's yes to redeploy):** the page opens on the Ask tab with a welcome, suggested questions and follow ups; nicknames, the legends' archetypes and the greats' labels in the chat; six questions added to the evaluation.
-12. A bargain is priced below fair value (prompt 20g, 28 October 2026, the owner's decision). The bargains ranking stays as it is (the reports, the registered forecasts and their scoring read it): every eligible regular of 33 or under, ranked by value against fair value, also those priced above it (72.7% of the prime list, 52.4% of the experienced; Mbappé #550, Haaland #735). The word bargain is reserved for a player whose market value is below his fair value: `below_fair_value` (value_to_fair under 1) in the bargains table, its contract and dictionary; the page opens the Bargains section on them with the count and "show all"; the chat searches them by default (`include_above_fair` for the whole ranking) and says by code that a ranked player above fair value is "on the value ranking at #N but priced above fair value, so not a bargain"; the report writer's sheet calls his line "Value ranking" and the check fails any report calling a player at or above fair value a bargain. Nothing recomputed; the registered forecasts untouched. **Built 28 October:** 341 prime and 167 experienced bargains; the next weekly run rewrites the 1,094 reports of ranked players above fair value (352 of them said bargain; about 0.16 USD); the evaluation gains four questions (72; the ideal calls hold all 72), the model run awaits the key.
+12. A bargain is priced below fair value (prompt 20g, 28 October 2026, the owner's decision). The bargains ranking stays as it is (the reports, the registered forecasts and their scoring read it): every eligible regular of 33 or under, ranked by value against fair value, also those priced above it (72.7% of the prime list, 52.4% of the experienced; Mbappé #550, Haaland #735). The word bargain is reserved for a player whose market value is below his fair value: `below_fair_value` (value_to_fair under 1) in the bargains table, its contract and dictionary; the page opens the Bargains section on them with the count and "show all"; the chat searches them by default (`include_above_fair` for the whole ranking) and says by code that a ranked player above fair value is "on the value ranking at #N but priced above fair value, so not a bargain"; the report writer's sheet calls his line "Value ranking" and the check fails any report calling a player at or above fair value a bargain. Nothing recomputed; the registered forecasts untouched. **Built 28 October:** 341 prime and 167 experienced bargains; the next weekly run rewrites the 1,094 reports of ranked players above fair value (352 of them said bargain; about 0.16 USD); the evaluation gains four questions (72; the ideal calls hold all 72). **Out on 28 October (prompt 20h):** 72 of 72 with the model; weekly run 16 rewrote 1,132 reports for 0.23 USD.
 
 ## Open questions
 
@@ -867,42 +886,62 @@ Settle them with the owner rather than guessing.
   stored key kept): the two fixes (C06, C11), 1,024 MB and the warm request;
   then tool markup never shown; then the warm ping. Weekly run 12, started
   by hand, publishes the page's part. Still open:
-  * **Prompt 20g (28 October, decision 12): built, tested, not yet out.**
-    Built on top of 20f, which was not yet on `main` (its branch
-    `claude/compassionate-euler-vr87es` was merged in). Committed and
-    pushed; nothing uploaded, deployed or published: each waits for the
-    owner's go, and the go covers 20f's part too (`sync up --only
-    processed` for `processed/lists/`, `ScoutChat` redeployed without
-    `--parameters`, then `scout publish` or a weekly run). The owner said
-    `SCOUT_CHAT_CLAUDE_KEY` was in the environment; the container had no
-    such variable (variables reach a session when its container starts), so
-    only `--dry-run` ran: 72 of 72 ideal calls hold their answers. The run
-    with the model (72 questions, about 0.45 USD) is still to do. The next
-    weekly run rewrites 1,094 reports (Models, MODELS.md).
-  * **Prompt 20f (28 October): the players table, built, tested, not yet
-    out.** Committed and pushed; nothing uploaded, deployed or published:
-    each waits for the owner's go (`sync up --only processed` for
-    `processed/lists/`, `ScoutChat` redeployed without `--parameters`, then
-    `scout publish` or weekly run). The evaluation with the model (68
-    questions, about 0.40 USD) needs `SCOUT_CHAT_CLAUDE_KEY` again; the
-    session had none, so only `--dry-run` ran (68 of 68 ideal calls hold
-    their answers). The owner's brief described the lists as "23 and under,
-    past the riser floor" and "value below fair value"; the code differs
-    (MODELS.md), and the reason sentences follow the code, so whether the
-    bargains list should drop the players priced above fair value (72.7% of
-    the prime list, 68 of the 100 most valuable players) is the owner's
-    call. Similar players keep the 450 minute threshold: the identity test
-    drops at 270 (learned 19.9% to 17.5%).
-  * **Prompt 20d's evaluation with the model is not run.** The session
-    (28 October) had no `SCOUT_CHAT_CLAUDE_KEY`, so only `--dry-run` ran:
-    the 56 ideal tool calls hold every expected answer (30 of 30, 6 of
-    6). With the key added back: `scout chat-eval --local` (about 0.30
-    USD); the existing 50 must still pass and the six new ones are the
-    test of the nicknames and the labels. `ScoutChat` was redeployed the
-    same day without `--parameters` (the stored key kept); a warm request
-    loaded the tables of 28 October, and weekly run 14 (started by hand,
-    success) published the page that opens on the Ask tab. The "ten seasons" of the requested
-    welcome is written from the data: 11 seasons, 2015/16 to 2025/26.
+  * **Prompt 20h (28 October): 20f and 20g are out.** With the owner's go:
+    the 72 questions with the model in process (72 of 72 twice; 0.50 then
+    0.35 USD), `processed/lists/` uploaded, `ScoutChat` redeployed twice
+    without `--parameters`, the branch fast-forwarded onto `main`, weekly
+    run 16 started by hand (success; published 20:06 UTC). Left open: (1)
+    the chat was down four minutes (19:36 to 19:40 UTC) after the first
+    redeploy, fixed in `data._optional` (docs/DEPLOY.md); (2) the report
+    writer's own `money` (`src/scout/reports_text.py`) still writes €1000k
+    for the 52 bargains valued 999,999.9999999997, and the reports published
+    by run 16 say "€1000k" 52 times; changing it changes their fact sheets and rewrites them, so it was
+    left for the owner (the float noise itself comes from the bargains
+    table's values); (3) an instance already running reads a republished
+    page only at its hourly check, so for up to an hour after a publish
+    some answers use the previous tables; (4) similar players keep the 450
+    minute threshold (prompt 20f: the identity test drops at 270, 19.9% to
+    17.5%); (5) the welcome's requested "ten seasons" is written from the
+    data as 11 seasons, 2015/16 to 2025/26 (prompt 20d); (6) the live
+    Rodri answer below uses markdown bold against rule 8, and the page
+    shows the asterisks: a prompt or code fix (strip `**` before the
+    reply) needs a redeploy.
+    The three live answers, asked once each through the Function URL as a
+    visitor at 21:08 UTC (0.037 USD in all, one tool call each, 4.3 to 6.7
+    s inside the function):
+    * "Tell me about Rodri": "Rodri is a 30-year-old Spanish defensive
+      midfielder at Manchester City in the Premier League. He is in the
+      data, but he is on neither list. - **Ability:** 99th percentile. -
+      **Minutes:** 1,513 league minutes, which is 44% of City's. That is
+      under the 47% line, so he carries the low-minutes flag. -
+      **Injuries:** he also carries the injured flag, with 16 matches
+      missed. - **Value:** €50m, ranked #98, against a fair value of €30m.
+      That is 168% of fair value. His value is down 55% on a year before.
+      - **Chances:** the elite chance and big move chance are not
+      computed. The elite chance is blank because he is older than 23 and
+      already among the 100 most valuable. The big move chance is blank
+      because he is already among the 100 most valuable. Why he is on no
+      list: - Not a candidate: already among the 100 most valuable. - Not a
+      bargain: under half of his team's league minutes. There is no written
+      scout report for him."
+    * "Is Mbappé a bargain?": "No: Kylian Mbappé is on the value ranking at
+      #550 (prime list) but priced above fair value, so not a bargain.
+      Real Madrid's centre-forward is 27. The market values him at €180m,
+      and the model puts his fair value at €132m. That makes his price
+      136% of fair value. His ability sits in the 100th percentile of
+      regular centre-forwards. He carries an injury flag for 8 matches
+      missed."
+    * "Who plays most like R9 today?": "The tables do not hold Ronaldo
+      Nazário (R9) as a player. He is an archetype from the record, not
+      measured, drafted from his Barcelona 1996/97 and Inter 1997/98 style.
+      It is illustrative only. The centre-forwards today who play closest
+      to that sketch: 1. A. Tetteh, Panathinaikos, similarity 0.79 2. M.
+      Daku, Spartak Moscow, 0.78 3. Igor Neves, Ruh Lviv, 0.73 4. L.
+      Zeefuik, Fortuna Sittard, 0.70 5. D. Romero, Parma, 0.70 Vitor Roque
+      of Palmeiras also appears, at 0.69. For him, 30% of 142 past players
+      in the same band became elite, which is a historical rate and not a
+      prediction. "Similar" means a similar playing style, not the same
+      quality. Treat this as a shortlist."
   * **The run against the URL: done 28 October** (prompt 20c, Models),
     once the owner allowed `*.lambda-url.eu-central-1.on.aws`: 30 of 30,
     10 of 10, 10 of 10, 0.26 USD. One finding is the owner's call: the per
@@ -917,9 +956,9 @@ Settle them with the owner rather than guessing.
     it works. Whether it keeps cold starts away in general is not measured
     from a session: the function's logs (`{"outcome": "warm", "cold": ...}`, the
     `REPORT` lines' `Init Duration`) are the owner's to read.
-  * The URL run is done (28 October): delete `SCOUT_CHAT_CLAUDE_KEY` from
-    the environment's variables now (the deployed function keeps its own
-    copy; a later `scout chat-eval` needs it added back for the run).
+  * Prompt 20h's runs are done (28 October): delete `SCOUT_CHAT_CLAUDE_KEY`
+    from the environment's variables now (the deployed function keeps its
+    own copy; a later `scout chat-eval` needs it added back for the run).
   * Reserved concurrency: the account's Lambda limit is 10, so the stack
     reserves none and that limit is the chat's cap until the quota increase
     is granted; then restore 2 (the one line TODO in

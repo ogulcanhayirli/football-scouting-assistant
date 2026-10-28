@@ -1926,6 +1926,42 @@ market value is below his fair value. Nothing is recomputed.
   bargains 4 of 4). The run with the model was not made: the session had
   no `SCOUT_CHAT_CLAUDE_KEY` (CLAUDE.md, Open questions).
 
+## The chat's 72 questions with the model (prompt 20h, 28 October 2026)
+
+The whole evaluation, run in process (`chat-eval --local`) on the tables of
+28 October rebuilt in the session from S3 (the lists match the S3 copy byte
+for byte apart from the new `below_fair_value` column):
+
+| Run | Computed | Suggested | Players | Bargains | Not in the data | Refused | Cost | Tool calls | Median, slowest |
+|---|---|---|---|---|---|---|---|---|---|
+| First | 30 of 30 | 6 of 6 | 12 of 12 | 4 of 4 | 10 of 10 | 10 of 10 | 0.50 USD | 56 | 3.8 s, 16.0 s |
+| After the two fixes | 30 of 30 | 6 of 6 | 12 of 12 | 4 of 4 | 10 of 10 | 10 of 10 | 0.35 USD | 57 | 3.4 s, 5.6 s |
+
+Every outcome was `answered`. The first run's cost and slow answers are the
+cache writes of its first questions (75,043 tokens written against 11,892).
+Its two answers with a number in no tool result were counts the model
+worked out ("89" of 90 rows not pulled, "0%" for the minimum it passed); the
+second run had none. The scorer found no failure, but reading every answer
+found two faults it cannot score, both fixed in code and not in the scorer:
+
+* "€1000k" (N04, the Eredivisie bargains): 52 bargains carry a value of
+  999,999.9999999997 (float noise in the table), which `tools.money` and
+  the page's `money` wrote in thousands. The unit now follows the rounded
+  number (€1m; 999.6 is €1k). The report writer's own formatter is
+  unchanged, and the reports published by weekly run 16 say "€1000k" 52
+  times (CLAUDE.md, Open questions).
+* The Mbappé answer (G01) opened with `bargain_verdict` as written, a
+  fragment without a subject ("On the value ranking at #550 (prime list)
+  but priced above fair value, so not a bargain."). The sentence now names
+  him and answers the question: "No: Kylian Mbappé is on the value ranking
+  at #550 (prime list) but priced above fair value, so not a bargain."
+
+The answers about stars on no list (João Neves, D. Doué, J. Musiala read
+from "J. Musiiala", O. Dembélé's elite chance "not computed") quote the
+code's reasons as written, and the three that must stay "not in the data"
+(Michael Ballack, the Chinese Super League, Isak's injury today) open with
+the fixed sentence; the last one adds what the season record holds.
+
 ## Next
 
 1. The clean check above: tune on earlier seasons, score on later ones.
