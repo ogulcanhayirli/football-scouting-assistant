@@ -525,6 +525,39 @@ def test_s3_source_reads_bodies_and_the_page_etag(tmp_path):
     assert src.version() == '"abc"'
 
 
+def test_a_missing_optional_file_is_none_also_when_s3_denies_it(tmp_path):
+    # Without ListBucket S3 answers a missing key with AccessDenied, raised by
+    # botocore as a subclass of ClientError named after the code.
+    class ClientError(Exception):
+        pass
+
+    class AccessDenied(ClientError):  # noqa: N818
+        pass
+
+    class Denying(data.Source):
+        def read(self, key):
+            raise AccessDenied(key)
+
+    class Broken(data.Source):
+        def read(self, key):
+            raise ValueError(key)
+
+    assert data._optional(Denying(), "data/players.json") is None
+    with pytest.raises(ValueError, match="players"):
+        data._optional(Broken(), "data/players.json")
+    # The page as published before prompt 20f, with players.json denied.
+    write_site(tmp_path)
+    (tmp_path / "data" / "players.json").unlink(missing_ok=True)
+
+    class Folder(data.FolderSource):
+        def read(self, key):
+            if key == "data/players.json":
+                raise AccessDenied(key)
+            return super().read(key)
+
+    assert data.load(Folder(tmp_path)).players == []
+
+
 # Formatting, as the page writes it
 
 

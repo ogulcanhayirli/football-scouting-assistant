@@ -251,7 +251,13 @@ def _optional(source: Source, key: str) -> bytes | None:
     try:
         return source.read(key)
     except Exception as exc:  # S3's NoSuchKey or a missing local file
-        if type(exc).__name__ in ("NoSuchKey", "FileNotFoundError", "KeyError", "ClientError"):
+        # Without ListBucket S3 answers a missing key with AccessDenied, which
+        # botocore raises as its own subclass of ClientError: match the class
+        # and its bases by name, as the Lambda bundles botocore but this
+        # module does not import it (prompt 20h: the first deploy of 20f
+        # failed every load before the page had players.json).
+        names = {c.__name__ for c in type(exc).__mro__}
+        if names & {"NoSuchKey", "FileNotFoundError", "KeyError", "ClientError"}:
             return None
         raise
 
