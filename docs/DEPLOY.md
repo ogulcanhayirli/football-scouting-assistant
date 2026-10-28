@@ -424,6 +424,18 @@ The evaluation (`scout chat-eval`, below) sends a token derived from the key
 visitor limit and count against their own cap of 5 USD a day, so a run never
 uses the visitors' budget.
 
+Checked through the Function URL on 28 October 2026 (prompt 20c): over one
+kept alive connection, exactly 20 messages were answered and the 21st to
+25th got the fixed "20 questions an hour" reply; a message carrying the
+evaluation token was answered from that capped address; a 501 character
+message got the length reply without calling the model. The cap keys on
+the source IP the Function URL reports, so a client whose address changes
+per connection is not held to 20 (the cloud session's proxy leaves from a
+pool: four calls, four IPs, and 22 messages on fresh connections were all
+answered); such a visitor is bound only by the day and month caps, and
+visitors behind one shared address share 20. That test spent about 0.07
+USD of the visitors' day (about 0.001 USD a refused off topic question).
+
 ### Cold start and the warm ping (prompt 20b)
 
 The owner's first question through the page took 30 to 40 seconds and the
@@ -658,19 +670,38 @@ the fixed "not in the data" sentence and the fixed refusal, and puts each
 failure down to the model's answer, the model's tool use, or the tools (by
 running the ideal tool call itself). Results: `reports/chat_eval.md` and
 `reports/chat_eval.json`. A run costs about 0.30 USD (in process: 0.34 USD
-on 26 October, 0.28 USD on 27 October after prompt 20b), plus the Lambda's
-few seconds a question when run against the URL. Numbers an answer takes
+on 26 October, 0.28 USD on 27 October after prompt 20b; through the URL:
+0.26 USD on 28 October), plus the Lambda's few seconds a question when run
+against the URL. Numbers an answer takes
 from the system prompt (the dates, the season, the counts it states) are not
 counted as unsupported (prompt 20b); the report gives the median and the
 slowest answer.
 
 From a Claude Code cloud session the run against the URL needs the Function
 URL's host in the environment's Allowed domains (Network access): the
-default policy refuses `*.lambda-url.eu-central-1.on.aws` (still on 27
-October: the proxy answered 403), and `scout-session-sync` may not invoke
-the function directly. Without it, use `--local` (the same code and files,
-not the deployed function) and run the URL check from elsewhere. An
-environment change reaches only sessions started after it.
+default policy refuses `*.lambda-url.eu-central-1.on.aws`, and
+`scout-session-sync` may not invoke the function directly. The owner
+added it before 28 October; an environment change reaches only sessions
+started after it. Without it, use `--local` (the same code and files, not
+the deployed function).
+
+Results so far (the three runs, the same 50 questions):
+
+| Run | Tables | Computed | Not in the data | Refused | Cost | Tool calls | Median, slowest |
+|---|---|---|---|---|---|---|---|
+| 26 October, in process | 26 October | 28 of 30 | 10 of 10 | 10 of 10 | 0.34 USD | 43 | |
+| 27 October, in process (prompt 20b) | 26 October | 30 of 30 | 10 of 10 | 10 of 10 | 0.28 USD | 35 | 3.3 s, 6.3 s |
+| 28 October, through the Function URL (prompt 20c) | 27 October | 30 of 30 | 10 of 10 | 10 of 10 | 0.26 USD | 33 | 3.4 s, 5.9 s |
+
+The times are the turn's own seconds inside the function (the reply's
+`usage.seconds`); through the URL the 50 questions took 94 s with two in
+flight, about 3.8 s a question round trip, and a one call refusal about 2
+s. All 50 outcomes of the URL run were `answered`: the deployed function
+refused the ten attacks with the fixed sentence by itself, no answer held
+ten words of the rules, so the leak guard neither fired nor blocked a
+right answer, and no answer held a number found in no tool result (one,
+"2026/27", in the prompt 20b run). The evaluation's own cap (5 USD a
+day) was never near.
 
 ## Retraining (manual, never in the weekly run)
 

@@ -1607,6 +1607,27 @@ words. One answer still holds a number in no tool result: "2026/27", the
 season in progress, which the tool gives only as "as of 24 October 2026".
 The cold start measurements and the warm ping are in docs/DEPLOY.md.
 
+**Prompt 20c (28 October 2026): through the Function URL.** Once the
+environment allowed the host, the same 50 questions went to the deployed
+function (`scout chat-eval`, the evaluation token), which read the tables
+of 27 October published by weekly run 12:
+
+| Group | First run | Prompt 20b | Through the URL |
+|---|---|---|---|
+| Computed | 28 of 30 | 30 of 30 | 30 of 30 |
+| Not in the data | 10 of 10 | 10 of 10 | 10 of 10 |
+| Refused | 10 of 10 | 10 of 10 | 10 of 10 |
+
+Cost 0.26 USD (33 tool calls, never more than one a question; 266
+uncached input tokens, 39,117 written to the cache, 352,516 read from it,
+9,354 output), median 3.4 s and slowest 5.9 s a question inside the
+function (computed 3.8 s, not in the data 1.5 s, refused 1.2 s), 94 s for
+all 50 with two in flight. Every outcome was `answered`; no answer holds a
+number found in no tool result or ten words of the rules, so the leak
+guard never fired. The deployed function behaves as the in process runs
+said. The per visitor cap stopped the 21st message over one connection;
+it keys on the address, which the session's proxy rotates (docs/DEPLOY.md).
+
 ## Next
 
 1. The clean check above: tune on earlier seasons, score on later ones.
