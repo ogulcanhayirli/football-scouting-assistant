@@ -86,6 +86,7 @@ chances shown as the rates that past forecasts actually achieved.
                          index.html with both tables embedded, data/*.csv, data/*.parquet,
                          data/similar.json (the similar players panel, the measured
                          greats and the archetypes, loaded on demand),
+                         data/players.json (every player of the season, prompt 20f),
                          statsbomb-logo.png (with the greats)
                                    │ read at cold start
                                    ▼
@@ -294,7 +295,13 @@ exception.
   no data for from their archetype, always saying "archetype from the
   record, not measured", and about the measured greats with "measured,
   cross era comparison is rough". Six questions on this were added to the
-  evaluation; their run with the model is still to come.
+  evaluation; their run with the model is still to come. Since prompt 20f
+  the chat and the page know every player with league minutes this
+  season, not only the two lists: a third table, players (18,931 on 28
+  October 2026), gives each one his club, minutes, ability, value and fair
+  value, and for a list he is not on a sentence that says why ("not a
+  candidate: already among the 100 most valuable"). The page has a Players
+  section with a name search, and the download is players.csv.
 * **The page is plain HTTP.** S3 website hosting has no HTTPS, and
   CloudFront is left out on purpose; the page holds public tables only.
 

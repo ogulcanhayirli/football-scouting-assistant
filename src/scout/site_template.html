@@ -332,7 +332,8 @@ footer p { margin: 0 0 8px; }
     <a href="#bargains" data-tab="bargains">Bargains</a>,
     <a href="#similar" data-tab="similar">Similar players</a>,
     <a href="#greats" data-tab="greats">Greats</a>,
-    <a href="#archetypes" data-tab="archetypes">Archetypes</a>
+    <a href="#archetypes" data-tab="archetypes">Archetypes</a>,
+    <a href="#players" data-tab="players">Players</a>
   </nav>
 </div>
 
@@ -458,6 +459,25 @@ footer p { margin: 0 0 8px; }
     <div id="ar-out"></div>
     <div id="ar-card"></div>
     <p class="note" id="ar-note"></p>
+  </section>
+
+  <section id="players" hidden>
+    <div class="section-head">
+      <h2>All players <span class="n" id="players-n"></span></h2>
+      <p id="pl-meta"></p>
+    </div>
+    <div class="controls">
+      <label class="search">Search a player by name
+        <input type="search" id="pl-q" placeholder="for example Rodri, Haaland" autocomplete="off">
+      </label>
+    </div>
+    <p class="status" id="pl-status" aria-live="polite"></p>
+    <div class="scroll">
+    <table id="pl-table">
+      <thead><tr><th>Player</th><th>Age</th><th>Club</th><th>League</th><th>Position</th><th>Minutes</th><th>Ability</th><th>Value</th><th>Lists</th></tr></thead>
+    </table>
+    </div>
+    <p class="note" id="pl-note"></p>
   </section>
 
 </div>
@@ -590,8 +610,9 @@ footer p { margin: 0 0 8px; }
     similar: location.hash === "#similar",
     greats: location.hash === "#greats",
     archetypes: location.hash === "#archetypes",
+    players: location.hash === "#players",
     // No data section open: the chat alone (prompt 20e); a data link opens one under it.
-    ask: ["#candidates", "#bargains", "#similar", "#greats", "#archetypes"].indexOf(location.hash) < 0,
+    ask: ["#candidates", "#bargains", "#similar", "#greats", "#archetypes", "#players"].indexOf(location.hash) < 0,
     list: "prime",
     shown: PAGE,
     sort: { candidates: { key: "order", dir: 1 }, bargains: { key: "rank", dir: 1 } }
@@ -725,16 +746,17 @@ footer p { margin: 0 0 8px; }
   function refresh() { state.shown = PAGE; draw(); }
 
   function tabs() {
-    var on = state.ask ? null : state.archetypes ? "archetypes" : state.greats ? "greats" : state.similar ? "similar" : state.tab;
+    var on = state.ask ? null : state.players ? "players" : state.archetypes ? "archetypes" : state.greats ? "greats" : state.similar ? "similar" : state.tab;
     document.querySelectorAll("#explore a").forEach(function (a) {
       if (a.dataset.tab === on) a.setAttribute("aria-current", "true");
       else a.removeAttribute("aria-current");
     });
     $("data-area").hidden = state.ask;
-    $("tables").hidden = state.similar || state.greats || state.archetypes || state.ask;
+    $("tables").hidden = state.similar || state.greats || state.archetypes || state.players || state.ask;
     $("similar").hidden = !state.similar;
     $("greats").hidden = !state.greats;
     $("archetypes").hidden = !state.archetypes;
+    $("players").hidden = !state.players;
   }
   // A data link opens its section under the chat and brings the links to the top.
   function showSection() {
@@ -957,6 +979,7 @@ footer p { margin: 0 0 8px; }
     state.similar = true;
     state.greats = false;
     state.archetypes = false;
+    state.players = false;
     state.ask = false;
     history.replaceState(null, "", "#similar");
     tabs();
@@ -1056,6 +1079,7 @@ footer p { margin: 0 0 8px; }
     state.greats = true;
     state.similar = false;
     state.archetypes = false;
+    state.players = false;
     state.ask = false;
     history.replaceState(null, "", "#greats");
     tabs();
@@ -1126,11 +1150,95 @@ footer p { margin: 0 0 8px; }
     state.archetypes = true;
     state.greats = false;
     state.similar = false;
+    state.players = false;
     state.ask = false;
     history.replaceState(null, "", "#archetypes");
     tabs();
     $("ar-status").textContent = SIM ? "" : "Loading the archetypes.";
     loadSimilar().then(setupArchetypes, function () { $("ar-status").textContent = ""; $("ar-out").innerHTML = simFailed(); });
+  }
+
+  // Players (prompt 20f): every player of the season, data/players.json, loaded
+  // when the section opens; a name search shows at most 50 matches.
+
+  var PL = null, plWait = null, PL_SHOWN = 50;
+  var BARGAIN = {};
+  DATA.bargains.forEach(function (o) { BARGAIN[o.player_id] = o; });
+
+  function loadPlayers() {
+    if (plWait) return plWait;
+    plWait = fetch("data/players.json").then(function (r) {
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      return r.json();
+    }).then(function (d) {
+      var coded = {};
+      d.coded.forEach(function (c) { coded[c] = true; });
+      PL = d.rows.map(function (r, i) {
+        var o = { _i: i };
+        d.columns.forEach(function (c, j) { o[c] = coded[c] && r[j] != null ? d.texts[r[j]] : r[j]; });
+        o._q = fold(o.player);
+        return o;
+      });
+      $("players-n").textContent = PL.length.toLocaleString("en") + " players";
+      return PL;
+    });
+    plWait.catch(function () { plWait = null; });
+    return plWait;
+  }
+  function openPlayers() {
+    state.players = true;
+    state.similar = false;
+    state.greats = false;
+    state.archetypes = false;
+    state.ask = false;
+    history.replaceState(null, "", "#players");
+    tabs();
+    $("pl-note").textContent = "Every player with league minutes in " + D.season_label + " in the leagues tracked, on a list or not, the most valuable first. " +
+      "Ability is his percentile among the regulars of his position (450 league minutes or more; blank under that). Lists says whether he is a candidate or a bargain; for a player on neither, the line under him gives the reason, as the chat does. " +
+      "The full table, with fair value, flags and the chances where they are computed, is in the downloads at the foot of the page.";
+    if (!PL) $("pl-status").textContent = "Loading every player.";
+    loadPlayers().then(playersDraw, function () {
+      $("pl-status").textContent = "The players file (data/players.json) did not load. It loads next to this page, so open the page from the website rather than as a local file.";
+    });
+  }
+  function listsCell(o) {
+    var on = [];
+    if (o.in_candidates) on.push("Candidates");
+    if (o.in_bargains) {
+      var b = BARGAIN[o.player_id];
+      on.push("Bargains" + (b ? ", " + b.list + " #" + int(b.list_rank) : ""));
+    }
+    return on.length ? esc(on.join("; ")) : '<span class="blank">none</span>';
+  }
+  function playersDraw() {
+    if (!PL) return;
+    var words = fold($("pl-q").value.trim()).split(/[\s.\-']+/).filter(Boolean);
+    var table = $("pl-table");
+    table.querySelectorAll("tbody").forEach(function (b) { b.remove(); });
+    if (!words.length) { $("pl-status").textContent = "Type a name to search " + PL.length.toLocaleString("en") + " players."; return; }
+    var found = PL.filter(function (o) {
+      return words.every(function (w) { return o._q.indexOf(w) >= 0; });
+    });
+    var html = found.slice(0, PL_SHOWN).map(function (o) {
+      var why = [o.why_not_candidate, o.why_not_bargain].filter(Boolean).join(". ");
+      return '<tbody class="row"><tr class="main">' +
+        '<td class="player">' + esc(o.player) + "</td>" +
+        '<td data-label="Age">' + (o.age == null ? "" : Math.floor(o.age)) + "</td>" +
+        '<td data-label="Club">' + esc(o.club || "") + "</td>" +
+        '<td data-label="League">' + esc(o.league || "") + "</td>" +
+        '<td data-label="Position">' + esc(o.position || "") + "</td>" +
+        '<td data-label="Minutes">' + int(o.minutes) + "</td>" +
+        '<td data-label="Ability">' + (o.ability_pct == null ? '<span class="blank">under 450 minutes</span>' : int(o.ability_pct)) + "</td>" +
+        '<td data-label="Value">' + money(o.value_eur) + "</td>" +
+        '<td data-label="Lists">' + listsCell(o) + "</td></tr>" +
+        (o.in_candidates || o.in_bargains ? "" : '<tr class="why"><td colspan="9">' + esc(why ? why + "." : "") + "</td></tr>") +
+        "</tbody>";
+    }).join("");
+    if (!found.length) html = '<tbody><tr><td class="empty" colspan="9">No player of that name.</td></tr></tbody>';
+    table.insertAdjacentHTML("beforeend", html);
+    $("pl-status").textContent = found.length > PL_SHOWN
+      ? "Showing the " + PL_SHOWN + " most valuable of " + found.length.toLocaleString("en") + " matching players; type more of the name to narrow it."
+      : found.length ? "Showing " + found.length.toLocaleString("en") + " matching player" + (found.length > 1 ? "s" : "") + "." : "";
   }
 
   function dictionary() {
@@ -1170,7 +1278,7 @@ footer p { margin: 0 0 8px; }
       (D.so_far_date ? ", clubs and this season to " + day(D.so_far_date) : "") +
       (on ? " · " + D.chat.max_chars + " characters, " + D.chat.per_hour + " questions an hour" : "");
     $("ask-how").textContent = on
-      ? "The chat is a prototype: " + D.chat.model + " answers with four lookup tools over the candidates, bargains, similar players and the written reports, and every number it gives comes from what it looked up, shown under each answer (From the tables)."
+      ? "The chat is a prototype: " + D.chat.model + " answers with four lookup tools over the candidates, bargains, every player of the season, similar players and the written reports, and every number it gives comes from what it looked up, shown under each answer (From the tables)."
       : "";
     welcome();
     chips($("ask-suggest"), on ? D.chat.suggested || [] : []);
@@ -1184,7 +1292,9 @@ footer p { margin: 0 0 8px; }
     var dates = Object.keys(D.feature_dates).sort(), S = D.seasons;
     var span = S ? " and " + words(S.count) + " seasons, " + S.first + "/" + String(S.first + 1).slice(-2) + " to " + D.season_label : "";
     $("ask-knows").innerHTML = "<b>What it knows.</b> The " + D.tracked + " leagues tracked" + span +
-      ": the candidates and their calibrated chances, the bargains, who plays like whom (today's players, measured greats such as Messi and Xavi, and legends such as Ronaldo Nazário and Zidane described from the record) and a written report on each player. Every number it gives comes from the tables shown on this page, and each answer shows what it looked up.";
+      ": the candidates and their calibrated chances, the bargains, who plays like whom (today's players, measured greats such as Messi and Xavi, and legends such as Ronaldo Nazário and Zidane described from the record) and a written report on each player. " +
+      "The two lists hold " + int(D.listed) + " players; every other player with league minutes this season (" + int(D.players) + " in all) has his row too, with his minutes, ability, value and fair value, and the reason he is on neither list. " +
+      "Every number it gives comes from the tables shown on this page, and each answer shows what it looked up.";
     $("ask-not").innerHTML = "<b>What it does not know.</b> No injury news, no fixtures or results, no wages, fees or rumours, and nothing after the data dates: players as they stood on " +
       day(dates[dates.length - 1]) + ", market values up to " + day(D.valuation_end) +
       (D.so_far_date ? ", clubs and the season so far up to " + day(D.so_far_date) : "") + ".";
@@ -1214,6 +1324,7 @@ footer p { margin: 0 0 8px; }
       if (r.tool === "search_players") table = input.table;
       if (o.candidate && !league) league = o.candidate.league;
       if (o.bargain && !league) league = o.bargain.league;
+      if (o.player_row && !league) league = o.player_row.league;
       if (o.archetype && o.archetype.archetype) legend = o.archetype.archetype;
       if (o.query && o.query.archetype) legend = legend || o.query.archetype;
       if (o.label) label = o.label;
@@ -1360,13 +1471,14 @@ footer p { margin: 0 0 8px; }
     $("subtitle").textContent = "Ask about " + int(D.players) + " players across " + D.player_leagues + " leagues. Every answer comes from the tables on this page.";
     var meta = "Season " + D.season_label + ", players from " + D.leagues + " of the " + D.tracked + " leagues tracked, built " + day(D.built) + ".";
     document.querySelectorAll(".data-meta").forEach(function (p) { p.textContent = meta; });
+    $("pl-meta").textContent = "Season " + D.season_label + ", every player with league minutes in " + D.player_leagues + " of the " + D.tracked + " leagues tracked, built " + day(D.built) + ".";
     document.querySelectorAll("#lists button").forEach(function (b) {
       b.querySelector(".n").textContent = DATA.bargains.filter(function (o) { return o.list === b.dataset.list; }).length.toLocaleString("en");
     });
     $("footer").innerHTML =
       "<p>Downloads: <a href=\"data/candidates.csv\">candidates.csv</a>, <a href=\"data/bargains.csv\">bargains.csv</a>, " +
-      "<a href=\"data/dictionary.csv\">dictionary.csv</a>; the same tables as Parquet: <a href=\"data/candidates.parquet\">candidates</a>, " +
-      "<a href=\"data/bargains.parquet\">bargains</a>.</p>" +
+      "<a href=\"data/players.csv\">players.csv</a>, <a href=\"data/dictionary.csv\">dictionary.csv</a>; the same tables as Parquet: " +
+      "<a href=\"data/candidates.parquet\">candidates</a>, <a href=\"data/bargains.parquet\">bargains</a>, <a href=\"data/players.parquet\">players</a>.</p>" +
       "<p>Sources: player statistics from API Football (api-football.com), used under the owner's subscription; raw responses are not published. " +
       "Market values and transfers from transfermarkt-datasets by dcaribou (github.com/dcaribou/transfermarkt-datasets), derived from Transfermarkt (transfermarkt.com), used for non commercial purposes only and credited here. No club logos or photos are stored or shown.</p>" +
       (D.greats ? '<p><img class="logo" src="statsbomb-logo.png" alt="StatsBomb">The Measured greats tab uses StatsBomb open data (github.com/statsbomb/open-data) for seasons before 2015/16, for non commercial use with attribution; only results computed from it are shown, never the data.</p>' : "") +
@@ -1381,10 +1493,12 @@ footer p { margin: 0 0 8px; }
       if (t.dataset.tab === "similar") { openSimilar(); showSection(); return; }
       if (t.dataset.tab === "greats") { openGreats(); showSection(); return; }
       if (t.dataset.tab === "archetypes") { openArchetypes(); showSection(); return; }
+      if (t.dataset.tab === "players") { openPlayers(); showSection(); return; }
       state.ask = false;
       state.similar = false;
       state.greats = false;
       state.archetypes = false;
+      state.players = false;
       state.tab = t.dataset.tab;
       history.replaceState(null, "", state.tab === "bargains" ? "#bargains" : "#candidates");
       ["q", "age-min", "age-max"].forEach(function (id) { $(id).value = ""; });
@@ -1440,6 +1554,10 @@ footer p { margin: 0 0 8px; }
   $("ar-name").addEventListener("change", function () { ar.key = $("ar-name").value; arDraw(); });
   ["ar-age-min", "ar-age-max"].forEach(function (id) { $(id).addEventListener("input", arDraw); });
   $("ar-pool").addEventListener("change", arDraw);
+  $("pl-q").addEventListener("input", function () {
+    if (PL) playersDraw();
+    else loadPlayers().then(playersDraw, function () {});
+  });
   $("ask-form").addEventListener("submit", sendQuestion);
   $("ask").addEventListener("click", function (e) {
     var b = e.target.closest(".chips button");
@@ -1459,6 +1577,7 @@ footer p { margin: 0 0 8px; }
   if (state.similar) openSimilar();
   if (state.greats) openGreats();
   if (state.archetypes) openArchetypes();
+  if (state.players) openPlayers();
   tabs();
   setupAsk();
   if (!state.ask) showSection();  // an old link to a data section still opens it

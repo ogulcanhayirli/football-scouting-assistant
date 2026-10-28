@@ -2,12 +2,13 @@
 
 Two destinations, nothing else (CLAUDE.md, the one exception to rule 8):
 
-* ``processed/lists/`` in the private data bucket: the two tables and the
-  dictionary of ``scout lists``, skipped when the bytes are already there
-  (``scout.sync``);
+* ``processed/lists/`` in the private data bucket: the two tables, the
+  players table (prompt 20f) and the dictionary of ``scout lists``, skipped
+  when the bytes are already there (``scout.sync``);
 * the public site bucket: ``index.html`` and ``data/`` from ``scout site``
-  (the two tables, the dictionary, the similar players file, the written
-  reports, and the StatsBomb logo when the measured greats are in it).
+  (the two tables, the players table as CSV, Parquet and the page's JSON,
+  the dictionary, the similar players file, the written reports, and the
+  StatsBomb logo when the measured greats are in it).
 
 Since prompt 19 it also keeps ``processed/reports_text/`` (``scout
 reports``) in the data bucket, so next week's run reuses every report whose
@@ -46,7 +47,7 @@ REPORT_FILES = {
 }
 LIST_FILES = {
     f"{name}.{suffix}"
-    for name in ("candidates", "bargains", "dictionary")
+    for name in ("candidates", "bargains", "players", "dictionary")
     for suffix in ("csv", "parquet")
 }
 SITE_FILES = {
@@ -56,6 +57,9 @@ SITE_FILES = {
     "data/dictionary.csv": "text/csv; charset=utf-8",
     "data/candidates.parquet": "application/vnd.apache.parquet",
     "data/bargains.parquet": "application/vnd.apache.parquet",
+    "data/players.csv": "text/csv; charset=utf-8",
+    "data/players.parquet": "application/vnd.apache.parquet",
+    "data/players.json": "application/json; charset=utf-8",  # prompt 20f
     "data/similar.json": "application/json; charset=utf-8",
     "data/reports.json": "application/json; charset=utf-8",
 }

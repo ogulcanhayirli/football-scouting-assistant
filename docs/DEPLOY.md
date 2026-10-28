@@ -17,9 +17,9 @@ unchanged.
    5. scout score                          stored models (processed/models/stored/), no training
    6. scout embed                          stored embedding: vectors, today's ten nearest each
    7. scout archetypes                     archetypes/*/*.yaml reloaded and checked, their vectors
-   8. scout lists                          the two tables and their explanations
+   8. scout lists                          the two tables, their explanations, the players table
    9. scout reports                        prompt 19: written reports, checked; never blocks
-  10. scout site                           index.html, similar.json, reports.json
+  10. scout site                           index.html, similar.json, reports.json, players.json
   11. scout publish                        processed/lists/ and processed/reports_text/ in the
                                            data bucket, the site bucket
                                                     │
@@ -28,6 +28,7 @@ unchanged.
    raw/transfermarkt/ ──►    │      └─ write ──► S3 scout-site-<account> (public read, website)
                              │                       index.html, data/*.csv, data/*.parquet,
    Claude API (Message  ◄────┘ step 9 only,          data/similar.json, data/reports.json,
+                                                     data/players.json (prompt 20f),
    Batches) with ANTHROPIC_API_KEY                   statsbomb-logo.png (with the greats)
 ```
 
@@ -408,11 +409,26 @@ the bucket first.
 The page's Ask tab posts a fan's question to one AWS Lambda behind a public
 Function URL (no API Gateway). The Lambda reads the published files from the
 site bucket at cold start (the page's data block, the two tables, the
-dictionary, `similar.json`, `reports.json`; once an hour it asks whether the
-page changed and reloads), and Claude Sonnet 5.5 answers with four tools over
+dictionary, `similar.json`, `reports.json` and, since prompt 20f,
+`players.json`; once an hour it asks whether the page changed and reloads), and Claude Sonnet 5.5 answers with four tools over
 them: `search_players`, `player_card`, `similar_players`, `how_to_read`
 (`src/scout/chat/`). The answer comes back with the tool results it was built
 from, which the page shows under it ("From the tables").
+
+### Every player, not only the lists (prompt 20f)
+
+`scout lists` also writes `players` (CSV and Parquet in
+`processed/lists/`): every player with a league minute in the newest season
+(18,931 on 28 October 2026), with why he is on no list in sentences set by
+code (`src/scout/players.py`, MODELS.md). `scout site` copies it to `data/`
+with `report_available` set from the page's own reports, and writes
+`data/players.json` (rows as lists, repeated texts as codes; 4.1 MB, 0.76
+MB gzip encoded), which the page's Players section loads when it opens and
+the chat reads with the other files. `scout publish` sends the three files
+(`SITE_FILES`) and the two list files (`LIST_FILES`): both inside the
+prefixes the weekly run may already write, so its IAM policy needs no
+change. A Lambda deployed before the first page with `players.json` still
+loads (the file is optional) and knows the two lists only.
 
 ### The page opens on the chat, and the chat knows the legends (prompt 20d)
 

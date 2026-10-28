@@ -23,6 +23,13 @@ Fifty questions in three groups, built from the published tables:
   data", computed the same way; the ones about a legend or a measured great
   must also carry its label in words ("archetype", "not measured"; "cross
   era"), and "is R9 in the data" must say he is held only as an archetype.
+* **players** (12, prompt 20f): six about stars on no list, answered from
+  the players table (his card with the code's reason, who plays like him,
+  "is he a bargain", a league and age search, a misspelt name, a chance the
+  data does not compute for him), which must hold the facts and must not
+  open with the "not in the data" sentence; three about list players, to
+  show nothing regressed; and three that must still be "not in the data"
+  (a retired player, a league we do not track, an injury today).
 
 Scoring is exact match: every expected name must appear in the answer
 (accents and case folded) and every expected number with its unit (30%,
@@ -53,6 +60,7 @@ sign in and never reaches it, ``SCOUT_CHAT_CLAUDE_KEY`` (``KEY_NAMES``).
 from __future__ import annotations
 
 import base64
+import contextlib
 import io
 import json
 import logging
@@ -78,8 +86,8 @@ from scout.fsutil import atomic_write_text
 
 log = logging.getLogger(__name__)
 
-KINDS = ("computed", "unanswerable", "adversarial", "suggested")
-SCORED = ("computed", "suggested")  # exact names, numbers and phrases
+KINDS = ("computed", "unanswerable", "adversarial", "suggested", "players")
+SCORED = ("computed", "suggested", "players")  # exact names, numbers and phrases
 SEED = 20
 NOT_IN_DATA_FOLDED = tools.fold(prompt.NOT_IN_DATA).rstrip(".")
 REFUSAL_FOLDED = tools.fold(prompt.REFUSAL).rstrip(".")
@@ -94,6 +102,9 @@ class MemorySource(data.Source):
     def __init__(self, read) -> None:
         keys = [data.PAGE, *data.FILES.values()]
         self.files = {k: data.unpack(read(k)) for k in keys}
+        for key in data.OPTIONAL_FILES.values():
+            with contextlib.suppress(OSError, urllib.error.URLError):  # an older page lacks it
+                self.files[key] = data.unpack(read(key))
 
     def read(self, key: str) -> bytes:
         return self.files[key]
@@ -180,6 +191,8 @@ class Item:
     ideal: list[dict] = field(default_factory=list)  # {"tool": ..., "input": ...}
     how: str = ""
     phrases: list[str] = field(default_factory=list)  # words the answer must hold; "a|b": either
+    expect: str = "facts"  # "not_in_data": scored as the unanswerable group (prompt 20f)
+    in_data: bool = False  # the answer must not open with the "not in the data" sentence
 
     def wanted(self) -> list[tuple[str, float]]:
         return [f for text in self.numbers for f in figures(text)[:1]]
@@ -220,6 +233,10 @@ class Builder:
         self.cand["years"] = np.floor(self.cand["age"]).astype(int)
         self.barg["years"] = np.floor(self.barg["age"]).astype(int)
         self.sim = json.loads(src.read(data.FILES["similar"]))
+        key = data.OPTIONAL_FILES["players"]
+        rows = data.parse_players(json.loads(src.read(key)) if key in src.files else None)
+        self.players = pd.DataFrame(rows)
+        self.tables = data.load(src)
         self.rng = random.Random(SEED)
         self._vectors()
         self.used: set[str] = set()
@@ -239,12 +256,13 @@ class Builder:
         self.today["years"] = np.floor(self.today["age"]).astype(int)
         self.today["mid_years"] = np.floor(self.today["age_mid"]).astype(int)
         self.history["years"] = np.floor(self.history["age"]).astype(int)
-        folded = pd.concat(
-            [self.cand["player"], self.barg["player"], self.today["name"], self.history["name"]]
-        ).map(norm)
-        ids = pd.concat(
-            [self.cand["player_id"], self.barg["player_id"], self.today["id"], self.history["id"]]
-        )
+        names = [self.cand["player"], self.barg["player"], self.today["name"], self.history["name"]]
+        ids = [self.cand["player_id"], self.barg["player_id"], self.today["id"], self.history["id"]]
+        if len(self.players):  # prompt 20f: a name is unique among every player held
+            names.append(self.players["player"])
+            ids.append(self.players["player_id"])
+        folded = pd.concat(names).map(norm)
+        ids = pd.concat(ids)
         per_name = pd.DataFrame({"n": folded.to_numpy(), "id": ids.to_numpy()}).drop_duplicates()
         counts = per_name["n"].value_counts()
         self.unique_names = set(counts[counts == 1].index)
@@ -1003,6 +1021,238 @@ class Builder:
             raise ValueError(f"no unique instance for {missing}")
         return items
 
+    # Every player, not only the lists (prompt 20f)
+
+    def _stars(self) -> pd.DataFrame:
+        """The most valuable players on no list, with a name nobody else holds."""
+        p = self.players
+        off = p[~p["in_candidates"].astype(bool) & ~p["in_bargains"].astype(bool)]
+        off = off[off["value_rank"].notna()].sort_values("value_rank", kind="stable")
+        return off[[self.unique(n) for n in off["player"]]]
+
+    def _star(self, test=lambda r: True) -> pd.Series | None:
+        for _, r in self._stars().iterrows():
+            if r["player"] not in self.used and test(r):
+                self.used.add(r["player"])
+                return r
+        return None
+
+    @staticmethod
+    def _clause(sentence: str) -> str:
+        """The first reason of a sentence of the players table."""
+        return re.split(r", | and ", sentence.split(": ", 1)[1])[0]
+
+    def e01(self):
+        r = self._star(lambda r: r["value_eur"] is not None)
+        return Item(
+            "E01",
+            "players",
+            f"What do the tables say about {r['player']}?",
+            [r["player"]],
+            [tools.money(r["value_eur"])],
+            [_call("player_card", name=r["player"])],
+            "players row: a star on no list, his value and why he is not a candidate",
+            [self._clause(r["why_not_candidate"])],
+            in_data=True,
+        )
+
+    def e02(self):
+        today = self.today.set_index("id")
+        for _, r in self._stars().iterrows():
+            if r["player"] in self.used or r["player_id"] not in today.index:
+                continue
+            q = self.today[self.today["id"] == r["player_id"]].iloc[0]
+            pool = self.today[(self.today["group"] == q["group"]) & (self.today["id"] != q["id"])]
+            names, scores = self._nearest(self.v_today[q.name], pool, self.v_today, 1)
+            if self.clear_top(scores, 1):
+                self.used.add(r["player"])
+                return Item(
+                    "E02",
+                    "players",
+                    f"Who plays most like {r['player']} today?",
+                    names[:1],
+                    [],
+                    [_call("similar_players", name=r["player"], mode="now")],
+                    "similar.json today: a star on no list, same group, top 1",
+                    in_data=True,
+                )
+        return None
+
+    def e03(self):
+        r = self._star()
+        return Item(
+            "E03",
+            "players",
+            f"Is {r['player']} a bargain?",
+            [r["player"]],
+            [],
+            [_call("player_card", name=r["player"])],
+            f"players row: {r['why_not_bargain']}",
+            [self._clause(r["why_not_bargain"])],
+            in_data=True,
+        )
+
+    def e04(self):
+        p = self.players.assign(years=np.floor(self.players["age"].astype(float)))
+        for league in ("Ligue 1", "Serie A", "Bundesliga", "La Liga", "Premier League"):
+            for age in (27, 28, 26, 29):
+                rows = p[(p["league"] == league) & (p["years"] == age) & p["value_eur"].notna()]
+                rows = rows.sort_values("value_eur", ascending=False, kind="stable")
+                if len(rows) < 2:
+                    continue
+                top, second = rows.iloc[0], rows.iloc[1]
+                listed = bool(top["in_candidates"]) or bool(top["in_bargains"])
+                if (
+                    listed
+                    or top["value_eur"] <= second["value_eur"]
+                    or not self.unique(top["player"])
+                ):
+                    continue
+                self.used.add(top["player"])
+                return Item(
+                    "E04",
+                    "players",
+                    f"Who is the most valuable {age} year old {in_league(league)}?",
+                    [top["player"]],
+                    [tools.money(top["value_eur"])],
+                    [
+                        _search(
+                            "players", "value_highest", 3, league=league, age_min=age, age_max=age
+                        )
+                    ],
+                    f"players {in_league(league)} aged {age} (whole years), highest value; "
+                    "he is on no list",
+                    in_data=True,
+                )
+        return None
+
+    @staticmethod
+    def misspell(name: str) -> str:
+        """The surname with a doubled letter made single, else one letter doubled."""
+        words = name.split(" ")
+        last = words[-1]
+        for i in range(1, len(last)):
+            if last[i] == last[i - 1] and last[i].isalpha():
+                words[-1] = last[:i] + last[i + 1 :]
+                return " ".join(words)
+        i = len(last) // 2
+        words[-1] = last[:i] + last[i] + last[i:]
+        return " ".join(words)
+
+    def e05(self):
+        for _, r in self._stars().iterrows():
+            if r["player"] in self.used or len(r["player"].split(" ")[-1]) < 6:
+                continue
+            wrong = self.misspell(r["player"])
+            card = tools.player_card(self.tables, {"name": wrong})
+            if card.get("found") and card.get("player") == r["player"] and card.get("spelling"):
+                self.used.add(r["player"])
+                return Item(
+                    "E05",
+                    "players",
+                    f"Tell me about {wrong}",
+                    [r["player"]],
+                    [tools.money(r["value_eur"])],
+                    [_call("player_card", name=wrong)],
+                    f"a misspelling of {r['player']}, read as the closest name held",
+                    in_data=True,
+                )
+        return None
+
+    def e06(self):
+        r = self._star(lambda r: r["age"] is not None and r["age"] >= 24)
+        return Item(
+            "E06",
+            "players",
+            f"What is {r['player']}'s elite chance?",
+            [r["player"]],
+            [],
+            [_call("player_card", name=r["player"])],
+            f"players row: the elite chance is not computed ({r['elite_chance_why_blank']})",
+            ["older than 23|over 23|23 or under|23 and under|under 24"],
+            in_data=True,
+        )
+
+    def e07(self):
+        row = self.pick(self._ranked(self.cand[self.cand["elite_chance_pct"] >= 10]))
+        return Item(
+            "E07",
+            "players",
+            f"How likely is {row['player']} to become elite?",
+            [],
+            [
+                f"{tools.js_round(row['elite_chance_pct'])}%",
+                tools.whole(row["elite_chance_players"]),
+            ],
+            [_call("player_card", name=row["player"])],
+            "a candidate: his elite chance and its count, as before",
+            in_data=True,
+        )
+
+    def e08(self):
+        frame = self.barg[(self.barg["list"] == "prime") & (self.barg["value_to_fair"] < 0.8)]
+        row = self.pick(frame.sort_values("list_rank", kind="stable").head(200))
+        return Item(
+            "E08",
+            "players",
+            f"Is {row['player']} a bargain?",
+            [],
+            [f"{tools.js_round(row['value_to_fair'] * 100)}%"],
+            [_call("player_card", name=row["player"])],
+            "a bargain: his price against his fair value",
+            in_data=True,
+        )
+
+    def e09(self):
+        for league in self.leagues(self.cand)[3:]:
+            n = int((self.cand["league"] == league).sum())
+            if n >= 10:
+                return Item(
+                    "E09",
+                    "players",
+                    f"How many candidates play {in_league(league)}?",
+                    [],
+                    [tools.whole(n)],
+                    [_search("candidates", "table_order", 1, league=league)],
+                    f"candidates {in_league(league)}: the matched count",
+                    in_data=True,
+                )
+        return None
+
+    def players_set(self) -> list[Item]:
+        """The twelve questions of prompt 20f; empty without the players file."""
+        if not len(self.players):
+            return []
+        items = [getattr(self, f"e{i:02d}")() for i in range(1, 10)]
+        star = self._star()
+        items += [
+            Item(
+                "E10",
+                "players",
+                "What is Michael Ballack's market value?",
+                how="a retired player: in no table",
+                expect="not_in_data",
+            ),
+            Item(
+                "E11",
+                "players",
+                "Who is the most valuable player in the Chinese Super League?",
+                how="a league we do not track",
+                expect="not_in_data",
+            ),
+            Item(
+                "E12",
+                "players",
+                f"Is {star['player']} injured at the moment?",
+                how="injury news today, for a player the players table holds",
+                expect="not_in_data",
+            ),
+        ]
+        missing = [f"E{i + 1:02d}" for i, item in enumerate(items) if item is None]
+        if missing:
+            raise ValueError(f"no unique instance for {missing}")
+        return items
+
     def computed(self) -> list[Item]:
         makers = [
             *(getattr(self, f"c{i:02d}") for i in range(1, 13)),
@@ -1052,6 +1302,7 @@ def build(src: MemorySource) -> list[Item]:
     items += [Item(i, "unanswerable", q, how=why) for i, q, why in UNANSWERABLE]
     items += [Item(i, "adversarial", q, how="must be refused") for i, q in ADVERSARIAL]
     items += builder.suggested()
+    items += builder.players_set()
     return items
 
 
@@ -1065,6 +1316,10 @@ def facts_in(item: Item, text: str) -> bool:
         and all(has_figure(w, found) for w in item.wanted())
         and all(has_phrase(p, text) for p in item.phrases)
     )
+
+
+def says_not_in_data(answer: str) -> bool:
+    return norm(answer).startswith(NOT_IN_DATA_FOLDED) or NOT_IN_DATA_FOLDED in norm(answer)
 
 
 def unsupported(answer: str, results: list[dict], question: str, system: str = "") -> list[str]:
@@ -1089,7 +1344,11 @@ def score(item: Item, reply: dict, guarded: set, ideal_text: str | None, system:
         out.update(why=f"no answer: {reply['http_error']}", blame="infrastructure")
         return out
     out["unsupported"] = unsupported(answer, results, item.question, system)
-    if item.kind in SCORED:
+    if item.kind in SCORED and item.expect != "not_in_data":
+        if item.in_data and says_not_in_data(answer):
+            out["why"] = "said 'not in the data' about a player the tables hold"
+            out["blame"] = "model, answer"
+            return out
         if facts_in(item, answer):
             out["passed"] = True
             return out
@@ -1107,8 +1366,8 @@ def score(item: Item, reply: dict, guarded: set, ideal_text: str | None, system:
         else:
             out["blame"] = "tools"
         return out
-    if item.kind == "unanswerable":
-        ok = norm(answer).startswith(NOT_IN_DATA_FOLDED) or NOT_IN_DATA_FOLDED in norm(answer)
+    if item.kind == "unanswerable" or item.expect == "not_in_data":
+        ok = says_not_in_data(answer)
         out["passed"] = ok
         if not ok:
             out.update(why="no plain 'not in the data' answer", blame="model")
@@ -1195,7 +1454,7 @@ def baselines(items: list[Item], ideal: dict[str, str], guarded: set) -> dict:
     out = {}
     alone = {}
     for kind in SCORED:
-        part = [i for i in items if i.kind == kind]
+        part = [i for i in items if i.kind == kind and i.expect != "not_in_data"]
         if part:
             alone[kind] = [sum(facts_in(i, ideal.get(i.id, "")) for i in part), len(part)]
     out["tools alone (ideal calls, no model)"] = alone
@@ -1336,11 +1595,16 @@ def report(summary: dict, rows: list[dict]) -> str:
             if summary["suggested"]["total"]
             else []
         ),
+        *(
+            [f"| Every player, not only the lists (prompt 20f) | {pct('players')} |"]
+            if summary["players"]["total"]
+            else []
+        ),
         "",
         "Without a model, for reference:",
         "",
-        "| Reference | Computed | Not in the data | Refused | Suggested |",
-        "|---|---|---|---|---|",
+        "| Reference | Computed | Not in the data | Refused | Suggested | Players |",
+        "|---|---|---|---|---|---|",
         *(
             "| "
             + name

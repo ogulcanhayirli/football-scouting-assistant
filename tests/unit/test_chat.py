@@ -1554,3 +1554,278 @@ def test_eval_phrases_take_either_wording_and_hyphens():
     bad = score(item, {"answer": "Ronaldo Nazário is a legend."}, set(), None)
     assert not bad["passed"]
     assert '"archetype"' in bad["why"]
+
+
+# Every player, not only the lists (prompt 20f)
+
+PLAYER_ROWS = [  # the players table: list players and players on no list
+    dict(
+        player_id=1,
+        player="Jesús Rodríguez",
+        age=20.6,
+        club="Como",
+        league="Serie A",
+        minutes=2100,
+        rank=305,
+        value=30e6,
+        fair=21632000.0,
+        cand=True,
+        barg=False,
+    ),
+    dict(
+        player_id=2,
+        player="Kenan Yıldız",
+        age=20.4,
+        club="Juventus",
+        league="Serie A",
+        minutes=2500,
+        rank=150,
+        value=60e6,
+        fair=40e6,
+        cand=True,
+        barg=True,
+    ),
+    dict(
+        player_id=40,
+        player="Rodri",
+        age=30.0,
+        club="Manchester City",
+        league="Premier League",
+        minutes=1513,
+        rank=98,
+        value=50e6,
+        fair=30e6,
+        cand=False,
+        barg=False,
+        why_c="not a candidate: already among the 100 most valuable",
+        why_b="not a bargain: under half of his team's league minutes",
+    ),
+    dict(
+        player_id=41,
+        player="E. Haaland",
+        age=25.9,
+        club="Manchester City",
+        league="Premier League",
+        minutes=2958,
+        rank=2,
+        value=200e6,
+        fair=130e6,
+        cand=False,
+        barg=False,
+        why_c="not a candidate: already among the 100 most valuable",
+        why_b="not a bargain: ability below the 70th percentile of his position",
+    ),
+    dict(
+        player_id=42,
+        player="Ligue Twin",
+        age=27.4,
+        club="Lens",
+        league="Ligue 1",
+        minutes=2900,
+        rank=642,
+        value=20e6,
+        fair=9e6,
+        cand=False,
+        barg=False,
+        why_c="not a candidate: valued below #2,000 and not one of the riser model's top 50",
+        why_b="not a bargain: ability below the 70th percentile of his position",
+    ),
+    dict(
+        player_id=43,
+        player="Ligue Bench",
+        age=27.1,
+        club="Nice",
+        league="Ligue 1",
+        minutes=200,
+        rank=None,
+        value=None,
+        fair=None,
+        cand=False,
+        barg=False,
+        why_c="not a candidate: fewer than 450 league minutes this season, no value on "
+        "record and not one of the riser model's top 50",
+        why_b="not a bargain: fewer than 450 league minutes this season and no value on record",
+    ),
+]
+
+
+def players_json():
+    import pandas as pd
+
+    from scout.players import COLUMNS, compact
+
+    rows = []
+    for r in PLAYER_ROWS:
+        older = r["age"] >= 24
+        rows.append(
+            {
+                **dict.fromkeys(COLUMNS),
+                "season": 2025,
+                "player_id": r["player_id"],
+                "player": r["player"],
+                "age": r["age"],
+                "nationality": "Spain",
+                "position": "Centre-Forward",
+                "club": r["club"],
+                "league": r["league"],
+                "minutes": r["minutes"],
+                "minutes_share": 0.8,
+                "ability_pct": 90.0 if r["minutes"] >= 450 else None,
+                "value_eur": r["value"],
+                "value_rank": r["rank"],
+                "fair_value_eur": r["fair"],
+                "value_to_fair": round(r["value"] / r["fair"], 3) if r["fair"] else None,
+                "elite_chance_why_blank": "older than 23" if older else None,
+                "elite_chance_pct": None if older else 30,
+                "elite_chance_players": None if older else 142,
+                "elite_decile": None if older else 10,
+                "big_move_chance_why_blank": "valued below #2,000",
+                "flag_count": 0,
+                "flags": "none",
+                "in_candidates": r["cand"],
+                "in_bargains": r["barg"],
+                "why_not_candidate": r.get("why_c"),
+                "why_not_bargain": r.get("why_b"),
+                "report_available": r["player_id"] == 1,
+                "value_date": pd.Timestamp("2026-06-01"),
+                "data_date": pd.Timestamp("2026-06-30"),
+            }
+        )
+    return compact(pd.DataFrame(rows)[COLUMNS])
+
+
+@pytest.fixture
+def everyone(tmp_path):
+    root = write_site(tmp_path)
+    (root / "data" / "players.json").write_text(json.dumps(players_json()))
+    return data.load(data.FolderSource(root))
+
+
+def test_a_page_without_the_players_file_still_loads(tables):
+    assert tables.players == []
+    assert "All players" not in prompt.system_prompt(tables)[0]
+
+
+def test_the_players_file_loads_with_its_texts_decoded(everyone):
+    assert len(everyone.players) == len(PLAYER_ROWS)
+    rodri = next(o for o in everyone.players if o["player"] == "Rodri")
+    assert rodri["club"] == "Manchester City"
+    assert rodri["why_not_bargain"] == "not a bargain: under half of his team's league minutes"
+    facts, rules = prompt.system_prompt(everyone)
+    assert "* All players: 6 players with league minutes in season 2025/26" in facts
+    assert "never answer him with" in rules.lower()
+
+
+def test_a_star_on_no_list_gets_his_row_and_the_codes_reasons(everyone):
+    card = tools.player_card(everyone, {"name": "Rodri"})
+    assert card["found"] is True
+    assert card["in_tables"] == []
+    row = card["player_row"]
+    assert (row["value"], row["value_rank"], row["fair_value"]) == ("€50m", "#98", "€30m")
+    assert row["elite_chance"] == "not computed: older than 23"
+    assert card["why_not_on_lists"] == [
+        "not a candidate: already among the 100 most valuable",
+        "not a bargain: under half of his team's league minutes",
+    ]
+    assert card["report"]["kind"] == "none"
+    assert "only for the players of the candidates and bargains" in card["report"]["note"]
+
+
+def test_a_list_player_keeps_his_list_rows_and_gets_the_other_lists_reason(everyone):
+    card = tools.player_card(everyone, {"name": "Jesús Rodríguez"})
+    assert card["in_tables"] == ["candidates"]
+    assert card["candidate"]["elite_chance"] == "30% of 142 past players, decile 10"
+    assert card["season_facts"] == {"nationality": "Spain", "league_minutes": "2,100"}
+    assert "player_row" not in card
+    assert card["report"]["kind"] == "written report"
+
+
+def test_a_misspelt_name_is_read_as_the_closest_one_and_says_so(everyone):
+    card = tools.player_card(everyone, {"name": "Erling Halland"})
+    assert card["player"] == "E. Haaland"
+    assert "closest name held is E. Haaland" in card["spelling"]
+    assert tools.player_card(everyone, {"name": "Michael Ballack"})["found"] is False
+    assert tools.fuzzy_score("Kylian Mbape", "Kylian Mbappé") > 0.8
+    assert tools.fuzzy_score("Kylian Mbape", "E. Mbappé") == 0  # Kylian is not E.
+    assert tools.fuzzy_score("Ronaldo", "Rinaldi") == 0  # two letters off in seven
+
+
+def test_a_name_held_only_at_another_club_says_so(everyone):
+    card = tools.player_card(everyone, {"name": "Rodri", "club": "Pro Vercelli"})
+    assert card["club"] == (
+        "no Rodri of Pro Vercelli is held; the player found plays for Manchester City"
+    )
+
+
+def test_search_players_over_the_players_table(everyone):
+    out = tools.search_players(
+        everyone,
+        {
+            "table": "players",
+            "sort_by": "value_highest",
+            "limit": 5,
+            "league": "Ligue 1",
+            "age_min": 27,
+            "age_max": 27,
+        },
+    )
+    assert out["matched"] == 2
+    assert [r["player"] for r in out["rows"]] == ["Ligue Twin", "Ligue Bench"]
+    assert out["rows"][0]["on_lists"] == "none"
+    assert out["rows"][1]["value"] == "no value"
+    regulars = tools.search_players(
+        everyone, {"sort_by": "minutes", "limit": 10, "min_minutes": 450}
+    )
+    assert regulars["table"] == "players"  # the default table
+    assert regulars["matched"] == 5
+    assert regulars["rows"][0]["player"] == "E. Haaland"
+
+
+def test_similar_players_without_a_vector_names_him_and_the_count(everyone):
+    out = tools.similar_players(everyone, {"name": "Rodri", "mode": "now"})
+    assert out["found"] is False
+    assert out["player"] == "Rodri"
+    assert "2 of the 6 players of the season have one" in out["note"]
+
+
+def test_the_definitions_offer_the_players_table_first_within_the_limits(everyone):
+    defs = {d["name"]: d for d in tools.definitions(everyone)}
+    search = defs["search_players"]["input_schema"]["properties"]
+    assert search["table"]["enum"][0] == "players"
+    assert "min_minutes" in search
+    assert "Ligue 1" in search["league"]["enum"]
+    assert "players" in defs["how_to_read"]["input_schema"]["properties"]["table"]["enum"]
+
+
+def test_how_to_read_explains_the_reasons(everyone):
+    limits, topics = prompt.limits(everyone), prompt.column_topics(everyone)
+    out = tools.how_to_read(everyone, {"column": "why_not_bargain"}, limits, topics)
+    assert any("priced above their fair value" in text for text in out["limits"])
+
+
+def test_eval_players_items_must_not_say_not_in_data_and_the_absent_ones_must():
+    from scout.chat_eval import KINDS, Builder, Item, score
+
+    assert "players" in KINDS
+    star = Item(
+        "E01",
+        "players",
+        "What about Rodri?",
+        ["Rodri"],
+        ["€50m"],
+        [],
+        "",
+        ["100 most valuable"],
+        in_data=True,
+    )
+    good = {"answer": "Rodri is worth €50m; not a candidate: already among the 100 most valuable."}
+    assert score(star, good, set(), None)["passed"]
+    wrong = {"answer": prompt.NOT_IN_DATA + " Rodri is worth €50m, among the 100 most valuable."}
+    out = score(star, wrong, set(), None)
+    assert not out["passed"]
+    assert "not in the data" in out["why"]
+    absent = Item("E10", "players", "Ballack?", expect="not_in_data")
+    assert score(absent, {"answer": prompt.NOT_IN_DATA + " Nothing."}, set(), None)["passed"]
+    assert not score(absent, {"answer": "He is worth €1m."}, set(), None)["passed"]
+    assert Builder.misspell("Kylian Mbappé") == "Kylian Mbapé"
+    assert Builder.misspell("J. Musiala") == "J. Musiiala"

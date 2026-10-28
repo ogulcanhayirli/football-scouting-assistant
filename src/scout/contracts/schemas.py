@@ -484,6 +484,98 @@ FIXTURE_EVENTS = DataFrameSchema(
 )
 
 
+# The players table (prompt 20f, ``scout.players``): one row per player of the
+# newest season, published next to the two lists.
+
+
+def _blank_has_reason(value: str, reason: str) -> Check:
+    """A chance is blank exactly when its reason is given."""
+
+    def check(df: pd.DataFrame) -> pd.Series:
+        return df[value].isna() == df[reason].notna()
+
+    return Check(check, name=f"{reason}_iff_blank", error=f"{reason} must explain a blank {value}")
+
+
+def _off_list_has_reason(member: str, reason: str) -> Check:
+    """A player is on the list exactly when no reason says why not."""
+
+    def check(df: pd.DataFrame) -> pd.Series:
+        return df[member].astype(bool) == df[reason].isna()
+
+    return Check(check, name=f"{reason}_iff_off", error=f"{reason} must explain not {member}")
+
+
+def _regular_only(column: str) -> Check:
+    """Ability and fair value exist only for regular players (450+ minutes)."""
+
+    def check(df: pd.DataFrame) -> pd.Series:
+        return df[column].isna() | (df["minutes"] >= 450)
+
+    return Check(check, name=f"{column}_regulars_only", error=f"{column} under 450 minutes")
+
+
+def _reports_on_lists(df: pd.DataFrame) -> pd.Series:
+    listed = df["in_candidates"].astype(bool) | df["in_bargains"].astype(bool)
+    return ~df["report_available"].astype(bool) | listed
+
+
+_pct = {"nullable": True, "checks": Check.in_range(0, 100)}
+_chance_count = {"nullable": True, "checks": Check.ge(30)}
+
+PLAYERS_TABLE = DataFrameSchema(
+    {
+        "season": Column(int, Check.in_range(2000, 2100)),
+        "player_id": Column("Int64", Check.gt(0), unique=True),
+        "player": Column(str, Check.str_length(min_value=1)),
+        "age": Column(float, Check.in_range(14, 50), nullable=True),
+        "nationality": Column(str, nullable=True),
+        "position": Column("string", nullable=True),
+        "club": Column(str),
+        "league": Column(str),
+        "minutes": Column("Int64", Check.in_range(1, MAX_SEASON_MINUTES)),
+        "minutes_share": Column(float, Check.ge(0), nullable=True),
+        "ability_score": Column(float, nullable=True),
+        "ability_pct": Column(float, **_pct),
+        "value_eur": Column(float, Check.gt(0), nullable=True),
+        "value_date": Column("datetime64[ns]", nullable=True),
+        "value_rank": Column("Int64", Check.ge(1), nullable=True),
+        "fair_value_eur": Column(float, Check.ge(0), nullable=True),
+        "value_to_fair": Column(float, Check.gt(0), nullable=True),
+        "elite_decile": Column("Int64", Check.in_range(1, 10), nullable=True),
+        "elite_chance_pct": Column("Int64", **_pct),
+        "elite_chance_players": Column("Int64", **_chance_count),
+        "elite_chance_why_blank": Column(str, nullable=True),
+        "big_move_decile": Column("Int64", Check.in_range(1, 10), nullable=True),
+        "big_move_chance_pct": Column("Int64", **_pct),
+        "big_move_chance_players": Column("Int64", **_chance_count),
+        "big_move_chance_why_blank": Column(str, nullable=True),
+        "flag_count": Column(int, Check.in_range(0, 3)),
+        "flags": Column(str),
+        "in_candidates": Column(bool),
+        "in_bargains": Column(bool),
+        "why_not_candidate": Column(str, nullable=True),
+        "why_not_bargain": Column(str, nullable=True),
+        "report_available": Column(bool),
+        "data_date": Column("datetime64[ns]"),
+    },
+    checks=[
+        NAMES_REPAIRED,
+        _on_or_before("value_date", "data_date"),
+        _blank_has_reason("elite_chance_pct", "elite_chance_why_blank"),
+        _blank_has_reason("big_move_chance_pct", "big_move_chance_why_blank"),
+        _off_list_has_reason("in_candidates", "why_not_candidate"),
+        _off_list_has_reason("in_bargains", "why_not_bargain"),
+        _regular_only("ability_pct"),
+        _regular_only("fair_value_eur"),
+        Check(_reports_on_lists, name="reports_on_lists", error="a report off the two lists"),
+    ],
+    strict=True,
+    coerce=False,
+    name="players_table",
+)
+
+
 def validate(schema: DataFrameSchema, frame: pd.DataFrame) -> pd.DataFrame:
     """Validate lazily so one run reports every violation, not just the first."""
     return schema.validate(frame, lazy=True)
@@ -496,6 +588,7 @@ __all__ = [
     "INJURIES",
     "MATCH_LINEUPS",
     "PLAYERS",
+    "PLAYERS_TABLE",
     "PLAYER_MATCH_STATS",
     "PLAYER_PROFILES",
     "PLAYER_SEASON_FEATURES",
