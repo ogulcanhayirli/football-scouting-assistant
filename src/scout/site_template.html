@@ -7,32 +7,33 @@
 <title>__TITLE__</title>
 <style>
 :root {
-  --bg: #f7f7f5;
+  --bg: #ffffff;
   --panel: #ffffff;
-  --ink: #1d1f23;
-  --muted: #5f6570;
-  --faint: #8a909a;
-  --line: #e2e3e0;
+  --soft: #f2f3f5;
+  --ink: #1b1d21;
+  --muted: #5d636d;
+  --faint: #868c96;
+  --line: #e2e4e8;
   --accent: #1f5fbf;
-  --accent-soft: #e6eefb;
+  --accent-soft: #e8effb;
   --good: #1d7a46;
   --good-soft: #e3f3ea;
   --warn: #9a5b00;
   --warn-soft: #fbf0dc;
   --risk: #b3261e;
   --risk-soft: #fbe7e5;
-  --row-hover: #fafaf8;
-  --shadow: 0 1px 2px rgba(0, 0, 0, .05);
+  --row-hover: #f8f9fa;
   color-scheme: light;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --bg: #15171a;
-    --panel: #1d2024;
-    --ink: #e8e9eb;
-    --muted: #a5abb4;
-    --faint: #7d838c;
-    --line: #2e3238;
+    --bg: #141518;
+    --panel: #141518;
+    --soft: #23262b;
+    --ink: #e7e8ea;
+    --muted: #a3a9b2;
+    --faint: #7c828b;
+    --line: #2e3137;
     --accent: #7fb0ff;
     --accent-soft: #1f2d44;
     --good: #6fd19a;
@@ -41,18 +42,18 @@
     --warn-soft: #33270f;
     --risk: #ff8f86;
     --risk-soft: #3a1c1a;
-    --row-hover: #222529;
-    --shadow: none;
+    --row-hover: #1b1d21;
     color-scheme: dark;
   }
 }
 :root[data-theme="dark"] {
-  --bg: #15171a;
-  --panel: #1d2024;
-  --ink: #e8e9eb;
-  --muted: #a5abb4;
-  --faint: #7d838c;
-  --line: #2e3238;
+  --bg: #141518;
+  --panel: #141518;
+  --soft: #23262b;
+  --ink: #e7e8ea;
+  --muted: #a3a9b2;
+  --faint: #7c828b;
+  --line: #2e3137;
   --accent: #7fb0ff;
   --accent-soft: #1f2d44;
   --good: #6fd19a;
@@ -61,8 +62,7 @@
   --warn-soft: #33270f;
   --risk: #ff8f86;
   --risk-soft: #3a1c1a;
-  --row-hover: #222529;
-  --shadow: none;
+  --row-hover: #1b1d21;
   color-scheme: dark;
 }
 * { box-sizing: border-box; }
@@ -72,48 +72,92 @@ body {
   margin: 0;
   background: var(--bg);
   color: var(--ink);
-  font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  overflow-x: hidden;
 }
-.wrap { max-width: 1280px; margin: 0 auto; padding: 20px 16px 48px; }
-header h1 { font-size: 24px; line-height: 1.2; margin: 0 0 4px; letter-spacing: -.01em; }
-header p { margin: 0; color: var(--muted); }
-a { color: var(--accent); }
-.howto {
-  margin: 18px 0;
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  box-shadow: var(--shadow);
+a { color: var(--accent); text-underline-offset: 2px; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+button { font: inherit; color: inherit; }
+
+/* Layout (prompt 20e): the chat and prose in one column, the tables wider */
+.col { max-width: 720px; margin: 0 auto; padding: 0 16px; }
+.wide { max-width: 1100px; margin: 0 auto; padding: 0 16px; }
+.hero { padding-top: 96px; }
+header h1 { font-size: 30px; line-height: 1.2; margin: 0; font-weight: 650; letter-spacing: -.015em; }
+header .sub { margin: 10px 0 0; color: var(--muted); }
+
+/* The chat */
+#ask { margin-top: 48px; }
+#ask-log:empty { display: none; }
+.msg { margin: 0 0 32px; }
+.msg p { margin: 0 0 .75em; }
+.msg p:last-child { margin-bottom: 0; }
+.msg.you { color: var(--muted); font-weight: 600; margin-bottom: 12px; }
+.msg.answer { animation: appear .3s ease-out; }
+.msg.capped { color: var(--muted); }
+@keyframes appear { from { opacity: 0; transform: translateY(4px); } }
+@media (prefers-reduced-motion: reduce) { .msg.answer { animation: none; } }
+details.from { margin-top: 12px; font-size: 14px; color: var(--muted); }
+details.from summary { cursor: pointer; width: max-content; max-width: 100%; }
+details.from h4 { font-size: 13px; margin: 12px 0 2px; color: var(--ink); }
+details.from .args { color: var(--faint); margin: 0 0 4px; }
+details.from ol { margin: 4px 0; padding-left: 20px; }
+details.from li { margin: 3px 0; }
+dl.kv { margin: 0; display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 2px 10px; overflow-wrap: anywhere; }
+dl.kv dt { color: var(--faint); }
+dl.kv dd { margin: 0; }
+.kv .k { color: var(--faint); }
+#ask-status { color: var(--muted); font-size: 14px; margin: 0 0 12px; }
+#ask-status:empty { display: none; }
+#ask-form { display: flex; gap: 8px; align-items: flex-end; border: 1px solid var(--line); border-radius: 16px; padding: 8px 8px 8px 16px; background: var(--bg); }
+#ask-form:focus-within { border-color: var(--faint); }
+#ask-form textarea {
+  flex: 1; min-width: 0; font: inherit; color: var(--ink); background: transparent; border: 0;
+  resize: none; min-height: 3em; padding: 6px 0; outline: none;
 }
-.howto summary { cursor: pointer; padding: 12px 16px; font-weight: 600; }
-.howto .body { padding: 0 16px 14px; }
-.howto ul { margin: 0; padding-left: 18px; }
+#ask-form textarea::placeholder { color: var(--faint); }
+#ask-send { border: 0; background: var(--accent); color: #fff; font-weight: 600; border-radius: 999px; padding: 8px 20px; cursor: pointer; }
+:root[data-theme="dark"] #ask-send { color: #10213d; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) #ask-send { color: #10213d; } }
+#ask-send:disabled { opacity: .55; cursor: wait; }
+#ask-count { display: block; text-align: right; font-size: 13px; color: var(--faint); margin-top: 4px; }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+.chips button {
+  font-size: 15px; text-align: left; border: 0; background: var(--soft); color: var(--ink);
+  border-radius: 999px; padding: 7px 14px; cursor: pointer; max-width: 100%;
+}
+.chips button:hover { color: var(--accent); }
+.chips button:disabled { opacity: .5; cursor: wait; }
+.chips.follow { margin-top: 16px; }
+.chips.follow button { font-size: 14px; padding: 5px 12px; }
+.fine { margin: 32px 0 0; color: var(--muted); font-size: 14px; }
+details.about { margin-top: 8px; font-size: 14px; color: var(--muted); }
+details.about summary { cursor: pointer; width: max-content; max-width: 100%; }
+details.about p { margin: 10px 0 0; }
+
+/* Explore the data: one quiet row of links, the section opens under it */
+.explore { margin-top: 32px; color: var(--muted); font-size: 15px; }
+.explore a { white-space: nowrap; }
+.explore a[aria-current="true"] { color: var(--ink); font-weight: 600; text-decoration: none; }
+#data-area { margin-top: 32px; }
+.section-head { margin: 0 0 16px; }
+.section-head h2 { font-size: 22px; line-height: 1.25; margin: 0; }
+.section-head h2 .n { color: var(--muted); font-weight: 400; font-variant-numeric: tabular-nums; }
+.section-head p { margin: 4px 0 0; color: var(--muted); font-size: 14px; }
+.howto { margin: 0 0 24px; font-size: 15px; }
+.howto summary { cursor: pointer; font-weight: 600; }
+.howto ul { margin: 8px 0 0; padding-left: 18px; color: var(--muted); }
 .howto li { margin: 6px 0; max-width: 92ch; }
-.tabs { display: flex; gap: 6px; margin: 18px 0 10px; flex-wrap: wrap; }
-.tab, .seg button {
-  font: inherit;
-  border: 1px solid var(--line);
-  background: var(--panel);
-  color: var(--ink);
-  border-radius: 999px;
-  padding: 7px 14px;
-  cursor: pointer;
-}
-.tab[aria-selected="true"], .seg button[aria-pressed="true"] {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: var(--panel);
-}
-.tab .n { opacity: .75; font-variant-numeric: tabular-nums; }
+.howto li b { color: var(--ink); }
+
+/* The data sections (unchanged mechanics, quieter) */
 .controls {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
   gap: 10px;
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: 10px;
+  background: var(--soft);
+  border-radius: 12px;
   padding: 12px;
-  box-shadow: var(--shadow);
 }
 .controls label { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--muted); }
 .controls input, .controls select {
@@ -133,12 +177,17 @@ a { color: var(--accent); }
 .controls .checks label { flex-direction: row; align-items: center; gap: 6px; font-size: 13px; color: var(--ink); }
 .controls .actions { display: flex; align-items: flex-end; gap: 6px; }
 .controls button {
-  font: inherit; font-size: 13px; border: 1px solid var(--line); background: var(--bg);
+  font-size: 13px; border: 1px solid var(--line); background: var(--bg);
   color: var(--ink); border-radius: 6px; padding: 6px 10px; cursor: pointer; white-space: nowrap;
 }
 .seg { display: flex; gap: 6px; flex-wrap: wrap; margin: 10px 0 0; }
+.seg button { border: 0; background: var(--soft); color: var(--ink); border-radius: 999px; padding: 6px 14px; cursor: pointer; font-size: 14px; }
+.seg button[aria-pressed="true"] { background: var(--ink); color: var(--bg); }
+.controls .seg button { border: 0; background: var(--bg); }
+.controls .seg button[aria-pressed="true"] { background: var(--ink); color: var(--bg); }
 .status { color: var(--muted); font-size: 13px; margin: 12px 2px 8px; }
-table { width: 100%; border-collapse: collapse; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.scroll { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; background: var(--panel); font-size: 14px; }
 th {
   text-align: left; font-size: 12px; font-weight: 600; color: var(--muted);
   padding: 8px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; vertical-align: bottom;
@@ -167,19 +216,19 @@ tr.why td { padding: 0 10px 10px; color: var(--muted); font-size: 13px; }
 .flags li + li { margin-top: 2px; }
 .none { color: var(--faint); font-size: 12.5px; }
 .chance { font-weight: 600; }
-.more { display: block; margin: 14px auto 0; font: inherit; padding: 8px 18px; border-radius: 999px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); cursor: pointer; }
+.more { display: block; margin: 16px auto 0; font-size: 14px; padding: 8px 18px; border-radius: 999px; border: 0; background: var(--soft); color: var(--ink); cursor: pointer; }
 .empty { padding: 28px; text-align: center; color: var(--muted); }
-details.dict { margin-top: 22px; }
+details.dict { margin-top: 24px; font-size: 15px; }
 details.dict summary { cursor: pointer; font-weight: 600; }
 details.dict dl { margin: 10px 0 0; }
 details.dict dt { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12.5px; margin-top: 8px; }
 details.dict dd { margin: 2px 0 0; color: var(--muted); max-width: 92ch; }
 .link {
-  font: inherit; font-size: 12px; background: none; border: 0; padding: 0; margin-top: 3px;
+  font-size: 12px; text-align: left; background: none; border: 0; padding: 0; margin-top: 3px;
   color: var(--accent); cursor: pointer; text-decoration: underline; text-underline-offset: 2px;
 }
 tr.sim td { padding: 0 10px 12px; }
-.simbox { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; font-size: 13px; }
+.simbox { background: var(--soft); border-radius: 10px; padding: 10px 12px; font-size: 13px; }
 .simbox h3, #sim-out h3 { font-size: 13px; margin: 0 0 6px; }
 .report { margin: 0 0 12px; }
 .report p { margin: 0 0 4px; max-width: 80ch; font-size: 14px; line-height: 1.5; }
@@ -191,11 +240,11 @@ tr.sim td { padding: 0 10px 12px; }
 .controls .mode { grid-column: 1 / -1; margin: 0; }
 .suggest { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 0; }
 .suggest button {
-  font: inherit; font-size: 13px; text-align: left; border: 1px solid var(--line); background: var(--panel);
+  font-size: 13px; text-align: left; border: 0; background: var(--soft);
   color: var(--ink); border-radius: 8px; padding: 6px 10px; cursor: pointer;
 }
-#sim-out { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; box-shadow: var(--shadow); }
-#sim-out:empty { display: none; }
+#sim-out, #ar-out, #ar-card { padding: 4px 0; font-size: 14px; margin: 0 0 12px; }
+#sim-out:empty, #ar-out:empty, #ar-card:empty { display: none; }
 #sim-out .query { color: var(--muted); margin: 0 0 10px; }
 .note { color: var(--muted); font-size: 13px; max-width: 100ch; }
 .label { background: var(--warn-soft); color: var(--warn); border-radius: 8px; padding: 9px 12px; font-weight: 600; font-size: 13.5px; max-width: 100ch; margin: 0 0 12px; }
@@ -208,103 +257,96 @@ tr.sim td { padding: 0 10px 12px; }
 .traits b { font-variant-numeric: tabular-nums; text-align: right; }
 .traits .why { color: var(--muted); }
 .tag { display: inline-block; font-size: 11.5px; color: var(--warn); background: var(--warn-soft); border-radius: 5px; padding: 1px 6px; margin-left: 6px; }
-#ar-out, #ar-card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; box-shadow: var(--shadow); margin: 0 0 12px; }
-#ar-out:empty, #ar-card:empty { display: none; }
 #ar-out h3, #ar-card h3 { font-size: 13px; margin: 0 0 6px; }
 #ar-card .query { color: var(--muted); font-size: 13px; margin: 0 0 8px; }
 #ar-card .sources { margin: 8px 0 0; padding-left: 18px; color: var(--muted); font-size: 13px; }
-.credit img, footer img.logo { height: 26px; vertical-align: middle; background: #fff; padding: 3px 6px; border-radius: 6px; margin-right: 8px; }
-.ask-line { color: var(--muted); font-size: 13.5px; margin: 0 0 12px; max-width: 100ch; }
-.explore { align-self: center; color: var(--muted); font-size: 13px; margin-left: 10px; padding-left: 12px; border-left: 1px solid var(--line); }
-.welcome { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; box-shadow: var(--shadow); margin: 0 0 12px; max-width: 100ch; }
-.welcome h2 { font-size: 18px; margin: 0 0 6px; }
-.welcome p { margin: 6px 0 0; }
-.chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 12px; }
-.chips button {
-  font: inherit; font-size: 14px; text-align: left; border: 1px solid var(--accent); background: var(--accent-soft);
-  color: var(--accent); border-radius: 999px; padding: 7px 14px; cursor: pointer; max-width: 100%;
+.credit img, footer img.logo { height: 22px; vertical-align: middle; background: #fff; padding: 3px 6px; border-radius: 6px; margin-right: 8px; }
+
+/* Footer: downloads and sources, small and muted */
+footer.col { margin: 64px auto 40px; color: var(--muted); font-size: 13px; line-height: 1.5; }
+footer p { margin: 0 0 8px; }
+
+
+@media (min-width: 761px) {
+  body { font-size: 17px; }
 }
-.chips button:disabled { opacity: .5; cursor: wait; }
-.chips.follow { margin: 10px 0 0; }
-.chips.follow button { font-size: 13px; padding: 5px 12px; }
-#ask-log { display: grid; gap: 10px; margin: 0 0 12px; }
-.msg { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; box-shadow: var(--shadow); max-width: 100ch; }
-.msg.you { background: var(--accent-soft); border-color: transparent; justify-self: end; }
-.msg .who { font-size: 11.5px; color: var(--faint); margin-bottom: 3px; }
-.msg p { margin: 0 0 8px; }
-.msg p:last-child { margin-bottom: 0; }
-.msg.capped { background: var(--warn-soft); color: var(--warn); border-color: transparent; }
-details.from { margin-top: 8px; border-top: 1px solid var(--line); padding-top: 6px; font-size: 13px; }
-details.from summary { cursor: pointer; color: var(--muted); }
-details.from h4 { font-size: 12.5px; margin: 10px 0 2px; }
-details.from .args { color: var(--faint); margin: 0 0 4px; }
-details.from ol { margin: 4px 0; padding-left: 20px; }
-details.from li { margin: 3px 0; }
-dl.kv { margin: 0; display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 2px 10px; }
-dl.kv dt { color: var(--faint); }
-dl.kv dd { margin: 0; }
-.kv .k { color: var(--faint); }
-#ask-form { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: end; }
-#ask-form textarea { font: inherit; width: 100%; min-height: 3.2em; resize: vertical; border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; background: var(--panel); color: var(--ink); }
-#ask-form button { font: inherit; border: 1px solid var(--accent); background: var(--accent); color: var(--panel); border-radius: 8px; padding: 8px 16px; cursor: pointer; }
-#ask-form button:disabled { opacity: .55; cursor: wait; }
-#ask-count { font-size: 12px; color: var(--faint); grid-column: 1 / -1; }
-footer { margin-top: 28px; color: var(--muted); font-size: 13px; border-top: 1px solid var(--line); padding-top: 14px; }
-footer p { margin: 6px 0; max-width: 100ch; }
 @media (max-width: 760px) {
-  .wrap { padding: 16px 16px 40px; }
-  header h1 { font-size: 21px; }
-  .explore { flex-basis: 100%; margin: 4px 0 0; padding: 0; border: 0; }
-  .chips button { width: 100%; }
-  #ask-form { grid-template-columns: 1fr; }
+  .hero { padding-top: 0; min-height: 100vh; min-height: 100svh; display: flex; flex-direction: column; justify-content: center; }
+  .hero.talking { min-height: 0; padding-top: 32px; justify-content: flex-start; }
+  header h1 { font-size: 26px; }
+  #ask-form { padding-left: 14px; }
   .controls { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .controls input, .controls select { width: 100%; }
   .controls input[type="checkbox"] { width: auto; }
   .controls .actions { grid-column: 1 / -1; }
   .controls .search { grid-column: 1 / -1; }
   table, thead, tbody, tr, td { display: block; }
-  table { border: 0; background: none; }
+  table { background: none; }
   thead { display: none; }
-  tbody.row {
-    background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
-    margin: 0 0 10px; padding: 6px 0 2px; box-shadow: var(--shadow);
-  }
-  tbody.row:hover { background: var(--panel); }
+  tbody.row { border-top: 1px solid var(--line); padding: 8px 0 4px; }
+  tbody.row:hover { background: none; }
   tr.main { display: grid; grid-template-columns: 1fr 1fr; }
-  tr.main td { padding: 6px 12px; }
+  tr.main td { padding: 6px 0; }
+  tr.main td + td { padding-right: 8px; }
   tr.main td.player, tr.main td.wide { grid-column: 1 / -1; }
   tr.main td[data-label]::before {
     content: attr(data-label); display: block; font-size: 11px; color: var(--faint); margin-bottom: 1px;
   }
-  tr.why td { padding: 2px 12px 10px; }
+  tr.why td { padding: 2px 0 10px; }
+  tr.sim td { padding: 0 0 12px; }
   .traits li { grid-template-columns: minmax(0, 1fr) 70px 2.2em; }
   .traits .why { grid-column: 1 / -1; }
 }
 </style>
 </head>
 <body>
-<div class="wrap">
+<div class="col hero" id="hero">
   <header>
-    <h1>Scouting lists</h1>
-    <p id="subtitle"></p>
+    <h1>Football scouting assistant</h1>
+    <p class="sub" id="subtitle"></p>
   </header>
 
-  <details class="howto" id="howto" open>
-    <summary>How to read this: calibrated odds from past seasons, not predictions beyond the market</summary>
-    <div class="body"><ul id="howto-list"></ul></div>
+  <section id="ask" aria-label="Ask about the players">
+    <div id="ask-log" aria-live="polite"></div>
+    <p id="ask-status" aria-live="polite"></p>
+    <form id="ask-form">
+      <textarea id="ask-q" maxlength="500" rows="2" placeholder="Ask about a player, a league or a type of player" aria-label="Your question"></textarea>
+      <button type="submit" id="ask-send">Ask</button>
+    </form>
+    <span id="ask-count" hidden></span>
+    <div class="chips" id="ask-suggest" aria-label="Suggested questions"></div>
+  </section>
+</div>
+
+<div class="col">
+  <p class="fine" id="ask-fine"></p>
+  <details class="about" id="ask-about">
+    <summary>What it knows and what it does not</summary>
+    <p id="ask-knows"></p>
+    <p id="ask-not"></p>
+    <p id="ask-how"></p>
   </details>
 
-  <div class="tabs" role="tablist">
-    <button class="tab" role="tab" id="tab-ask" data-tab="ask">Ask</button>
-    <span class="explore">Explore the data:</span>
-    <button class="tab" role="tab" id="tab-candidates" data-tab="candidates">Candidates <span class="n"></span></button>
-    <button class="tab" role="tab" id="tab-bargains" data-tab="bargains">Bargains <span class="n"></span></button>
-    <button class="tab" role="tab" id="tab-similar" data-tab="similar">Similar players</button>
-    <button class="tab" role="tab" id="tab-greats" data-tab="greats">Measured greats</button>
-    <button class="tab" role="tab" id="tab-archetypes" data-tab="archetypes">Archetypes</button>
-  </div>
+  <nav class="explore" id="explore" aria-label="Explore the data">Explore the data:
+    <a href="#candidates" data-tab="candidates">Candidates</a>,
+    <a href="#bargains" data-tab="bargains">Bargains</a>,
+    <a href="#similar" data-tab="similar">Similar players</a>,
+    <a href="#greats" data-tab="greats">Greats</a>,
+    <a href="#archetypes" data-tab="archetypes">Archetypes</a>
+  </nav>
+</div>
+
+<div class="wide" id="data-area" hidden>
+  <details class="howto" id="howto">
+    <summary>How to read this: calibrated odds from past seasons, not predictions beyond the market</summary>
+    <ul id="howto-list"></ul>
+  </details>
 
   <div id="tables">
+  <div class="section-head">
+    <h2 id="tables-title"></h2>
+    <p class="data-meta"></p>
+  </div>
 
   <div class="controls" id="controls">
     <label class="search">Search player or club
@@ -332,9 +374,11 @@ footer p { margin: 6px 0; max-width: 100ch; }
   </div>
 
   <p class="status" id="status" aria-live="polite"></p>
+  <div class="scroll">
   <table id="table">
     <thead><tr id="head"></tr></thead>
   </table>
+  </div>
   <button type="button" class="more" id="more" hidden>Show 50 more</button>
 
   <details class="dict" id="dict">
@@ -344,6 +388,10 @@ footer p { margin: 6px 0; max-width: 100ch; }
   </div>
 
   <section id="similar" hidden>
+    <div class="section-head">
+      <h2>Similar players <span class="n" id="similar-n"></span></h2>
+      <p class="data-meta"></p>
+    </div>
     <div class="controls">
       <div class="seg mode" id="sim-mode">
         <button type="button" data-mode="now" aria-pressed="true">Plays like him now</button>
@@ -373,6 +421,10 @@ footer p { margin: 6px 0; max-width: 100ch; }
   </section>
 
   <section id="greats" hidden>
+    <div class="section-head">
+      <h2>Measured greats <span class="n" id="greats-n"></span></h2>
+      <p class="data-meta"></p>
+    </div>
     <p class="label" id="gr-label"></p>
     <div class="controls">
       <label>Great <select id="gr-name"></select></label>
@@ -386,6 +438,10 @@ footer p { margin: 6px 0; max-width: 100ch; }
   </section>
 
   <section id="archetypes" hidden>
+    <div class="section-head">
+      <h2>Archetypes <span class="n" id="archetypes-n"></span></h2>
+      <p class="data-meta"></p>
+    </div>
     <p class="label" id="ar-label"></p>
     <div class="controls">
       <label>Archetype <select id="ar-name"></select></label>
@@ -404,26 +460,9 @@ footer p { margin: 6px 0; max-width: 100ch; }
     <p class="note" id="ar-note"></p>
   </section>
 
-  <section id="ask" hidden>
-    <div class="welcome">
-      <h2>Ask about the players</h2>
-      <p id="ask-knows"></p>
-      <p id="ask-not"></p>
-    </div>
-    <div class="chips" id="ask-suggest" aria-label="Suggested questions"></div>
-    <p class="label">Answers are built only from the tables shown on this page.</p>
-    <p class="ask-line" id="ask-line"></p>
-    <div id="ask-log" aria-live="polite"></div>
-    <p class="status" id="ask-status" aria-live="polite"></p>
-    <form id="ask-form">
-      <textarea id="ask-q" maxlength="500" placeholder="for example: who is the youngest centre back with an elite chance of 30%?" aria-label="Your question"></textarea>
-      <button type="submit" id="ask-send">Ask</button>
-      <span id="ask-count">0 / 500</span>
-    </form>
-  </section>
-
-  <footer id="footer"></footer>
 </div>
+
+<footer class="col" id="footer"></footer>
 
 <script type="application/json" id="data">__DATA__</script>
 <script>
@@ -551,7 +590,8 @@ footer p { margin: 6px 0; max-width: 100ch; }
     similar: location.hash === "#similar",
     greats: location.hash === "#greats",
     archetypes: location.hash === "#archetypes",
-    ask: !location.hash || location.hash === "#ask",  // the page opens on the chat (prompt 20d)
+    // No data section open: the chat alone (prompt 20e); a data link opens one under it.
+    ask: ["#candidates", "#bargains", "#similar", "#greats", "#archetypes"].indexOf(location.hash) < 0,
     list: "prime",
     shown: PAGE,
     sort: { candidates: { key: "order", dir: 1 }, bargains: { key: "rank", dir: 1 } }
@@ -596,6 +636,8 @@ footer p { margin: 6px 0; max-width: 100ch; }
     }).join("");
     checks();
     tabs();
+    $("tables-title").innerHTML = (state.tab === "bargains" ? "Bargains" : "Candidates") + ' <span class="n">' +
+      DATA[state.tab].length.toLocaleString("en") + " players</span>";
     $("lists").hidden = state.tab !== "bargains";
     head();
     dictionary();
@@ -683,16 +725,20 @@ footer p { margin: 6px 0; max-width: 100ch; }
   function refresh() { state.shown = PAGE; draw(); }
 
   function tabs() {
-    var on = state.ask ? "ask" : state.archetypes ? "archetypes" : state.greats ? "greats" : state.similar ? "similar" : state.tab;
-    document.querySelectorAll(".tab").forEach(function (t) {
-      t.setAttribute("aria-selected", String(t.dataset.tab === on));
+    var on = state.ask ? null : state.archetypes ? "archetypes" : state.greats ? "greats" : state.similar ? "similar" : state.tab;
+    document.querySelectorAll("#explore a").forEach(function (a) {
+      if (a.dataset.tab === on) a.setAttribute("aria-current", "true");
+      else a.removeAttribute("aria-current");
     });
+    $("data-area").hidden = state.ask;
     $("tables").hidden = state.similar || state.greats || state.archetypes || state.ask;
     $("similar").hidden = !state.similar;
     $("greats").hidden = !state.greats;
     $("archetypes").hidden = !state.archetypes;
-    $("ask").hidden = !state.ask;
-    $("howto").hidden = state.ask;  // the welcome says what the chat holds
+  }
+  // A data link opens its section under the chat and brings the links to the top.
+  function showSection() {
+    $("explore").scrollIntoView({ block: "start" });
   }
 
   // Similar players (prompt 18): data/similar.json, loaded on first use
@@ -736,6 +782,7 @@ footer p { margin: 6px 0; max-width: 100ch; }
         return list[list.length - 1];
       });
       SIM = { available: true, d: d, today: today, byId: byId, seasons: seasons, people: people };
+      $("similar-n").textContent = today.length.toLocaleString("en") + " players today";
       if (d.greats && d.greats.available) SIM.greats = greatRows(d.greats, d);
       options($("sim-league"), d.leagues, "All leagues");
       return SIM;
@@ -956,6 +1003,7 @@ footer p { margin: 6px 0; max-width: 100ch; }
     }
     $("gr-label").textContent = g.label;
     var names = greatNames();
+    $("greats-n").textContent = names.length + " greats";
     if (!gr.name || names.indexOf(gr.name) < 0) gr.name = names.indexOf("Lionel Messi") >= 0 ? "Lionel Messi" : names[0];
     $("gr-name").innerHTML = names.map(function (n) {
       return '<option value="' + esc(n) + '"' + (n === gr.name ? " selected" : "") + ">" + esc(n) + "</option>";
@@ -1026,6 +1074,7 @@ footer p { margin: 6px 0; max-width: 100ch; }
       return;
     }
     if (!SIM.archetypes) SIM.archetypes = greatRows(a, SIM.d);
+    $("archetypes-n").textContent = SIM.archetypes.length + " archetypes";
     $("ar-label").textContent = a.label + " Every archetype is a draft from the historical record awaiting the owner's review.";
     var groups = [["legends", "Legends"], ["calibration", "Calibration drafts (players we can measure)"]];
     if (!ar.key) ar.key = SIM.archetypes[0].key;
@@ -1097,6 +1146,7 @@ footer p { margin: 6px 0; max-width: 100ch; }
   var chat = { history: [], busy: false, warmed: false };
   var TURNS = 6;  // earlier messages sent with a question
   var SLOW_MS = 5000;  // then the status says a first answer can be slow
+  var COUNT_FROM = 400;  // the character counter shows from here on (prompt 20e)
 
   // Wakes the chat while the visitor types (prompt 20b): the Lambda loads the
   // tables and calls no model, so the first question rarely meets a cold start.
@@ -1110,17 +1160,17 @@ footer p { margin: 6px 0; max-width: 100ch; }
     }).catch(function () {});
   }
 
-  function openAsk() {
-    state.ask = true;
-    state.similar = false;
-    state.greats = false;
-    state.archetypes = false;
-    history.replaceState(null, "", "#ask");
-    tabs();
+  // The chat is always on the page (prompt 20e): the box, three suggested
+  // questions, one line of dates and limits, and what it knows behind a click.
+  function setupAsk() {
     var on = D.chat && D.chat.url;
     $("ask-form").hidden = !on;
-    $("ask-line").textContent = on
-      ? D.chat.model + " looks the answer up in the candidates, bargains, similar players and the written reports with four tools; every number it gives must come from what it looked up, shown under each answer (From the tables). A prototype: at most " + D.chat.max_chars + " characters a question and " + D.chat.per_hour + " questions an hour."
+    var dates = Object.keys(D.feature_dates).sort();
+    $("ask-fine").textContent = "Players as of " + day(dates[dates.length - 1]) +
+      (D.so_far_date ? ", clubs and this season to " + day(D.so_far_date) : "") +
+      (on ? " · " + D.chat.max_chars + " characters, " + D.chat.per_hour + " questions an hour" : "");
+    $("ask-how").textContent = on
+      ? "The chat is a prototype: " + D.chat.model + " answers with four lookup tools over the candidates, bargains, similar players and the written reports, and every number it gives comes from what it looked up, shown under each answer (From the tables)."
       : "";
     welcome();
     chips($("ask-suggest"), on ? D.chat.suggested || [] : []);
@@ -1128,7 +1178,7 @@ footer p { margin: 6px 0; max-width: 100ch; }
     else warmChat();
   }
 
-  // The welcome and the suggested questions (prompt 20d)
+  // What it knows and does not (prompt 20d), now inside the details under the box
 
   function welcome() {
     var dates = Object.keys(D.feature_dates).sort(), S = D.seasons;
@@ -1213,8 +1263,14 @@ footer p { margin: 6px 0; max-width: 100ch; }
         return "<h4>" + esc(r.tool.replace(/_/g, " ")) + '</h4><p class="args">' + esc(plain(r.input)) + "</p>" + result(r.result);
       }).join("") + "</details>";
   }
-  function say(who, html, cls) {
-    $("ask-log").insertAdjacentHTML("beforeend", '<div class="msg ' + (cls || "") + '"><div class="who">' + esc(who) + "</div>" + html + "</div>");
+  function say(html, cls) {
+    $("ask-log").insertAdjacentHTML("beforeend", '<div class="msg ' + cls + '">' + html + "</div>");
+    return $("ask-log").lastElementChild;
+  }
+  function count() {
+    var n = $("ask-q").value.length;
+    $("ask-count").hidden = n < COUNT_FROM;
+    $("ask-count").textContent = n + " / " + ((D.chat && D.chat.max_chars) || 500);
   }
   function sendQuestion(e) {
     e.preventDefault();
@@ -1230,9 +1286,11 @@ footer p { margin: 6px 0; max-width: 100ch; }
     var slow = setTimeout(function () {
       $("ask-status").textContent = "Looking it up in the tables. The first answer can take up to 30 seconds.";
     }, SLOW_MS);
-    say("You", paragraphs(q), "you");
+    $("ask-suggest").hidden = true;  // the follow ups under each answer take over
+    $("hero").classList.add("talking");
+    say(paragraphs(q), "you").scrollIntoView({ block: "start" });
     $("ask-q").value = "";
-    $("ask-count").textContent = "0 / " + D.chat.max_chars;
+    count();
     var past = chat.history.slice(-TURNS);
     fetch(D.chat.url, {
       method: "POST",
@@ -1248,12 +1306,12 @@ footer p { margin: 6px 0; max-width: 100ch; }
       var follow = next.length ? '<div class="chips follow" aria-label="Ask next">' + next.map(function (x) {
         return '<button type="button" data-q="' + esc(x) + '">' + esc(x) + "</button>";
       }).join("") + "</div>" : "";
-      say("Answer", paragraphs(b.answer || "Sorry, no answer came back.") + fromTables(b.tool_results) + follow, answered ? "" : "capped");
+      say(paragraphs(b.answer || "Sorry, no answer came back.") + fromTables(b.tool_results) + follow, answered ? "answer" : "answer capped");
       if (answered) chat.history.push({ role: "user", content: q }, { role: "assistant", content: b.answer });
       $("ask-status").textContent = "";
     }).catch(function (err) {
       clearTimeout(slow);
-      say("Answer", paragraphs(err && err.message === "busy" ? "The chat is busy with other questions; please try again in a minute." : "The chat could not be reached; please try again in a minute."), "capped");
+      say(paragraphs(err && err.message === "busy" ? "The chat is busy with other questions; please try again in a minute." : "The chat could not be reached; please try again in a minute."), "answer capped");
       $("ask-status").textContent = "";
     }).then(function () {
       chat.busy = false;
@@ -1299,9 +1357,9 @@ footer p { margin: 6px 0; max-width: 100ch; }
   }
 
   function header() {
-    $("subtitle").textContent = "Season " + D.season_label + ", players from " + D.leagues + " of the " + D.tracked + " leagues tracked, built " + day(D.built) + ".";
-    $("tab-candidates").querySelector(".n").textContent = DATA.candidates.length.toLocaleString("en");
-    $("tab-bargains").querySelector(".n").textContent = DATA.bargains.length.toLocaleString("en");
+    $("subtitle").textContent = "Ask about " + int(D.players) + " players across " + D.player_leagues + " leagues. Every answer comes from the tables on this page.";
+    var meta = "Season " + D.season_label + ", players from " + D.leagues + " of the " + D.tracked + " leagues tracked, built " + day(D.built) + ".";
+    document.querySelectorAll(".data-meta").forEach(function (p) { p.textContent = meta; });
     document.querySelectorAll("#lists button").forEach(function (b) {
       b.querySelector(".n").textContent = DATA.bargains.filter(function (o) { return o.list === b.dataset.list; }).length.toLocaleString("en");
     });
@@ -1317,12 +1375,12 @@ footer p { margin: 6px 0; max-width: 100ch; }
 
   // Wiring
 
-  document.querySelectorAll(".tab").forEach(function (t) {
-    t.addEventListener("click", function () {
-      if (t.dataset.tab === "similar") { openSimilar(); return; }
-      if (t.dataset.tab === "greats") { openGreats(); return; }
-      if (t.dataset.tab === "archetypes") { openArchetypes(); return; }
-      if (t.dataset.tab === "ask") { openAsk(); return; }
+  document.querySelectorAll("#explore a").forEach(function (t) {
+    t.addEventListener("click", function (e) {
+      e.preventDefault();
+      if (t.dataset.tab === "similar") { openSimilar(); showSection(); return; }
+      if (t.dataset.tab === "greats") { openGreats(); showSection(); return; }
+      if (t.dataset.tab === "archetypes") { openArchetypes(); showSection(); return; }
       state.ask = false;
       state.similar = false;
       state.greats = false;
@@ -1333,6 +1391,7 @@ footer p { margin: 6px 0; max-width: 100ch; }
       state.shown = PAGE;
       setupTab();
       draw();
+      showSection();
     });
   });
   document.querySelectorAll("#lists button").forEach(function (b) {
@@ -1359,7 +1418,7 @@ footer p { margin: 6px 0; max-width: 100ch; }
   $("table").addEventListener("click", function (e) {
     var open = e.target.closest(".sim-open"), more = e.target.closest(".sim-more");
     if (open) togglePanel(open);
-    if (more) { openSimilar(Number(more.dataset.id)); window.scrollTo(0, 0); }
+    if (more) { openSimilar(Number(more.dataset.id)); showSection(); }
   });
   document.querySelectorAll("#sim-mode button").forEach(function (b) {
     b.addEventListener("click", function () { sim.mode = b.dataset.mode; suggest(); simDraw(); });
@@ -1386,14 +1445,13 @@ footer p { margin: 6px 0; max-width: 100ch; }
     var b = e.target.closest(".chips button");
     if (b && !b.disabled) ask(b.dataset.q);
   });
-  $("ask-q").addEventListener("input", function () { $("ask-count").textContent = $("ask-q").value.length + " / " + ((D.chat && D.chat.max_chars) || 500); });
+  $("ask-q").addEventListener("input", count);
   $("ask-q").addEventListener("keydown", function (e) {
     if (e.key === "Enter" && !e.shiftKey) sendQuestion(e);
   });
 
   header();
   howto();
-  if (window.matchMedia && window.matchMedia("(max-width: 760px)").matches) $("howto").open = false;
   document.querySelector('#lists button[data-list="prime"]').setAttribute("aria-pressed", "true");
   document.querySelector('#lists button[data-list="experienced"]').setAttribute("aria-pressed", "false");
   setupTab();
@@ -1401,7 +1459,9 @@ footer p { margin: 6px 0; max-width: 100ch; }
   if (state.similar) openSimilar();
   if (state.greats) openGreats();
   if (state.archetypes) openArchetypes();
-  if (state.ask) openAsk();
+  tabs();
+  setupAsk();
+  if (!state.ask) showSection();  // an old link to a data section still opens it
 })();
 </script>
 </body>

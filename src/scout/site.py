@@ -25,12 +25,16 @@
   published analysis of its data to carry, written only with the greats
   (no greats are shown without it);
 * the Ask tab (prompt 20): the chat's Function URL (``chat.url`` of the
-  config) and its caps, for the page to call; without a URL the tab says the
-  chat is not switched on. Since prompt 20d it is the first tab and opens by
-  default, with a welcome, four suggested questions and follow ups built
-  from each answer's tool results; the data tabs sit under "Explore the
-  data". The chat Lambda reads this page's data block and
-  the downloads, never anything else (``scout.chat.data``);
+  config) and its caps, for the page to call; without a URL the page says the
+  chat is not switched on. Since prompt 20e the page is the chat: the title,
+  one line (how many players and leagues it can tell about), the question
+  box and three suggested questions, then one muted line of dates and
+  limits and a collapsed "What it knows and what it does not"; follow ups
+  are built from each answer's tool results. The data sections open under
+  the chat from one row of links ("Explore the data"), with their counts in
+  their headings; downloads and sources sit in the footer. The chat Lambda
+  reads this page's data block and the downloads, never anything else
+  (``scout.chat.data``);
 * ``data/reports.json`` (prompt 19): each player's written report when the
   stored one (``scout reports``) still matches today's fact sheet, else his
   template explanation, with the label the panel shows under it; loaded
@@ -69,6 +73,7 @@ PUBLISHED = ("candidates", "bargains")  # each as .csv and .parquet, plus dictio
 SIMILAR = "similar.json"  # in data/, next to the downloads
 REPORTS = "reports.json"  # in data/, next to the downloads
 LOGO = "statsbomb-logo.png"  # next to the page, only with the greats
+TITLE = "Football scouting assistant"  # the page's title and heading (prompt 20e)
 HISTORY_TOP = 500  # "looks like X at Y": every season of players once ranked this high
 SCALE = 127  # unit vectors as 8 bit integers
 
@@ -249,6 +254,10 @@ def page_data(
         "tags": TAGS,
         "so_far_date": _day(cand["so_far_date"].max()) if "so_far_date" in cand else None,
         "leagues": int(cand["league"].nunique()),
+        # The subtitle's "Ask about N players across M leagues" (prompt 20e): every
+        # player with a card, the two tables together.
+        "players": int(pd.concat([cand["player_id"], barg["player_id"]]).nunique()),
+        "player_leagues": int(pd.concat([cand["league"], barg["league"]]).dropna().nunique()),
         "tracked": tracked,
         "greats": greats,
         "reports": {k: v for k, v in (reports or {"available": False}).items() if k != "rows"},
@@ -475,9 +484,7 @@ def render(data: dict, template: Path = TEMPLATE) -> str:
     payload = json.dumps(data, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
     payload = payload.replace("</", "<\\/").replace("<!--", "<\\!--")
     html = template.read_text(encoding="utf-8")
-    return html.replace("__TITLE__", f"Scouting lists {data['season_label']}").replace(
-        "__DATA__", payload
-    )
+    return html.replace("__TITLE__", TITLE).replace("__DATA__", payload)
 
 
 def build_site(

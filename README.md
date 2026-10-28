@@ -285,7 +285,11 @@ exception.
   answer can take up to 30 seconds. Since 28 October (prompt 20d) the page
   opens on the chat: a short welcome saying what it knows and does not,
   four suggested questions and two or three follow ups after each answer;
-  the tables sit under "Explore the data". The chat reads nicknames (R9,
+  the tables sit under "Explore the data". Since prompt 20e the page is
+  minimal: the title, one line, the question box and three suggested
+  questions; the dates, the caps and what it knows sit quietly under the
+  box, the tables open from one row of links, and the downloads and
+  sources are in the footer. The chat reads nicknames (R9,
   CR7, La Pulga, Zizou, Il Maestro, Rio) and answers about legends we hold
   no data for from their archetype, always saying "archetype from the
   record, not measured", and about the measured greats with "measured,

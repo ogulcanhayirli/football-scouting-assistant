@@ -427,11 +427,13 @@ says what the chat holds) and shown on every data tab.
   page's `seasons` field) and what it does not (no injury news, no
   fixtures or results, no wages, fees or rumours, nothing after the
   feature date, the valuation end and the pull day).
-* **Four suggested questions** under it send themselves when tapped
+* **Suggested questions** under it send themselves when tapped
   (`SUGGESTED` in `src/scout/chat/prompt.py`, passed to the page by
   `chat_block`): "Who plays most like R9 today?", "Who looks like Messi did
-  at 19?", "Which 20 year olds have the best chance of becoming elite?",
-  "Show me bargains in the Eredivisie".
+  at 19?", "Which 20 year olds have the best chance of becoming elite?"
+  (prompt 20e dropped "Show me bargains in the Eredivisie" from the page;
+  the evaluation still asks it as N04). Since prompt 20e the welcome sits
+  in a collapsed "What it knows and what it does not" under the box.
 * **Follow ups:** after each answer, two or three questions built from its
   tool results (`followUps` in the page): "Tell me about" and "Who plays
   most like ... today?" for the first player returned, then "Show me

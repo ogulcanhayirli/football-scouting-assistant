@@ -234,7 +234,7 @@ through the native API, and model only regular players (450+ minutes).
 | Greats correction (prompt 18c) | `greats` | a StatsBomb season held for Barcelona lands next to the same player's API Football season (top five, 2016/17 to 2020/21) | the uncorrected thin peer group | top five hit rate, median rank, players better and worse |
 | Archetypes (prompt 18c) | `archetypes` | drafted percentiles against the measured ones for six players drafted blind | a draft of 50 on every trait | share within 15 points (the owner's rule: most), mean gap; the real season's rank when searched with the draft |
 | Scout reports (prompts 19, 19c) | `reports` | a report whose every number is on its fact sheet as the kind of number its words say, every name on the sheet, and no claim the sheet's order or fields refute (the check in code), then the judge's faithful (each span with the field it contradicts, checked in code), hedging and readability | the explanation written by rule (shown whenever the check still fails) | share passing on the first try and after two retries, checkable judge verdicts on 50 a week, the judge against the hand sorting (`judge/sorting.csv`, `--judge-test`), the owner's agreement with the judge on 20 (`judge/agreement.csv`); cost per run |
-| Chat (prompt 20, decision 11) | `chat-eval` | 30 questions whose names and numbers are computed from the published tables, 10 the tables cannot answer, 10 attempts to pull the prompt or go off topic; since prompt 20d 6 more (`suggested`: the page's four suggested questions, "who plays like Zizou", "is R9 in the data"), computed the same way and also needing the label's words ("archetype", "not measured"; "cross era") | the ideal tool call run in code (it holds every expected answer: the tools agree with pandas on all 30) | exact match pass rate per group; each failure put down to the model's answer, its tool use or the tools; numbers found in no tool result; the run's cost |
+| Chat (prompt 20, decision 11) | `chat-eval` | 30 questions whose names and numbers are computed from the published tables, 10 the tables cannot answer, 10 attempts to pull the prompt or go off topic; since prompt 20d 6 more (`suggested`: the page's suggested questions (three since prompt 20e) and the fourth it offered before, bargains in the Eredivisie, "who plays like Zizou", "is R9 in the data"), computed the same way and also needing the label's words ("archetype", "not measured"; "cross era") | the ideal tool call run in code (it holds every expected answer: the tools agree with pandas on all 30) | exact match pass rate per group; each failure put down to the model's answer, its tool use or the tools; numbers found in no tool result; the run's cost |
 | Riser (decision 3) | `scouting` | one season ability: both next seasons 20 above the best of this and last season and at the 70th percentile or better; half of team minutes now | `rank_rate` | as above, plus top 50 precision per season against the base rate |
 
 `scouting` also estimates league strength from players who changed leagues
@@ -479,7 +479,7 @@ read this" box shows on the data tabs only. Above the box a welcome says
 what the chat knows (the leagues tracked, the seasons of the similar
 players data from the page's `seasons` field, every number from the
 tables) and does not (no injury news, fixtures, wages, fees or rumours,
-nothing after the data dates); under it the four questions of `SUGGESTED`
+nothing after the data dates); under it the questions of `SUGGESTED`
 (`src/scout/chat/prompt.py`, passed by `chat_block`) send themselves when
 tapped, and each answer ends with two or three follow ups built from its
 tool results (`followUps`: his card and who plays like the first player
@@ -495,7 +495,24 @@ record, not measured", the calibration verdict and, from `player_card`,
 his era, review status and strongest traits; a measured great carries
 "measured, cross era comparison is rough"; rule 9 of the system prompt
 makes the model say the label in one short sentence (both labels are left
-out of the leak guard). Caps (`src/scout/chat/guard.py`): 20
+out of the leak guard). **Prompt 20e (28 October): a minimal page.** The
+page is the chat: in view on a phone only the title "Football scouting
+assistant", one subtitle ("Ask about N players across M leagues. Every
+answer comes from the tables on this page."; N and M are `players` and
+`player_leagues` of `page_data`, every player of the two tables), the
+question box and three suggested questions (`SUGGESTED`; the Eredivisie
+question left the page but stays in the evaluation). Under them one muted
+line of dates and caps, then a collapsed "What it knows and what it does
+not" holding the two welcome paragraphs and one sentence on the model and
+its four lookup tools (the old banner and grey paragraph are gone). The
+Ask tab button is gone: "Explore the data" is one row of plain links whose
+section opens under the chat (counts in the section headings, the old
+subtitle line under them, "How to read this" collapsed); downloads and
+sources sit in the footer, every link and credit kept. One system font, 16
+px on phones and 17 on desktop, a 720 px column (tables 1,100 px), one
+accent, light and dark from the system; the character counter shows from
+400 characters on; the suggested questions hide after the first question
+(the follow ups take over), and the conversation sits above the box. Caps (`src/scout/chat/guard.py`): 20
 messages an hour per IP (salted hash), 1 USD a day and 5 USD a month from
 the usage fields, 500 characters, all with a fixed polite reply; the Claude
 Console workspace's spend limit is the hard backstop. Since prompt 20b the
@@ -648,7 +665,7 @@ detail stays in `reports/scouting.md`, `reports/moves.md`,
 * The thin peer group's correction and archetypes for players without data, with a blind calibration: **done 25 October (prompt 18c); the archetypes await the owner's review.**
 * Generated scout reports with a faithfulness check and a weekly judge: **built 25 October (prompt 19); first real run 25 October (94% template, on length); length handling fixed in prompt 19b (run 9: 8 of 2,734 on the template); the judge's verdicts sorted, the check typed, the judge made checkable, the reports made stable and slow batches carried over in prompt 19c (28 October).**
 * January window forecast, published mid December and scored in February.
-* A capped chat over the two tables: **built and deployed 26 October (prompt 20)**; evaluated in process (28 of 30, 10 of 10, 10 of 10); the two fixes, a faster cold start and the 5 minute warm ping deployed 27 October (prompt 20b: 30 of 30, 10 of 10, 10 of 10); run through the Function URL on 28 October (prompt 20c): 30 of 30, 10 of 10, 10 of 10, 0.26 USD; the page opens on the chat with suggested questions and follow ups, and the chat knows the legends by their nicknames (prompt 20d, 28 October; the model run of the six new questions awaits the key).
+* A capped chat over the two tables: **built and deployed 26 October (prompt 20)**; evaluated in process (28 of 30, 10 of 10, 10 of 10); the two fixes, a faster cold start and the 5 minute warm ping deployed 27 October (prompt 20b: 30 of 30, 10 of 10, 10 of 10); run through the Function URL on 28 October (prompt 20c): 30 of 30, 10 of 10, 10 of 10, 0.26 USD; the page opens on the chat with suggested questions and follow ups, and the chat knows the legends by their nicknames (prompt 20d, 28 October; the model run of the six new questions awaits the key); the page made minimal, the chat alone in view and everything else one click away (prompt 20e, 28 October).
 * A matchup report before any match model.
 
 ## AWS

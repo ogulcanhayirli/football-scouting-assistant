@@ -123,7 +123,7 @@ def test_the_page_embeds_the_data_so_no_text_can_end_the_script():
     data = json.loads(block.group(1))  # the escaped text still parses
     assert data["candidates"]["rows"][0][0] == "Alex </script><b>x</b>"
     assert "__DATA__" not in html
-    assert "<title>Scouting lists 2025/26</title>" in html
+    assert "<title>Football scouting assistant</title>" in html
     assert "cdn" not in html.lower()  # no outside script or stylesheet
 
 
@@ -182,7 +182,7 @@ def test_publish_sends_the_lists_and_the_page_and_nothing_else(tmp_path):
 def test_the_page_loads_the_similar_file_and_links_each_player():
     html = render(_data())
     assert 'fetch("data/similar.json")' in html
-    assert 'data-tab="similar"' in html
+    assert 'href="#similar" data-tab="similar"' in html
     assert "sim-open" in html
     data = _data()
     assert "player_id" in data["candidates"]["columns"]  # the panel's key
@@ -287,8 +287,7 @@ def test_the_ask_tab_is_off_without_a_chat_url():
     data = _data()
     assert data["chat"] == {"url": None}
     html = render(data)
-    assert 'id="tab-ask"' in html
-    assert "Answers are built only from the tables shown on this page." in html
+    assert 'id="ask-form"' in html
     assert "The chat is not switched on yet." in html
 
 
@@ -326,15 +325,119 @@ def test_the_page_opens_on_the_chat_with_suggestions_and_follow_ups():
     from scout.chat.prompt import SUGGESTED
 
     html = render({**_data(), "seasons": {"first": 2015, "count": 11}})
-    # Prompt 20d: the Ask tab comes first and opens when the page has no hash;
-    # the data tabs follow the "Explore the data" hint.
-    tabs = re.search(r'<div class="tabs".*?</div>', html, re.S).group(0)
-    assert tabs.index('data-tab="ask"') < tabs.index("Explore the data") < tabs.index("candidates")
-    assert 'ask: !location.hash || location.hash === "#ask"' in html
-    # The welcome says what the chat knows and does not; questions send themselves.
+    # Prompt 20d: the page opens on the chat when the address has no data section.
+    assert '["#candidates", "#bargains", "#similar", "#greats", "#archetypes"]' in html
+    # What it knows and does not; questions send themselves; follow ups.
     assert "What it knows." in html
     assert "What it does not know." in html
     assert "function followUps(results, asked)" in html
     assert "ask(b.dataset.q)" in html
-    assert len(SUGGESTED) == 4
-    assert "Who plays most like R9 today?" in SUGGESTED
+    assert SUGGESTED == (
+        "Who plays most like R9 today?",
+        "Who looks like Messi did at 19?",
+        "Which 20 year olds have the best chance of becoming elite?",
+    )
+
+
+def _body(html):
+    return html[html.index("<body>") : html.index('<script type="application/json"')]
+
+
+def test_the_page_is_the_chat_and_everything_else_is_one_click_away():
+    html = render(_data())
+    body = _body(html)
+    # Prompt 20e: the title, the subtitle, the box, then the rest under it.
+    order = [
+        "<h1>Football scouting assistant</h1>",
+        'id="subtitle"',
+        'id="ask-form"',
+        'id="ask-suggest"',
+        'id="ask-fine"',
+        'id="ask-about"',
+        'id="explore"',
+        'id="data-area"',
+        'id="footer"',
+    ]
+    places = [body.index(x) for x in order]
+    assert places == sorted(places)
+    # The subtitle's counts come from the build: both tables, players and leagues.
+    data = _data()
+    assert (data["players"], data["player_leagues"]) == (2, 2)
+    assert '"Ask about " + int(D.players) + " players across " + D.player_leagues' in html
+    assert "Every answer comes from the tables on this page." in html
+    # What it knows sits in a native details element, collapsed.
+    about = re.search(r'<details class="about" id="ask-about">', body)
+    assert about is not None
+    assert "open" not in about.group(0)
+    assert "<summary>What it knows and what it does not</summary>" in body
+    assert "answers with four lookup tools" in html
+    # The yellow banner and the grey paragraph are gone; so is the Ask tab button.
+    assert "Answers are built only from the tables shown on this page." not in html
+    for gone in ("ask-line", "tab-ask", 'role="tab"'):
+        assert gone not in html
+    # The data dates and the caps in one muted line.
+    assert '"Players as of " + day(' in html
+    assert '", clubs and this season to " + day(D.so_far_date)' in html
+    assert '" characters, " + D.chat.per_hour + " questions an hour"' in html
+    # The counter shows only from 400 characters on.
+    assert '<span id="ask-count" hidden></span>' in body
+    assert "var COUNT_FROM = 400;" in html
+
+
+def test_the_data_sections_open_from_one_row_of_links_with_their_counts():
+    html = render(_data())
+    body = _body(html)
+    nav = re.search(r'<nav class="explore".*?</nav>', body, re.S).group(0)
+    labels = re.findall(r'<a href="#(\w+)" data-tab="\1">([^<]+)</a>', nav)
+    assert labels == [
+        ("candidates", "Candidates"),
+        ("bargains", "Bargains"),
+        ("similar", "Similar players"),
+        ("greats", "Greats"),
+        ("archetypes", "Archetypes"),
+    ]
+    assert nav.startswith(
+        '<nav class="explore" id="explore" aria-label="Explore the data">Explore the data:'
+    )
+    assert 'class="n"' not in nav  # no counts in the links
+    # The counts are in the section headings.
+    assert 'DATA[state.tab].length.toLocaleString("en") + " players</span>"' in html
+    for heading in ("Similar players", "Measured greats", "Archetypes"):
+        assert f"<h2>{heading} <span" in body
+    # Hidden until a link is clicked, and the how to read box starts collapsed.
+    assert '<div class="wide" id="data-area" hidden>' in body
+    assert '<details class="howto" id="howto">' in body
+
+
+def test_the_footer_keeps_every_download_and_credit():
+    html = render({**_data(), "greats": True})
+    for line in (
+        '<a href=\\"data/candidates.csv\\">candidates.csv</a>',
+        '<a href=\\"data/bargains.csv\\">bargains.csv</a>',
+        '<a href=\\"data/dictionary.csv\\">dictionary.csv</a>',
+        '<a href=\\"data/candidates.parquet\\">candidates</a>',
+        '<a href=\\"data/bargains.parquet\\">bargains</a>',
+        "Sources: player statistics from API Football (api-football.com), used under the "
+        "owner's subscription; raw responses are not published. ",
+        "Market values and transfers from transfermarkt-datasets by dcaribou "
+        "(github.com/dcaribou/transfermarkt-datasets), derived from Transfermarkt "
+        "(transfermarkt.com), used for non commercial purposes only and credited here. "
+        "No club logos or photos are stored or shown.",
+        "StatsBomb open data (github.com/statsbomb/open-data)",
+        "A non commercial project.",
+    ):
+        assert line in html
+    assert '<footer class="col" id="footer">' in html
+
+
+def test_the_style_is_one_system_font_and_follows_the_system_theme():
+    html = render(_data())
+    style = html[html.index("<style>") : html.index("</style>")]
+    assert "@import" not in style
+    assert "@font-face" not in style
+    assert "font: 16px/1.5 system-ui" in style
+    assert "body { font-size: 17px; }" in style
+    assert ".col { max-width: 720px;" in style
+    assert ".wide { max-width: 1100px;" in style
+    assert "@media (prefers-color-scheme: dark)" in style
+    assert ":focus-visible { outline: 2px solid var(--accent);" in style

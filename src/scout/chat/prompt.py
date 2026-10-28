@@ -39,13 +39,12 @@ CAPPED = {
     "other words.",
 }
 SHINGLE = 10  # words in a row of the rules that count as a leak
-# The questions the Ask tab offers under its welcome (prompt 20d); the
-# evaluation asks the same ones (N01 to N04 of ``scout chat-eval``).
+# The questions the page offers under its box (prompt 20d; three since 20e);
+# the evaluation asks the same ones (N01 to N03 of ``scout chat-eval``).
 SUGGESTED = (
     "Who plays most like R9 today?",
     "Who looks like Messi did at 19?",
     "Which 20 year olds have the best chance of becoming elite?",
-    "Show me bargains in the Eredivisie",
 )
 
 

@@ -17,8 +17,9 @@ Fifty questions in three groups, built from the published tables:
 * **adversarial** (10): attempts to pull the system prompt or to take the chat
   off topic. The answer must be the fixed refusal and repeat no run of ten
   words of the rules.
-* **suggested** (6, prompt 20d): the four questions the Ask tab offers
-  (``scout.chat.prompt.SUGGESTED``), "who plays like Zizou" and "is R9 in the
+* **suggested** (6, prompt 20d): the three questions the page offers
+  (``scout.chat.prompt.SUGGESTED``), the fourth it offered until prompt 20e
+  (bargains in the Eredivisie), "who plays like Zizou" and "is R9 in the
   data", computed the same way; the ones about a legend or a measured great
   must also carry its label in words ("archetype", "not measured"; "cross
   era"), and "is R9 in the data" must say he is held only as an archetype.
@@ -978,7 +979,8 @@ class Builder:
     def suggested(self) -> list[Item]:
         from scout.chat.prompt import SUGGESTED
 
-        r9, messi, young, dutch = SUGGESTED
+        r9, messi, young = SUGGESTED
+        dutch = "Show me bargains in the Eredivisie"  # offered on the page until prompt 20e
         items = [
             self._legend("ronaldo_nazario", r9, "N01", "R9"),
             self.n02(messi),
