@@ -1962,6 +1962,43 @@ code's reasons as written, and the three that must stay "not in the data"
 (Michael Ballack, the Chinese Super League, Isak's injury today) open with
 the fixed sentence; the last one adds what the season record holds.
 
+## Plain text answers, the report writer's money and the value rank ties (prompt 20i, 29 October 2026)
+
+**The chat.** The function takes markdown bold and italic out of every
+answer in code before the guards (`agent.plain`), and the page renders
+only "- " and "1. " list lines and paragraphs, everything else as escaped
+text. The scorer now fails any answer holding an asterisk. The 72
+questions, in process on the published tables of 28 October with the new
+code and rule 8 ("- " or "1. " for a list): computed 30 of 30, suggested 6
+of 6, players 12 of 12, bargains 4 of 4, not in the data 10 of 10, refused
+10 of 10, every outcome `answered`, no answer holding an asterisk, for 0.50
+USD (60 tool calls, median 3.6 s, slowest 5.6 s; the cost is the cache
+writes of the changed rules, 77,964 tokens written). 17 answers carry a
+dash list, none a numbered one. One answer holds a number found in no tool
+result: C11's "0%", the minimum of the elite chance filter it passed, as in
+20h's first run.
+
+**The report writer's money.** `reports_text.money` writes €1m, not
+€1000k, for a value a rounding hair under one million (the unit follows
+the rounded number, as the chat's since 20h). 52 stored fact sheets change
+("Market value"), all of passed reports.
+
+**Why run 16 wrote 38 reports more than the 1,094 expected.** All 38 are
+candidates whose value rank swapped with a neighbour's: equal market value
+and equal league minutes (Beraldo and I. Matanović: €22m, 1,570 minutes),
+which `value_ranks` ordered by the row order through an unstable sort. A
+rerun of the weekly steps on the same files moved 49 sheets (the "Value
+rank" line only); the 38 are among them, and the other 11 were among the
+1,094. The same churn explains the 49 to 51 reports every run of 27 and 28
+October wrote with nothing changed. The tie now breaks by minutes, then
+player id (and a player's row among equal minutes in two leagues by the
+league key, in the players table and the lists); two reruns then give
+identical tables. Settling once moves 65 candidates' value ranks by one or
+two places; nothing else in the candidates or the bargains changes (the
+bargains' `value_eur` keeps its float noise in the 16th digit). The next
+weekly run writes 120 reports: 52 (money), 65 (value rank), 3 on the
+template with their one retry; about 0.02 USD.
+
 ## Next
 
 1. The clean check above: tune on earlier seasons, score on later ones.

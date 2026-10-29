@@ -303,10 +303,12 @@ def load_outcomes(settings) -> pd.DataFrame:
 
 def newest_players(scouting: pd.DataFrame, season: int | None = None) -> pd.DataFrame:
     """The season's regular players (the newest when None), one row each (the
-    league where he played most minutes)."""
+    league where he played most minutes; on equal minutes the league key
+    decides, never the row order, prompt 20i)."""
     season = scouting["season"].max() if season is None else season
     newest = scouting[(scouting["season"] == season) & scouting["regular"].astype(bool)]
-    return newest.sort_values("minutes").drop_duplicates("source_player_id", keep="last")
+    newest = newest.sort_values(["minutes", "league_key"], kind="stable")
+    return newest.drop_duplicates("source_player_id", keep="last")
 
 
 def rising_ids(scouting: pd.DataFrame, top: int = RISING_TOP, season: int | None = None) -> set:

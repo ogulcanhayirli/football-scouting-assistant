@@ -1031,3 +1031,18 @@ def test_the_committed_sorting_has_the_columns_the_judge_test_reads():
     assert set(table["category"]) == {"real_error", "judge_mistake", "sheet_gap"}
     assert (table.loc[table["category"] == "real_error", "span"].str.len() > 0).all()
     assert set(table["field"]) <= set(rt.FIELD_KEYS)
+
+
+@pytest.mark.parametrize(
+    ("value", "text"),
+    [
+        (999_999.9999999997, "€1m"),  # float noise in 52 bargains' values (prompt 20i)
+        (999_499.0, "€999k"),
+        (1_000_000.0, "€1m"),
+        (1_300_000.0, "€1.3m"),
+        (21_600_000.0, "€22m"),
+        (750_000.0, "€750k"),
+    ],
+)
+def test_money_follows_the_rounded_number(value, text):
+    assert rt.money(value) == text

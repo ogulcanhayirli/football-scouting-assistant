@@ -10,7 +10,7 @@ import pytest
 from scout.chat.data import parse_players
 from scout.contracts.schemas import PLAYERS_TABLE, validate
 from scout.lists import dictionary
-from scout.players import COLUMNS, DICTIONARY, compact, players_table
+from scout.players import COLUMNS, DICTIONARY, compact, main_rows, players_table
 
 KEYS = ["league_key", "season", "source_player_id"]
 LEAGUES = {"epl": "Premier League", "serie_a": "Serie A"}
@@ -190,3 +190,20 @@ def test_compact_json_round_trips_through_the_chats_reader(table):
 def test_every_column_has_a_sentence_in_the_dictionary():
     words = dictionary()
     assert set(words.loc[words["table"] == "players", "column"]) == set(DICTIONARY) == set(COLUMNS)
+
+
+def test_equal_minutes_in_two_leagues_pick_the_same_row_whatever_the_order():
+    # A bench player and a regular, each with equal minutes in two leagues (prompt 20i).
+    rows = pd.DataFrame(
+        [
+            _row(8, "Loanee", league="epl", minutes=300.0, club="Leicester"),
+            _row(8, "Loanee", league="serie_a", minutes=300.0, club="Necaxa"),
+            _row(9, "Split", league="serie_a", minutes=900.0, club="Club B"),
+            _row(9, "Split", league="epl", minutes=900.0, club="Club A"),
+        ]
+    )
+    picks = []
+    for seed in range(6):
+        out = main_rows(rows.sample(frac=1, random_state=seed), 2025)
+        picks.append(tuple(out.sort_values("source_player_id")["league_key"]))
+    assert set(picks) == {("serie_a", "serie_a")}

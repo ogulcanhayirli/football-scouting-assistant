@@ -404,6 +404,12 @@ October 2026, from MODELS.md and `reports/`:
   the deploy: 5.0 to 7.5 s of load inside the function (6 to 8.4 s round
   trip, players.json included) against 0.8 to 1.0 s warm, about twice the
   2.4 s of prompt 20b's cgroup measure (docs/DEPLOY.md).
+  Prompt 20i (29 October): answers in plain text (bold and italic taken
+  out in code before the guards, the page rendering only list lines and
+  paragraphs), the scorer failing any answer with an asterisk; the 72 in
+  process on the tables of 28 October: 72 of 72, no asterisk, 0.50 USD (60
+  tool calls, median 3.6 s, slowest 5.6 s; the cache writes of the changed
+  rule 8), one number in no tool result (C11's "0%", a filter's minimum).
 * Bargains (19 October, 37 leagues, seasons 2015 to 2023, experienced 30 to
   33): the top 50 gained value far more often than matched peers (prime
   63.2% against 43.3%, experienced 11.0% against 4.5%), but moved to a club
@@ -510,7 +516,11 @@ makes every number come from a tool result, opens an unanswerable question
 with "The tables on this page do not answer that." and refuses anything
 else with one fixed sentence; an answer that repeats ten words of the rules
 is replaced by that refusal in code, as is tool call markup written as text
-(prompt 20b). **Prompt 20d (28 October):** the Ask tab is the first tab
+(prompt 20b). Since prompt 20i every answer is plain text before those
+guards (`agent.plain`: bold and italic markers out, "* " items as "- ",
+no asterisk left), and the page renders it with `answerHtml` ("- " and
+"1. " lines as list items, blank lines as paragraphs, everything else
+escaped; never HTML from the model). **Prompt 20d (28 October):** the Ask tab is the first tab
 and opens when the address has no `#` part (old `#candidates` links still
 work); the data tabs follow an "Explore the data" hint, and the "how to
 read this" box shows on the data tabs only. Above the box a welcome says
@@ -739,7 +749,7 @@ detail stays in `reports/scouting.md`, `reports/moves.md`,
 * The thin peer group's correction and archetypes for players without data, with a blind calibration: **done 25 October (prompt 18c); the archetypes await the owner's review.**
 * Generated scout reports with a faithfulness check and a weekly judge: **built 25 October (prompt 19); first real run 25 October (94% template, on length); length handling fixed in prompt 19b (run 9: 8 of 2,734 on the template); the judge's verdicts sorted, the check typed, the judge made checkable, the reports made stable and slow batches carried over in prompt 19c (28 October).**
 * January window forecast, published mid December and scored in February.
-* A capped chat over the two tables: **built and deployed 26 October (prompt 20)**; evaluated in process (28 of 30, 10 of 10, 10 of 10); the two fixes, a faster cold start and the 5 minute warm ping deployed 27 October (prompt 20b: 30 of 30, 10 of 10, 10 of 10); run through the Function URL on 28 October (prompt 20c): 30 of 30, 10 of 10, 10 of 10, 0.26 USD; the page opens on the chat with suggested questions and follow ups, and the chat knows the legends by their nicknames (prompt 20d, 28 October); the page made minimal, the chat alone in view and everything else one click away (prompt 20e, 28 October); every player of the season, not only the two lists, in the chat and a Players section (prompt 20f, 28 October); the word bargain kept for a player priced below fair value, on the page, in the chat and in the reports (prompt 20g, decision 12, 28 October); both evaluated with the model (72 of 72, 0.35 USD), deployed and published on 28 October (prompt 20h).
+* A capped chat over the two tables: **built and deployed 26 October (prompt 20)**; evaluated in process (28 of 30, 10 of 10, 10 of 10); the two fixes, a faster cold start and the 5 minute warm ping deployed 27 October (prompt 20b: 30 of 30, 10 of 10, 10 of 10); run through the Function URL on 28 October (prompt 20c): 30 of 30, 10 of 10, 10 of 10, 0.26 USD; the page opens on the chat with suggested questions and follow ups, and the chat knows the legends by their nicknames (prompt 20d, 28 October); the page made minimal, the chat alone in view and everything else one click away (prompt 20e, 28 October); every player of the season, not only the two lists, in the chat and a Players section (prompt 20f, 28 October); the word bargain kept for a player priced below fair value, on the page, in the chat and in the reports (prompt 20g, decision 12, 28 October); both evaluated with the model (72 of 72, 0.35 USD), deployed and published on 28 October (prompt 20h); answers in plain text, 72 of 72 again (prompt 20i, 29 October; awaiting the owner's go to redeploy and publish).
 * A matchup report before any match model.
 
 ## AWS
@@ -886,6 +896,16 @@ Settle them with the owner rather than guessing.
   stored key kept): the two fixes (C06, C11), 1,024 MB and the warm request;
   then tool markup never shown; then the warm ping. Weekly run 12, started
   by hand, publishes the page's part. Still open:
+  * **Prompt 20i (29 October): built, awaiting the owner's go.** Plain
+    text answers (the function and the page), the scorer's asterisk check
+    (72 of 72 in process, none with an asterisk, 0.50 USD), the report
+    writer's €1m, the stable value rank tie break. On the go: redeploy
+    `ScoutChat` without `--parameters`, fast forward `main`, start the
+    weekly run by hand; it writes 120 reports (52 on money, 65 on the rank
+    settling once, 3 template retries; about 0.02 USD). Until then the live
+    chat and page answer as in 20h. The owner can read the real cold start
+    with the CloudShell command of docs/DEPLOY.md (prompt 20i); the session
+    may not read the logs.
   * **Prompt 20h (28 October): 20f and 20g are out.** With the owner's go:
     the 72 questions with the model in process (72 of 72 twice; 0.50 then
     0.35 USD), `processed/lists/` uploaded, `ScoutChat` redeployed twice
@@ -893,19 +913,18 @@ Settle them with the owner rather than guessing.
     run 16 started by hand (success; published 20:06 UTC). Left open: (1)
     the chat was down four minutes (19:36 to 19:40 UTC) after the first
     redeploy, fixed in `data._optional` (docs/DEPLOY.md); (2) the report
-    writer's own `money` (`src/scout/reports_text.py`) still writes €1000k
-    for the 52 bargains valued 999,999.9999999997, and the reports published
-    by run 16 say "€1000k" 52 times; changing it changes their fact sheets and rewrites them, so it was
-    left for the owner (the float noise itself comes from the bargains
-    table's values); (3) an instance already running reads a republished
+    writer's own `money` wrote €1000k for the 52 bargains valued
+    999,999.9999999997: fixed in prompt 20i (€1m; their 52 reports are
+    rewritten by the next weekly run; the float noise itself stays in the
+    bargains table's values); (3) an instance already running reads a republished
     page only at its hourly check, so for up to an hour after a publish
     some answers use the previous tables; (4) similar players keep the 450
     minute threshold (prompt 20f: the identity test drops at 270, 19.9% to
     17.5%); (5) the welcome's requested "ten seasons" is written from the
     data as 11 seasons, 2015/16 to 2025/26 (prompt 20d); (6) the live
     Rodri answer below uses markdown bold against rule 8, and the page
-    shows the asterisks: a prompt or code fix (strip `**` before the
-    reply) needs a redeploy.
+    shows the asterisks: fixed in code and on the page in prompt 20i, live
+    only after the redeploy and the publish the owner's go starts.
     The three live answers, asked once each through the Function URL as a
     visitor at 21:08 UTC (0.037 USD in all, one tool call each, 4.3 to 6.7
     s inside the function):
@@ -1071,8 +1090,14 @@ Settle them with the owner rather than guessing.
   different order than the build that made the registered lists: rebuilt on
   24 October, 51 candidates' value ranks swap by one with a neighbour of the
   same value (Matanović and Beraldo, both €22m, #513 and #514). The order of
-  rows, deciles and every chance are unchanged; a stable tie break is not
-  yet in `value_ranks`. The rebuild of 25 October (prompt 18b) showed 49
+  rows, deciles and every chance are unchanged. **Fixed in prompt 20i:**
+  `value_ranks` breaks a tie of value and minutes by player id (these
+  pairs share both: Beraldo and Matanović, €22m and 1,570 minutes), and
+  the players table and the lists pick a player's row among equal minutes
+  by league key. The swaps had made every weekly run rewrite about 49
+  reports (the 38 above the 1,094 expected in run 16); two reruns now give
+  identical tables, and the next weekly run settles 65 candidates' ranks
+  once (one or two places). The rebuild of 25 October (prompt 18b) showed 49
   such swaps, and in the bargains 103 values differing in the 16th digit
   (400000.0000000002 against 400000.0000000001).
 * The new transfer lists (830 clubs, all 37 leagues and the cups) are kept

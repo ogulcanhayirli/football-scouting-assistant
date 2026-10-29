@@ -552,10 +552,14 @@ def league_percentiles(features: pd.DataFrame, stats: list[str]) -> pd.DataFrame
 
 
 def value_ranks(features: pd.DataFrame) -> pd.Series:
-    """Rank of each row's market value among one row per player per season."""
-    per_player = features.sort_values("minutes").drop_duplicates(
-        ["season", "source_player_id"], keep="last"
-    )
+    """Rank of each row's market value among one row per player per season.
+    Equal values rank by minutes, then by player id (prompt 20i): the order
+    of the rows read never decides it, so a rerun on the same files gives
+    the same ranks (before, two players of equal value and minutes swapped
+    places from run to run, and with them their written reports)."""
+    per_player = features.sort_values(
+        ["minutes", "source_player_id", "league_key"], kind="stable"
+    ).drop_duplicates(["season", "source_player_id"], keep="last")
     rank = per_player.groupby("season")["market_value"].rank(ascending=False, method="first")
     by_player = pd.Series(
         rank.to_numpy(), index=pd.MultiIndex.from_frame(per_player[["season", "source_player_id"]])

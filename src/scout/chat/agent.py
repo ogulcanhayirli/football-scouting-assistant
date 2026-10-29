@@ -15,7 +15,10 @@
   call starts, so a turn ends well inside the Lambda's timeout and its cost
   is always recorded (an API error ends the turn the same way, keeping the
   cost of the calls already made).
-* The answer: the text blocks of the final reply. A refusal by the API, an
+* The answer: the text blocks of the final reply, as plain text: bold and
+  italic markers are taken out in code and a "* " list item becomes "- "
+  (``plain``, prompt 20i: the model wrote markdown although rule 8 forbids
+  it, and the page showed the asterisks). A refusal by the API, an
   answer that repeats the rules (``scout.chat.prompt.leaks``), tool call
   markup written as text (a model stuck after its last call, C06 of the
   first evaluation) or a turn that runs out of budget gets a fixed reply
@@ -58,7 +61,21 @@ PRICES = {
 }
 CACHE_WRITE, CACHE_READ = 1.25, 0.10
 TOOL_MARKUP = re.compile(r"<(?:invoke|parameter|function_calls)\b")
+# Markdown emphasis: **bold**, __bold__, _italic_ (not snake_case); a
+# single asterisk left after them (*italic*, a stray one) is dropped.
+BULLET = re.compile(r"^([ \t]*)[*•][ \t]+", re.M)
+BOLD = re.compile(r"(\*\*|__)(?=\S)(.+?)(?<=\S)\1", re.S)
+UNDERSCORE = re.compile(r"(?<!\w)_(?=\S)([^_\n]+?)(?<=\S)_(?!\w)")
 USAGE = ("input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens", "output_tokens")
+
+
+def plain(text: str) -> str:
+    """The answer without markdown emphasis: list items keep their line as
+    "- ", bold and italic keep their words, and no asterisk is left."""
+    text = BULLET.sub(r"\1- ", text)
+    text = BOLD.sub(r"\2", text)
+    text = UNDERSCORE.sub(r"\1", text)
+    return text.replace("*", "")
 
 
 def usage_of(u: Any) -> dict[str, int]:
@@ -201,8 +218,10 @@ class Assistant:
                     )
                 messages.append({"role": "user", "content": results})
                 continue
-            text = "\n\n".join(
-                b.text.strip() for b in reply.content if getattr(b, "type", None) == "text"
+            text = plain(
+                "\n\n".join(
+                    b.text.strip() for b in reply.content if getattr(b, "type", None) == "text"
+                )
             ).strip()
             if not text:
                 turn.answer, turn.outcome = prompt.CAPPED["error"], "error"

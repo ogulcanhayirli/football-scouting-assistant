@@ -273,10 +273,12 @@ class FactSheet:
 
 
 def money(value: float) -> str:
-    """As the page writes it: €30m, €21.6m, €750k."""
+    """As the page writes it: €30m, €21.6m, €750k. The unit follows the
+    rounded number, as in the chat's (prompt 20i): 999,999.9999999997 (float
+    noise in 52 bargains' values) is €1m, never €1000k."""
     if value >= 1e7:
         return f"€{round(value / 1e6)}m"
-    if value >= 1e6:
+    if value >= 1e6 or round(value / 1e3) >= 1000:
         return f"€{value / 1e6:.1f}".removesuffix(".0") + "m"
     if value >= 1e3:
         return f"€{round(value / 1e3)}k"

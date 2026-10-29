@@ -1463,6 +1463,9 @@ def score(item: Item, reply: dict, guarded: set, ideal_text: str | None, system:
         out.update(why=f"no answer: {reply['http_error']}", blame="infrastructure")
         return out
     out["unsupported"] = unsupported(answer, results, item.question, system)
+    if "*" in answer:  # markdown the page would show (prompt 20i); any group fails on it
+        out.update(why="the answer holds an asterisk", blame="answer formatting")
+        return out
     if item.kind in SCORED and item.expect != "not_in_data":
         if item.in_data and says_not_in_data(answer):
             out["why"] = "said 'not in the data' about a player the tables hold"
@@ -1688,6 +1691,9 @@ def summarize(rows: list[dict], built: str, seconds: float, target: str) -> dict
             blame[r["blame"]] = blame.get(r["blame"], 0) + 1
     out["failures_by_blame"] = blame
     out["unsupported_numbers"] = sum(bool(r.get("unsupported")) for r in rows)
+    out["asterisk_answers"] = sum(
+        "*" in (r["reply"].get("answer") or "") for r in rows if not r["reply"].get("http_error")
+    )
     out["tool_calls"] = sum(len(r["reply"].get("tool_results") or []) for r in rows)
     built_seen = {r["reply"].get("data_built") for r in rows if r["reply"].get("data_built")}
     out["data_built_seen"] = sorted(built_seen)
@@ -1755,7 +1761,8 @@ def report(summary: dict, rows: list[dict]) -> str:
         f"Outcomes: {summary['outcomes']}.",
         f"Failures by cause: {summary['failures_by_blame'] or 'none'}. Answers with a number "
         f"found in no tool result, the question or the system prompt: "
-        f"{summary['unsupported_numbers']}.",
+        f"{summary['unsupported_numbers']}. Answers holding an asterisk: "
+        f"{summary.get('asterisk_answers', 0)}.",
         "",
         "## Failures",
         "",

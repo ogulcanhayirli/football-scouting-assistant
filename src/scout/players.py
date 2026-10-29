@@ -160,7 +160,10 @@ def main_rows(scouting: pd.DataFrame, season: int) -> pd.DataFrame:
         rows = rows[~nameless]
     regular = newest_players(scouting, season)
     rest = rows[~rows["source_player_id"].isin(regular["source_player_id"])]
-    rest = rest.sort_values("minutes").drop_duplicates("source_player_id", keep="last")
+    # Equal minutes in two leagues: the league key decides, never the row order (prompt 20i).
+    rest = rest.sort_values(["minutes", "league_key"], kind="stable").drop_duplicates(
+        "source_player_id", keep="last"
+    )
     return pd.concat([regular, rest], ignore_index=True)
 
 

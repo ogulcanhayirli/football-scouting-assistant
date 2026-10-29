@@ -92,6 +92,8 @@ header .sub { margin: 10px 0 0; color: var(--muted); }
 .msg { margin: 0 0 32px; }
 .msg p { margin: 0 0 .75em; }
 .msg p:last-child { margin-bottom: 0; }
+.msg ul, .msg ol { margin: 0 0 .75em; padding-left: 1.4em; }
+.msg li { margin: 0 0 .3em; }
 .msg.you { color: var(--muted); font-weight: 600; margin-bottom: 12px; }
 .msg.answer { animation: appear .3s ease-out; }
 .msg.capped { color: var(--muted); }
@@ -1376,6 +1378,35 @@ footer p { margin: 0 0 8px; }
       return "<p>" + esc(p).replace(/\n/g, "<br>") + "</p>";
     }).join("");
   }
+  // An answer as plain text (prompt 20i): a line opening with "- " or a
+  // number and a dot is a list item, a blank line ends a paragraph and
+  // everything else is escaped text; never HTML from the model.
+  function answerHtml(text) {
+    return String(text).replace(/\r/g, "").split(/\n[ \t]*\n/).map(function (block) {
+      var html = "", list = null, lines = [];
+      function endLines() { if (lines.length) html += "<p>" + lines.join("<br>") + "</p>"; lines = []; }
+      function endList() { if (list) html += "</" + list + ">"; list = null; }
+      block.split("\n").forEach(function (line) {
+        var m = /^\s*(?:(-)|(\d+)\.)\s+(\S.*)$/.exec(line);
+        if (!m) {
+          endList();
+          if (line.trim()) lines.push(esc(line.trim()));
+          return;
+        }
+        var kind = m[1] ? "ul" : "ol";
+        endLines();
+        if (list !== kind) {
+          endList();
+          html += kind === "ol" ? '<ol start="' + Number(m[2]) + '">' : "<ul>";
+          list = kind;
+        }
+        html += "<li>" + esc(m[3].trim()) + "</li>";
+      });
+      endLines();
+      endList();
+      return html;
+    }).join("");
+  }
   function plain(v) {
     if (v == null) return "none";
     if (Array.isArray(v)) return v.map(plain).join("; ");
@@ -1448,7 +1479,7 @@ footer p { margin: 0 0 8px; }
       var follow = next.length ? '<div class="chips follow" aria-label="Ask next">' + next.map(function (x) {
         return '<button type="button" data-q="' + esc(x) + '">' + esc(x) + "</button>";
       }).join("") + "</div>" : "";
-      say(paragraphs(b.answer || "Sorry, no answer came back.") + fromTables(b.tool_results) + follow, answered ? "answer" : "answer capped");
+      say(answerHtml(b.answer || "Sorry, no answer came back.") + fromTables(b.tool_results) + follow, answered ? "answer" : "answer capped");
       if (answered) chat.history.push({ role: "user", content: q }, { role: "assistant", content: b.answer });
       $("ask-status").textContent = "";
     }).catch(function (err) {

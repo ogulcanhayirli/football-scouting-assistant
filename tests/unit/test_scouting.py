@@ -21,6 +21,7 @@ from scout.scouting import (
     team_shares,
     trait_table,
     two_seasons,
+    value_ranks,
 )
 
 
@@ -330,6 +331,24 @@ def test_ability_v2_removes_the_league_effect_from_the_composite():
     movers = features["source_player_id"] % 3 == 1
     spread = out[movers].groupby(features["source_player_id"])["ability_pct"].std()
     assert spread.median() < 10  # a mover ranks alike wherever he plays
+
+
+def test_equal_values_rank_the_same_whatever_the_row_order():
+    # Beraldo and Matanović: both €22m and 1,570 minutes in 2025 (prompt 20i).
+    features = pd.DataFrame(
+        {
+            "league_key": ["ligue_1", "bundesliga", "epl", "ligue_1", "epl"],
+            "season": [2025] * 5,
+            "source_player_id": [307835, 202696, 276184, 276184, 9],
+            "minutes": [1570.0, 1570.0, 107.0, 1305.0, 2000.0],
+            "market_value": [22e6, 22e6, 22e6, 22e6, 30e6],
+        }
+    )
+    ranks = value_ranks(features)
+    for seed in range(5):
+        shuffled = features.sample(frac=1, random_state=seed)
+        assert value_ranks(shuffled).sort_index().tolist() == ranks.tolist()
+    assert ranks.tolist() == [4.0, 3.0, 2.0, 2.0, 1.0]
 
 
 def test_rank_rate_baseline_uses_value_rank_and_age():

@@ -3,6 +3,8 @@
 import gzip
 import json
 import re
+import shutil
+import subprocess
 
 import pandas as pd
 import pytest
@@ -374,6 +376,38 @@ def test_the_page_opens_on_the_chat_with_suggestions_and_follow_ups():
         "Who looks like Messi did at 19?",
         "Which 20 year olds have the best chance of becoming elite?",
     )
+
+
+def _function(html, name):
+    """One function of the page's script, by its name, up to its closing brace."""
+    start = html.index(f"  function {name}(")
+    return html[start : html.index("\n  }\n", start) + 4]
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="needs node")
+def test_an_answer_renders_lists_and_paragraphs_and_never_html():
+    html = render(_data())
+    script = _function(html, "esc") + _function(html, "answerHtml")
+    answer = (
+        "Rodri is in the data.\nHe is on <b>neither</b> list.\n\n"
+        "- Ability: 99th percentile.\n- Minutes: 1,513 & 44%.\n\n"
+        "1. A. Tetteh, 0.79\n2. M. Daku, 0.78\n\n3. Igor Neves, 0.73\n"
+        "Value -12% on a year before. <img src=x onerror=alert(1)>"
+    )
+    out = subprocess.run(
+        ["node", "-e", script + "process.stdout.write(answerHtml(process.argv[1]));", answer],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    assert out == (
+        "<p>Rodri is in the data.<br>He is on &lt;b&gt;neither&lt;/b&gt; list.</p>"
+        "<ul><li>Ability: 99th percentile.</li><li>Minutes: 1,513 &amp; 44%.</li></ul>"
+        '<ol start="1"><li>A. Tetteh, 0.79</li><li>M. Daku, 0.78</li></ol>'
+        '<ol start="3"><li>Igor Neves, 0.73</li></ol>'
+        "<p>Value -12% on a year before. &lt;img src=x onerror=alert(1)&gt;</p>"
+    )
+    assert "say(answerHtml(b.answer" in html
 
 
 def _body(html):

@@ -507,6 +507,58 @@ asterisks. Mbappé gets the new verdict sentence word for word, R9 the
 archetype's label and today's nearest centre forwards. The answers in full
 are in CLAUDE.md (Open questions).
 
+### Three small fixes after 20h (prompt 20i, 29 October 2026)
+
+**Answers in plain text.** The model wrote markdown bold and dash lists
+although rule 8 forbids markdown, and the page showed the asterisks (the
+live Rodri answer of 20h). The function now takes bold and italic markers
+out in code (`agent.plain`: `**x**`, `__x__`, `*x*`, `_x_` but not
+snake_case, a "* " list item becomes "- ", no asterisk is left) after the
+answer is produced and before the leak and markup guards; rule 8 now says
+how to write a list ("- " or "1. ", one item a line). The page renders an
+answer with `answerHtml`: a line opening with "- " or a number and a dot is
+a list item, a blank line ends a paragraph, everything else is escaped
+text; it never inserts HTML from the model. The evaluation fails any answer
+holding an asterisk (`answer formatting`) and counts them. Both need a
+redeploy of `ScoutChat` (the function) and a publish (the page): only
+after the owner's go.
+
+**The report writer's money** writes €1m for a value a rounding hair under
+one million, as the chat and the page do since 20h. 52 stored reports (the
+bargains valued 999,999.9999999997) change their fact sheet ("Market
+value") and are rewritten by the next weekly run.
+
+**The 38 extra reports of run 16.** All 38 are candidates whose value rank
+moved by one place: they share their market value and their league minutes
+exactly with another player (Beraldo and I. Matanović, both €22m and 1,570
+minutes, #513 and #514), and `scouting.value_ranks` broke such ties by the
+order the rows were read, through an unstable sort, so every weekly run
+swapped about 49 of them and rewrote their reports (runs of 27 and 28
+October: 49, 51, 49). It now breaks them by minutes, then player id; two
+reruns of `features --current`, `score`, `lists` on the same files now give
+identical tables (before, 49 sheets moved between two such reruns). The
+same fix in `players.main_rows` and `lists.newest_players` (equal minutes
+in two leagues: the league key decides). The ranks settle once: 65
+candidates' value ranks move by one or two places, and the next weekly run
+rewrites those 65 reports too. With the 52 of the money and the 3 on the
+template that get their one retry, it writes 120 (about 0.02 USD).
+
+**The cold start, from CloudShell.** The session may not read the
+function's logs (`logs:StartQuery` is refused). In CloudShell (region
+eu-central-1), this prints the last twenty cold starts of the last 30 days,
+each with its `Init Duration` and the `Duration` of that first request, in
+milliseconds:
+
+```bash
+Q=$(aws logs start-query --region eu-central-1 --log-group-name /aws/lambda/scout-chat --start-time $(date -d '-30 days' +%s) --end-time $(date +%s) --query-string 'filter @type = "REPORT" and ispresent(@initDuration) | sort @timestamp desc | limit 20 | display @timestamp, @initDuration, @duration' --query queryId --output text) && for i in $(seq 30); do [ "$(aws logs get-query-results --region eu-central-1 --query-id "$Q" --query status --output text)" = Complete ] && break; sleep 2; done && aws logs get-query-results --region eu-central-1 --query-id "$Q" --query "results[*].[[?field=='@timestamp'].value|[0], [?field=='@initDuration'].value|[0], [?field=='@duration'].value|[0]]" --output table
+```
+
+`Init Duration` covers only Lambda's own start and the module imports: the
+handler loads the Claude SDK and the tables on its first request, so most
+of a cold start sits in that request's `Duration` (5 to 8 s measured in
+20h); the two together are the cold start. The chat's own line (`{"outcome":
+"warm", "cold": true, "seconds": ...}`) gives the load alone.
+
 ### The page opens on the chat, and the chat knows the legends (prompt 20d)
 
 Since 28 October 2026 the Ask tab is the page's first tab and opens when the
@@ -883,7 +935,7 @@ started after it. Without it, use `--local` (the same code and files, not
 the deployed function).
 
 Results so far (the three runs of the same 50 questions, then the whole
-set of 72 of prompt 20h):
+set of 72 of prompts 20h and 20i):
 
 | Run | Tables | Computed | Not in the data | Refused | Cost | Tool calls | Median, slowest |
 |---|---|---|---|---|---|---|---|
@@ -892,9 +944,13 @@ set of 72 of prompt 20h):
 | 28 October, through the Function URL (prompt 20c) | 27 October | 30 of 30 | 10 of 10 | 10 of 10 | 0.26 USD | 33 | 3.4 s, 5.9 s |
 | 28 October, in process, 72 questions (prompt 20h, first run) | 28 October | 30 of 30 | 10 of 10 | 10 of 10 | 0.50 USD | 56 | 3.8 s, 16.0 s |
 | 28 October, in process, 72 questions (prompt 20h, after its two fixes) | 28 October | 30 of 30 | 10 of 10 | 10 of 10 | 0.35 USD | 57 | 3.4 s, 5.6 s |
+| 29 October, in process, 72 questions (prompt 20i, plain text answers) | 28 October | 30 of 30 | 10 of 10 | 10 of 10 | 0.50 USD | 60 | 3.6 s, 5.6 s |
 
 Both prompt 20h runs also passed suggested 6 of 6, players 12 of 12 and
-bargains 4 of 4 (72 of 72). The first run's cost and slowest answers are
+bargains 4 of 4 (72 of 72), and so did the prompt 20i run, with no answer
+holding an asterisk (17 answers carry a dash list; its cost is the cache
+writes of the changed rule 8, 77,964 tokens; its one number found in no
+tool result is C11's "0%", the minimum of the filter it passed). The first run's cost and slowest answers are
 its cache writes (75,043 tokens written against 11,892 in the second).
 Reading every answer found what the scorer cannot see: "€1000k" for the 52
 bargains valued 999,999.9999999997 (float noise; the chat's `money` and
