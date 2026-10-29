@@ -520,8 +520,13 @@ answer with `answerHtml`: a line opening with "- " or a number and a dot is
 a list item, a blank line ends a paragraph, everything else is escaped
 text; it never inserts HTML from the model. The evaluation fails any answer
 holding an asterisk (`answer formatting`) and counts them. Both need a
-redeploy of `ScoutChat` (the function) and a publish (the page): only
-after the owner's go.
+redeploy of `ScoutChat` (the function) and a publish (the page): both
+went out on 29 October with the owner's go (redeployed without
+`--parameters`, `main` fast forwarded, weekly run 17 started by hand:
+success in 10 minutes, published 11:58 UTC, the 120 reports below written
+for 0.023 USD). Checked live: the Rodri answer through the Function URL
+holds a dash list and no asterisk, and the R9 question typed into the live
+page in a headless browser renders as paragraphs and a list.
 
 **The report writer's money** writes €1m for a value a rounding hair under
 one million, as the chat and the page do since 20h. 52 stored reports (the

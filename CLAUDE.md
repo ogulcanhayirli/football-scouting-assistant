@@ -749,7 +749,7 @@ detail stays in `reports/scouting.md`, `reports/moves.md`,
 * The thin peer group's correction and archetypes for players without data, with a blind calibration: **done 25 October (prompt 18c); the archetypes await the owner's review.**
 * Generated scout reports with a faithfulness check and a weekly judge: **built 25 October (prompt 19); first real run 25 October (94% template, on length); length handling fixed in prompt 19b (run 9: 8 of 2,734 on the template); the judge's verdicts sorted, the check typed, the judge made checkable, the reports made stable and slow batches carried over in prompt 19c (28 October).**
 * January window forecast, published mid December and scored in February.
-* A capped chat over the two tables: **built and deployed 26 October (prompt 20)**; evaluated in process (28 of 30, 10 of 10, 10 of 10); the two fixes, a faster cold start and the 5 minute warm ping deployed 27 October (prompt 20b: 30 of 30, 10 of 10, 10 of 10); run through the Function URL on 28 October (prompt 20c): 30 of 30, 10 of 10, 10 of 10, 0.26 USD; the page opens on the chat with suggested questions and follow ups, and the chat knows the legends by their nicknames (prompt 20d, 28 October); the page made minimal, the chat alone in view and everything else one click away (prompt 20e, 28 October); every player of the season, not only the two lists, in the chat and a Players section (prompt 20f, 28 October); the word bargain kept for a player priced below fair value, on the page, in the chat and in the reports (prompt 20g, decision 12, 28 October); both evaluated with the model (72 of 72, 0.35 USD), deployed and published on 28 October (prompt 20h); answers in plain text, 72 of 72 again (prompt 20i, 29 October; awaiting the owner's go to redeploy and publish).
+* A capped chat over the two tables: **built and deployed 26 October (prompt 20)**; evaluated in process (28 of 30, 10 of 10, 10 of 10); the two fixes, a faster cold start and the 5 minute warm ping deployed 27 October (prompt 20b: 30 of 30, 10 of 10, 10 of 10); run through the Function URL on 28 October (prompt 20c): 30 of 30, 10 of 10, 10 of 10, 0.26 USD; the page opens on the chat with suggested questions and follow ups, and the chat knows the legends by their nicknames (prompt 20d, 28 October); the page made minimal, the chat alone in view and everything else one click away (prompt 20e, 28 October); every player of the season, not only the two lists, in the chat and a Players section (prompt 20f, 28 October); the word bargain kept for a player priced below fair value, on the page, in the chat and in the reports (prompt 20g, decision 12, 28 October); both evaluated with the model (72 of 72, 0.35 USD), deployed and published on 28 October (prompt 20h); answers in plain text, 72 of 72 again, deployed and published on 29 October (prompt 20i).
 * A matchup report before any match model.
 
 ## AWS
@@ -896,16 +896,19 @@ Settle them with the owner rather than guessing.
   stored key kept): the two fixes (C06, C11), 1,024 MB and the warm request;
   then tool markup never shown; then the warm ping. Weekly run 12, started
   by hand, publishes the page's part. Still open:
-  * **Prompt 20i (29 October): built, awaiting the owner's go.** Plain
-    text answers (the function and the page), the scorer's asterisk check
-    (72 of 72 in process, none with an asterisk, 0.50 USD), the report
-    writer's €1m, the stable value rank tie break. On the go: redeploy
-    `ScoutChat` without `--parameters`, fast forward `main`, start the
-    weekly run by hand; it writes 120 reports (52 on money, 65 on the rank
-    settling once, 3 template retries; about 0.02 USD). Until then the live
-    chat and page answer as in 20h. The owner can read the real cold start
-    with the CloudShell command of docs/DEPLOY.md (prompt 20i); the session
-    may not read the logs.
+  * **Prompt 20i (29 October): out.** Plain text answers (the function
+    and the page), the scorer's asterisk check (72 of 72 in process, none
+    with an asterisk, 0.50 USD), the report writer's €1m, the stable value
+    rank tie break. With the owner's go: `ScoutChat` redeployed without
+    `--parameters` (the stored key kept; a cold warm request 7.5 s, then
+    0.0 s), `main` fast forwarded to a705870, weekly run 17 started by hand
+    (success in 10 minutes, published 11:58 UTC): 120 reports written as
+    predicted, 0.023 USD, none saying "€1000k". Checked live: "Tell me
+    about Rodri" through the Function URL answers with a dash list and no
+    asterisk (0.020 USD); "Who plays most like R9 today?" typed into the
+    live page in a headless browser renders as paragraphs and a list. The
+    owner can read the real cold start with the CloudShell command of
+    docs/DEPLOY.md (prompt 20i); the session may not read the logs.
   * **Prompt 20h (28 October): 20f and 20g are out.** With the owner's go:
     the 72 questions with the model in process (72 of 72 twice; 0.50 then
     0.35 USD), `processed/lists/` uploaded, `ScoutChat` redeployed twice
