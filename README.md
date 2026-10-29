@@ -1,564 +1,204 @@
 # Football Scouting Assistant
 
-Finds footballers likely to reach elite level (the level of Liverpool,
-Barcelona or Bayern regulars) before the market prices it in, and bargains:
-players already very good but cheap, at any age. It covers **37 leagues**
-(the big five, their second tiers, the rest of Europe's main leagues, Brazil,
-Argentina, Colombia, Uruguay, Liga MX, MLS, Japan, South Korea and Saudi
-Arabia) and runs on AWS for well under 1 USD a month.
+[![CI](https://github.com/ogulcanhayirli/football-scouting-assistant/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/ogulcanhayirli/football-scouting-assistant/actions/workflows/ci.yml)
+Live page: <http://scout-site-098499087060.s3-website.eu-central-1.amazonaws.com/>
 
-The result is **two tables**, published once a week with one static page:
-<http://scout-site-098499087060.s3-website.eu-central-1.amazonaws.com/>
+I built this to find footballers who are likely to reach the level of a
+Liverpool, Barcelona or Bayern regular before their price says so, and
+bargains: good players whose market value is below what their numbers
+suggest. It covers 37 leagues (36 of them played in 2025/26 with
+minutes in our data) and seasons 2010 to 2025. Once a week a
+GitHub Actions run scores the newest season with stored models and
+publishes one static page. On the page you ask questions in plain words,
+and a chat answers from the published tables only. I am a football fan,
+not a professional scout. I made the decisions and reviewed the results;
+coding agents wrote the code ([how it was built](docs/HOW_IT_WAS_BUILT.md)).
 
-* **Candidates:** every regular player ranked #101 to #2,000 by market value
-  in the newest season (1,830 rows for 2025/26, including the riser model's
-  top 50 valued below #2,000). Each row has the elite chance, step up chance,
-  fall back risk and big move chance, each with the number of past players it
-  rests on; the warning flags with the player's own numbers; a one line
-  explanation; the rising tag; value, fair value and ability percentile.
-* **Bargains:** regular players at the 70th ability percentile of their
-  position or better whose market value is low against the fair value model,
-  in two lists: prime (29 and under, 1,249 players) and experienced (30 to
-  33, 353 players), with the same flags and explanation and two context tags
-  (on loan, stale value). The lists rank every eligible player by value
-  against fair value; only a player priced below his fair value is called
-  a bargain (`below_fair_value`, decision 12: 341 prime and 167
-  experienced on 28 October), and the page opens on those.
+## A 60 second tour
 
-The page also answers **who plays like him** (decision 10): every player
-has a "Similar players" panel with the ten nearest of his position group
-today, and a Similar players tab searches "plays like him now" (with
-filters on age, league and ability) and "looks like he did at an age"
-(Rodri at 21 against today's players aged 20 to 22). Similar means the
-same way of playing with the level taken out, not the same level.
+Open the page and type one of these. Each answer shows the table rows it
+was built from under it. The answers below are from 28 October 2026; the
+numbers move when the tables do.
 
-An **Ask** tab (prompt 20, a prototype) answers questions in plain words
-("who is the youngest centre back with an elite chance of 30%?", "who plays
-like Lionel Messi at 21?"): Claude Sonnet 5.5 looks the answer up in the
-published tables with four tools, and every answer shows the tool results it
-was built from. It answers only from the tables on the page, says so plainly
-when they cannot answer, and is capped at 20 questions an hour per visitor,
-1 USD a day and 5 USD a month.
+1. **"Who plays most like R9 today?"** We hold no data on Ronaldo Nazário,
+   so the chat says he is an "archetype from the record, not measured",
+   then lists today's centre forwards nearest to that sketch with a
+   similarity score. Where one of them has an elite chance, it is given as
+   a historical rate ("30% of 142 past players in the same band").
+2. **"Is Mbappé a bargain?"** The answer is no, and it says why: he is on
+   the value ranking (#550 of the prime list), but his market value (€180m)
+   is above the model's fair value (€132m). The word bargain is kept for
+   players priced below fair value.
+3. **"Tell me about Rodri."** He is on neither list. The chat shows his
+   card (ability percentile, league minutes, value against fair value, his
+   flags) and the reasons, set in code, why he is on no list ("already
+   among the 100 most valuable"; "under half of his team's league
+   minutes").
 
-The emphasis is on honest evaluation: strict point in time features, season
-by season backtests, a simple baseline reported next to every model, and
-chances shown as the rates that past forecasts actually achieved.
+![The page on a phone, 390 px wide](docs/images/page-phone.png)
 
-## Status
+## What makes it honest
 
-| Part | State |
-|---|---|
-| Data: API Football raw cache, 37 leagues and 24 cups or national team competitions, seasons 2010 to 2025 | Done on the Ultra plan (254,398 cached responses); all in the private S3 bucket |
-| Transfermarkt snapshot (values, transfers) | Release of 5 September 2026; valuations end 12 June 2026, upstream paused |
-| Point in time feature and label tables (`FEATURES.md`) | Done: 233,272 player seasons, 135 columns, contracts check the point in time rule |
-| Fair value model | Done: error 0.395 against 0.780 for the baseline (log units, 37 leagues) |
-| Big move model | Done: AUC 0.928 against 0.803; 38.5% of each season's top 50 join a top 20 club within two years |
-| Ability score version 2 | Done: more stable year to year (0.858 against 0.503 for version 1) |
-| Elite, step up, riser models | Done: elite AUC 0.774 against 0.771 on the 23 and under pool; step up 0.927 against 0.912; riser top 50 precision 0.093 against a base rate of 0.017 |
-| Fall back risk and warning flags | Done: 17.2% of the elite pool fall back; three flags, each raising the risk 1.33 to 1.40 times |
-| The two tables and their dictionary (`scout lists`) | Done: chances are the realized rates of rebuilt past forecasts, last five scored seasons |
-| Registered forecast (`forecasts/2026-10-21/`) | Frozen 21 October 2026, revised twice that day (both recorded); final in 2028 |
-| Stored models (`scout score`) | Done: trained once by the manual commands, reproduce the registered tables byte for byte |
-| Weekly run (`.github/workflows/weekly.yml`) | Built, and the stored models are in S3 (23 October); waits for the `scout-weekly` user and the GitHub secrets and variables (docs/DEPLOY.md). A clean run of the same steps took 4 minutes 14 seconds on a 4 core machine |
-| Static page (`scout site`) and its bucket (`ScoutSite`) | Live since 21 October 2026 |
-| Similar players (`scout embed`, `scout similar`, decision 10) | Done 24 October 2026: a learned embedding finds the same player's other season among his five nearest 19.9% of the time against 13.2% for plain style vectors (0.35% at random); in S3 since 25 October, on the page at the next publish |
-| Measured greats (`scout greats`, prompts 18b and 18c) | Done 25 October 2026: StatsBomb open data (La Liga 2004/05 to 2020/21, Premier League 2003/04, 2.83 GB) mapped to our match table and checked against API Football (tackles and interceptions agree at 0.63 and 0.68 per match and are kept, the owner's call on the identity test); Barcelona's old seasons corrected for the thin peer group (the same player found 55.1% of the time on 2016/17 to 2020/21 against 28.6% uncorrected); 23 greats by age against today's players, with the calibrated elite chance, in a page tab at the next publish |
-| Archetypes (`scout archetypes`, prompt 18c) | Drafted 25 October 2026, awaiting the owner's review: eight legends from the historical record (Cruyff, Gullit, Rio Ferdinand, Maldini, Zidane, Ronaldo Nazário, Baresi, Pirlo) searched among today's players; a calibration on six players we can measure lands within 15 points on half the traits (28% for a draft of 50 everywhere), so they are labelled illustrative only |
-| Scout reports (`scout reports`, prompt 19) | Built 25 October 2026: Claude Haiku 5.5 writes about 130 words per player from a fact sheet of the table columns (Message Batches API, cached prefix, rewritten only when the facts change), code checks every number and name against the sheet (two retries, then the explanation written by rule; a templated player is retried on the next run once), Claude Sonnet 5.5 judges 50 a week. The first real run (25 October) cost 1.41 USD and sent 94% of the players to the template, nearly all for running over 150 words; prompt 19b fixed the length handling (90 to 170 words pass, an example report, the cut stated on a retry), and the next weekly run is its real test (about 0.65 USD expected) |
-| Chat over the tables (Ask tab, `ScoutChat`, prompt 20) | Built 26 October 2026: one Lambda behind a Function URL, Claude Sonnet 5.5 with four strict tools over the published files, the caps in a small S3 object, an Ask tab on the page. Deployed 26 October 2026; the evaluation (50 questions, first run in process) passed 28 of 30 computed, 10 of 10 not in the data and 10 of 10 refusals for 0.34 USD. Prompt 20b (27 October): both failures fixed and redeployed, with a faster cold start; the same evaluation passed 30 of 30, 10 of 10 and 10 of 10 for 0.28 USD; through the Function URL itself (28 October) 30 of 30, 10 of 10 and 10 of 10 again for 0.26 USD. Prompt 20d (28 October): the page opens on the chat with a welcome, four suggested questions and follow ups; the chat reads nicknames (R9, CR7, Zizou) and answers about the legends held as archetypes and the measured greats, each with its label; six questions added to the evaluation. Prompts 20f and 20g (28 October): every player of the season in the chat and a Players section; the word bargain kept for a player priced below fair value (decision 12). Prompt 20h (28 October): the whole set of 72 questions with the model passed 72 of 72 for 0.35 USD; shipped the same day. Prompt 20i (29 October): answers in plain text (markdown taken out in code, lists rendered by the page, never HTML from the model), 72 of 72 again for 0.50 USD; deployed and published the same day |
-| Free tier update of the current season | Not started: prompt 4, from 6 November; the weekly run skips it until its config exists |
-| Glue and Athena, Feature Store, SageMaker training stacks | Retired by decision 9, code in `infra/archive/`; still deployed until the owner removes them |
+* **Chances are realized rates.** Every chance shown is the share of past
+  players in the same bucket who made it, from forecasts rebuilt for 2015
+  to 2023 and scored two seasons later (last five scored seasons). The top
+  elite bucket shows 30%; 27.6% to 32.1% made it in each season 2020 to 2023.
+* **Forecasts are registered.** The lists of 21 October 2026 (1,830
+  candidates, 1,602 bargains) are frozen in `forecasts/2026-10-21/` under
+  the git tag `forecast-2026-10-21`, with both same day revisions recorded
+  in the folder. They are scored in 2028, two seasons on.
+* **Every model has a baseline in the same table.** Backtests run season by
+  season: each test season is predicted by a model trained only on earlier
+  seasons, with a gap and a check on the actual dates. Random folds are
+  never used. Fair value error: 0.395 against 0.780 for the baseline.
+* **Written reports are checked in code against their fact sheet.** Every
+  number must be on the sheet as the kind of number its words say, every
+  name must be on the sheet, and a report that fails twice is replaced by
+  the explanation written by rule. On a judged sample of 50, the check now
+  catches 8 of the 9 real errors it used to miss.
+* **The chat is evaluated on 72 questions.** 30 with answers computed from
+  the tables, 10 the tables cannot answer, 10 attempts to pull the prompt or
+  go off topic, and 22 on players, legends and bargains. Latest run (29
+  October 2026): 72 of 72, for 0.50 USD.
+
+## Results
+
+From MODELS.md, all 37 leagues, out of sample.
+
+| Model | What it predicts | Metric | Model | Baseline |
+|---|---|---|---|---|
+| Fair value | log market value | mean absolute error, log units | 0.395 | 0.780 (median of league, position, age band) |
+| Big move | joins a top 20 club within 24 months | AUC | 0.928 | 0.803 (group rate) |
+| Elite, ranked #101 to #1,000 | enters the 100 most valuable within 2 seasons | AUC | 0.881 | 0.874 (value rank and age band) |
+| Elite, same, 23 or under | as above | AUC / top 50 precision | 0.774 / 0.342 | 0.771 / 0.349 |
+| Step up | value rank 3 times better, inside the top 500 | AUC | 0.927 | 0.912 (value rank and age band) |
+| Riser | ability jumps 20 percentiles and stays | top 50 precision | 0.093 | 0.027 (base rate 0.017) |
+| Ability score v2 | (a rating, not a target) | year to year correlation | 0.858 | 0.503 (version 1) |
+| Team Elo | club match results | Brier score | 0.161 | 0.180 (home result rate) |
+| Bargains, prime top 50 | value rises within 24 months | share | 63.2% | 43.3% (matched peers) |
+| Similar players | same player's other season in the top five | hit rate | 19.9% | 13.2% (cosine on style vectors), 0.35% random |
+| Greats correction | the same, for StatsBomb seasons of Barcelona | hit rate | 55.1% | 28.6% (uncorrected) |
+| Archetypes | drafted traits within 15 points of measured | share | 50% | 28% (a draft of 50 on every trait) |
+
+Two rows are where the model does not win. Among young players the elite
+model barely beats value rank plus age, and its top 50 is slightly worse.
+Bargains gain value more often than their peers, but they do not move to
+stronger clubs more often (39.8% against 41.8%).
 
 ## Architecture
 
-```
- API Football v3 ──► raw cache (byte for byte) ──► adapters + pandera contracts ──► Parquet tables
- transfermarkt-datasets ──► snapshot CSVs ─────────────────────────────────────────────┘
-                                                                                        │
- manual, on a machine with about 10 GB:                                                 ▼
-   scout features ─► backtest, moves, scouting (train and store the models) ─► forecast history
-                                                                                        │ sync up
-                                                                                        ▼
- S3 data bucket (private): raw/, processed/ (tables, models/stored/, lists/), reports/
-            │ read processed/ and raw/transfermarkt/                          ▲ write processed/lists/
-            ▼                                                                 │
- GitHub Actions, weekly:  features --current ─► score (stored models, no training)
-                          ─► embed ─► archetypes ─► lists ─► site ─► publish ─┤
-                                                                              ▼ write
-                         S3 site bucket (public read, static website hosting)
-                         index.html with both tables embedded, data/*.csv, data/*.parquet,
-                         data/similar.json (the similar players panel, the measured
-                         greats and the archetypes, loaded on demand),
-                         data/players.json (every player of the season, prompt 20f),
-                         statsbomb-logo.png (with the greats)
-                                   │ read at cold start
-                                   ▼
- Ask tab ── POST ──► Lambda scout-chat (Function URL, 2 at once) ──► Claude API
-                     caps in S3 scout-chat-<account> (private)       (Sonnet 5.5, 4 tools)
-```
+![Sources to raw cache to private S3, retraining by hand, the weekly run with the reports check, the public site bucket, the page and the chat Lambda with four tools, the chat's evaluation loop](docs/images/architecture.svg)
 
-Deliberately small: one scheduled job and one static page, plus one Lambda
-for the Ask tab (decision 11, prompt 20, which revises decision 9 for the
-chat only). The site bucket and the chat's Function URL are the only public
-resources; the site bucket holds the two tables, the
-dictionary, the similar players file and, with the measured greats, the
-StatsBomb logo its data agreement asks for, and nothing else (`scout publish`
-refuses any other file). The
-infrastructure code is two CDK stacks in `infra/`: `ScoutSite`, which
-creates that bucket, and `ScoutChat`, the chat's function, its role, its
-private state bucket and log group; the earlier analysis stacks are archived in
-`infra/archive/` with a note on why. Setup, secrets, the IAM policy and the
-cost: [docs/DEPLOY.md](docs/DEPLOY.md).
+One scheduled job, one static page in a public S3 bucket and one Lambda
+for the chat. The data bucket is private. The infrastructure is two CDK
+stacks in `infra/` (`ScoutSite`, `ScoutChat`). Setup, IAM policy and
+secrets are in [docs/DEPLOY.md](docs/DEPLOY.md).
 
-Expected monthly AWS cost, at eu-central-1 prices: the data bucket's storage
-(8.7 GB of current objects, mostly the raw cache: about 0.21 USD, plus any
-old versions the bucket keeps), a few cents for the weekly run and the page
-(requests; the transfer stays inside AWS's free 100 GB a month), and next to
-nothing for the retired stacks while they stay deployed (a Glue catalog, an
-idle Athena workgroup, a small offline feature store). About 0.25 to 0.50
-USD a month in all, far under the 5 USD alarm.
+## Cost
 
-## Layout
-
-```
-src/scout/
-  config.py, secrets.py     YAML settings (pydantic); API key from the environment or SSM
-  ratelimit.py, storage.py  quota guard; raw cache, written last through an atomic rename
-  providers/                API Football client and adapters; Transfermarkt snapshot; StatsBomb open data
-  contracts/                pandera schemas for every table
-  matching.py               player matching between sources
-  backfill/                 season, match, injury and transfer runners, coverage reports
-  features/                 point in time feature and label tables (full, or --current)
-  elo.py                    team Elo from the cached fixtures
-  models/                   targets, backtest, estimators, big move, stored models (store.py)
-  scouting.py               league strength, ability score, elite, step up, riser
-  candidates.py, flags.py   chance tables, fall back risk, warning flags
-  bargains.py, explain.py   bargains lists; one line explanations
-  lists.py                  the two tables, their dictionary, reports/candidates.md
-  forecast.py               registered forecasts: freeze, score, history, revise
-  embeddings.py             style vectors, the learned embedding, similar players
-  greats.py, greats_check.py  the measured greats from StatsBomb open data; the check against API Football
-  archetypes.py             archetypes from the record: files checked, level free vectors, calibration
-  site.py, site_template.html   the static page
-  chat/                     the Ask tab's chat: data, tools, prompt, guard (caps), agent, handler
-  chat_eval.py              the chat's evaluation (scout chat-eval)
-  publish.py, sync.py       the weekly upload; copying data to and from S3
-  cli.py                    `scout <command>`
-archetypes/                 legends/ and calibration/: one YAML file per player, drafted, for the owner to edit
-configs/                    backfill.ultra.yaml (current), free, pro, expansion
-forecasts/<date>/           registered forecasts (committed)
-infra/                      ScoutSite and ScoutChat CDK stacks (own uv environment); chat/requirements.txt
-                            the chat Lambda's pinned wheels; archive/ holds the retired stacks
-docs/DEPLOY.md              the weekly run and the chat: setup, secrets, IAM policy, caps, cost, retraining
-docs/AWS_SETUP.md           one time account setup that lets a session deploy, narrowly
-FEATURES.md, MODELS.md, FEASIBILITY.md   data dictionary, models and results, feasibility check
-tests/unit, tests/contracts, tests/fixtures (synthetic sample)
-```
-
-## Running it
-
-```bash
-uv sync --all-extras
-cp .env.example .env              # then set API_FOOTBALL_KEY; .env is gitignored
-set -a; source .env; set +a
-
-uv run pytest                     # unit and contract tests, no network
-uv run ruff check . && uv run ruff format --check .
-
-C="uv run scout --config configs/backfill.ultra.yaml"
-
-# Restore the data from the private bucket ($SCOUT_S3_BUCKET) into a fresh checkout
-$C sync down --only processed && $C sync down --only transfermarkt
-
-# The weekly run, as GitHub Actions runs it (docs/DEPLOY.md)
-$C features --current     # the newest season only, earlier ones as stored
-$C score                  # the newest season with the stored models, no training
-$C embed                  # every player season embedded with the stored model; today's ten nearest
-$C archetypes             # archetypes/*/*.yaml reloaded and checked, vectors, calibration, reports/archetypes.md
-$C lists                  # candidates and bargains, reports/candidates.md
-$C reports                # written reports, checked; a sample judged (needs ANTHROPIC_API_KEY)
-$C reports --dry-run      # the fact sheets and the run's tokens and cost, estimated; no request
-$C site                   # data/site/index.html and the downloads
-$C publish                # processed/lists/, processed/reports_text/ and the site bucket
-
-# Retraining, by hand (about 10 GB of memory; the models are stored as they train)
-$C features               # full rebuild
-$C backtest               # fair value, against its baseline
-$C moves                  # big move
-$C scouting               # ability score, elite, step up, riser
-$C embed --train          # similar players: tested against plain style vectors, refit, stored
-$C forecast history       # past forecasts rebuilt and scored; their realized rates are the shown chances
-$C lists && $C site
-
-# Downloads (each spends API requests; the raw cache is never fetched twice)
-$C backfill               # season totals; --level match | team | lineup | injuries | transfers
-$C transfermarkt          # the snapshot, once; --refresh for a newer release
-
-# Similar players (after embed)
-$C similar "Lamine Yamal"                 # plays like him now; --age-max, --league, --ability-min
-$C similar Rodri --at-age 21              # today's players aged 20 to 22 who look like he did
-
-# The measured greats (StatsBomb open data; download once, then offline)
-$C statsbomb download     # La Liga 2004/05 to 2020/21 and the Premier League 2003/04, 2.83 GB, cached
-$C statsbomb build        # per match player table, checked by the contract
-$C greats                 # mapping check, the peer group correction and its test, reports/greats.md
-
-# Registered forecasts
-$C forecast freeze        # copy today's lists into forecasts/<date>; never overwrites
-$C forecast score forecasts/2026-10-21 --as-of 2027-06-30
-
-# The chat (prompt 20; deploying it is in docs/DEPLOY.md)
-$C chat-eval --dry-run    # the 56 questions from the published tables, the tools checked against them
-$C chat-eval              # the questions against chat.url (needs SCOUT_CHAT_CLAUDE_KEY or ANTHROPIC_API_KEY), reports/chat_eval.md
-```
-
-Uploading to S3 (`sync up`) and deploying a stack need the owner's yes
-(CLAUDE.md, rule 8); the weekly run's writes to `processed/lists/`,
-`processed/reports_text/` (prompt 19) and the site bucket are the one
-exception.
+About 0.25 to 0.50 USD a month on AWS (mostly storing 8.7 GB of raw
+cache), a few cents to 0.25 USD a week of Claude API for the reports
+(about 0.75 to 1.40 USD when every report is rewritten), and at most 5 USD
+a month for the chat, which is capped in code. GitHub Actions minutes are
+free at this size.
 
 ## Limits
 
-* **Among young players the elite model barely beats the market.** On the
-  elite pool (ranked #101 to #1,000 by value, 23 or under) its AUC is 0.774
-  against 0.771 for value rank plus age (prompt 12 run), and its top 50 is
-  slightly worse (0.342 against 0.349). A young player's price already holds
-  most of what the data says about his chance of becoming elite.
-* **So the product's value is not prediction beyond the market.** It is
-  calibrated odds (each chance is the realized rate of past forecasts in the
-  same bucket, with how many players there were), risk flags with the player's own
-  numbers, and one consistent treatment of 37 leagues, far more players than
-  anyone can price by hand.
-* **The top elite chance runs high.** Rebuilt forecasts of 2015 to 2023 saw
-  30.5% of the players shown 40% make it. Since prompt 14b every chance shown
-  is the realized rate of those forecasts, and since prompt 14c only of the
-  last five scored seasons (2019 to 2023 for the 2025 table): the top elite
-  decile now shows 30%, against 27.6% to 32.1% made it in each season 2020
-  to 2023. The test seasons can barely tell the two rules apart, so read the
-  top chance with that in mind (MODELS.md).
-* **Market values freeze at June 2026.** The Transfermarkt snapshot has had
-  no valuations since 12 June 2026 (CLAUDE.md, open questions). Until a new
-  value source arrives, every weekly run republishes the same 2025/26
-  tables; a season in progress cannot be listed, because its rows would have
-  no market value.
-* **The weekly run does not retrain.** It scores with the models stored on
-  21 October 2026; new seasons of data need the manual retraining above.
-* **The measured greats before 2015/16 are sketches.** StatsBomb's open
-  seasons hold Barcelona's matches (Arsenal's for 2003/04), so a great is
-  measured against Barcelona and its opponents only: a thinner, biased peer
-  group, with no league or team adjustment (ours starts in 2010). A
-  correction learned on 2015/16 (prompt 18c) rebuilds the league from the
-  opponents for Barcelona's seasons; tested on 2016/17 to 2020/21 it finds
-  the same player's API Football season in the top five 55% of the time
-  against 29% uncorrected, still short of the 76% a whole league season
-  gets. Arsenal's 2003/04 is not corrected (MODELS.md).
-* **Archetypes are illustrative only.** The eight legends without data are
-  drafts from the historical record awaiting the owner's review. Drafted
-  the same way for six players we can measure, the percentiles landed
-  within 15 points on half the traits (the owner's bar is most), against
-  28% for a draft of 50 on every trait; every result is labelled
-  "archetype from the record, not measured" (MODELS.md).
-* **A written report is checked for its numbers and names, not its
-  meaning.** Code rejects any number that is not in the player's fact sheet
-  within its rounding and any name that is not in it, but a number of the
-  sheet attached to the wrong fact (another player's ability percentile)
-  passes, and so does an ordinary word that opens a sentence. The weekly
-  judge (Claude Sonnet 5.5, 50 reports) reads the meaning; the owner checks
-  the judge on 20 of them (MODELS.md, docs/DEPLOY.md).
-* **The chat is a prototype, measured on 50 questions.** Its answers come
-  only from the published tables, through four tools, and every number in
-  an answer must come from a tool result; code blocks an answer that repeats
-  its rules. The evaluation that decides whether it works (30 questions with
-  answers computed from the tables, 10 the tables cannot answer, 10 attempts
-  to pull the prompt or go off topic) first ran on 26 October, in process
-  with the deployed code: 28 of 30 computed (93%), 10 of 10 not in the
-  data, 10 of 10 refused, for 0.34 USD. One failure came from the order
-  of the search tool's fields (an age filter could not follow a league),
-  the other from the guard blocking a right answer that explained a chance
-  in the rules' own words. Both were fixed and redeployed on 27 October
-  (prompt 20b), and the same run then passed 30 of 30, 10 of 10 and 10 of
-  10 for 0.28 USD (median 3.3 s a question, slowest 6.3 s). Through the
-  Function URL itself (28 October) it passed 30 of 30, 10 of 10 and 10 of
-  10 again, for 0.26 USD (median 3.4 s, slowest 5.9 s); the per visitor
-  limit stopped the 21st message from one address, and the guard never
-  had to block an answer. The limit counts addresses, so a visitor whose
-  address changes often is held only by the daily and monthly budget. A 5
-  minute warm ping (an EventBridge rule, live since 27 October) and a warm
-  request when the Ask tab opens keep the function loaded, so a visitor
-  rarely waits for a cold start; when one does, the page says the first
-  answer can take up to 30 seconds. Since 28 October (prompt 20d) the page
-  opens on the chat: a short welcome saying what it knows and does not,
-  four suggested questions and two or three follow ups after each answer;
-  the tables sit under "Explore the data". Since prompt 20e the page is
-  minimal: the title, one line, the question box and three suggested
-  questions; the dates, the caps and what it knows sit quietly under the
-  box, the tables open from one row of links, and the downloads and
-  sources are in the footer. The chat reads nicknames (R9,
-  CR7, La Pulga, Zizou, Il Maestro, Rio) and answers about legends we hold
-  no data for from their archetype, always saying "archetype from the
-  record, not measured", and about the measured greats with "measured,
-  cross era comparison is rough". Six questions on this were added to the
-  evaluation; their run with the model is still to come. Since prompt 20f
-  the chat and the page know every player with league minutes this
-  season, not only the two lists: a third table, players (18,931 on 28
-  October 2026), gives each one his club, minutes, ability, value and fair
-  value, and for a list he is not on a sentence that says why ("not a
-  candidate: already among the 100 most valuable"). The page has a Players
-  section with a name search, and the download is players.csv.
-* **The page is plain HTTP.** S3 website hosting has no HTTPS, and
-  CloudFront is left out on purpose; the page holds public tables only.
+* **Market values stop at June 2026.** The Transfermarkt dataset has
+  published nothing since its 5 September 2026 release, and its last
+  valuation is dated 12 June 2026. Until a new value source exists, every
+  weekly run republishes the same 2025/26 tables, and the season in
+  progress cannot be listed.
+* **The refresh moves to the free tier.** The API Football plan that paid
+  for the history ends on 7 November 2026. After that I assume the free
+  tier (100 requests a day): one pull of every club's squad and transfers
+  takes about three weeks, and the weekly update for the free tier is not
+  built yet.
+* **Young players: the market already knows most of it.** On players of 23
+  or under the elite model is about as good as value rank plus age. The
+  value is in calibrated odds, risk flags and one treatment of 37 leagues,
+  not in beating the market.
+* **The ability score is weak for defenders and goalkeepers.** Its
+  measures favour goals, passes and shots, so centre backs are rated on
+  what a rising player shows, not on defending. The goalkeeper version
+  rests on thin measures (passes, fouls drawn, duels), and goalkeeper style
+  vectors find the same keeper only 5.7% of the time.
+* **Archetypes are illustrative.** The eight legends without data are drafts
+  from the historical record that I have not reviewed yet. Drafted the
+  same way for six players we can measure, they landed within 15 points on
+  half the traits.
+* **The greats before 2015/16 are rough.** StatsBomb's open seasons hold
+  Barcelona's matches only, so those seasons are measured against
+  Barcelona's opponents, with a correction that helps but does not close
+  the gap.
+* **Cold start.** After the function has been idle, the first answer waits
+  5 to 8 seconds while it loads the tables. A ping every 5 minutes keeps it
+  warm most of the time.
+* **The chat's per visitor cap counts IP addresses.** A visitor whose
+  address changes per connection is held only by the daily and monthly
+  budget.
+* **The page is plain HTTP.** S3 website hosting has no HTTPS, and I left
+  CloudFront out. The page holds public tables only.
 
-## Data sources and attribution
+## How it was built
 
-* **API Football** (api-football.com) supplies player season statistics. Used
-  under the account holder's subscription. Raw responses stay in a private cache
-  and are not redistributed.
-* **transfermarkt-datasets** by dcaribou
-  (github.com/dcaribou/transfermarkt-datasets) supplies players, appearances,
-  market value history and transfer fees, derived from Transfermarkt (transfermarkt.com). The
-  project states no license, so it is used here for non commercial purposes only
-  and credited here. The snapshot ends in July 2026, and its last valuation
-  is dated 2026-06-12. `scout transfermarkt --refresh` checks the published
-  release and downloads only files whose ETag changed, moving the old copies
-  to `data/raw/transfermarkt/archive/<date>/`; as of 2026-10-16 upstream
-  updates are paused and the release of 5 September 2026 is the latest.
-* **StatsBomb open data** (github.com/statsbomb/open-data) supplies the
-  event data behind the measured greats (La Liga 2004/05 to 2020/21,
-  Barcelona's matches; the Premier League 2003/04, Arsenal's). Used under
-  the StatsBomb Public Data User Agreement: research and analysis only, no
-  commercial use, the data itself never passed on (it stays in the private
-  cache and bucket), and every published analysis carries the StatsBomb
-  logo, which the page shows next to the greats and in its footer.
-  StatsBomb asks users to register at statsbomb.com/resource-centre.
-* No site is scraped. No club logos or badges are stored or shown, and the
-  `logo` and `photo` URLs in API responses are dropped by the adapter.
+I wrote the brief and every decision (CLAUDE.md, Decisions), and coding
+agents built each numbered prompt against them. Each step shipped with
+named tests, and nothing was deployed or paid for until I typed go. The
+prompts, what each proved, and what went wrong are in
+[docs/HOW_IT_WAS_BUILT.md](docs/HOW_IT_WAS_BUILT.md).
 
-This is a non commercial portfolio project.
+## Run it locally
 
-## Decisions
+You need git and [uv](https://docs.astral.sh/uv/).
 
-Each entry records the choice, the reason, and what would change it.
+```bash
+git clone https://github.com/ogulcanhayirli/football-scouting-assistant.git
+```
 
-**D1. Download history in one Pro month, then return to the free tier.**
-Historical seasons never change, so they only need downloading once. One month
-of the Pro plan (19 USD, 7,500 requests a day) covers every past season for
-both leagues with room to spare; the free tier (100 a day) then keeps the
-current season up to date. The backfill takes its limits from config, so
-switching plans is a config change. *Would change if* the feasibility estimate
-showed the backfill needs more than about half of a Pro month, for example if
-match level stats turn out to be necessary.
+```bash
+cd football-scouting-assistant
+```
 
-**D2. The raw cache is the resume state.** A request is skipped when its cache
-file exists. The body is written last through an atomic rename, so a crash can
-never leave a half written entry. This gives resumability and idempotency
-without a separate database, and processed data can always be rebuilt from the
-cache without spending requests.
+```bash
+uv sync --all-extras
+```
 
-**D3. Refusals are errors, not data.** API Football reports plan limits, quota
-exhaustion and bad keys as HTTP 200 with an `errors` field. The client
-classifies those and never caches them, so a refused season can't be stored as
-an empty season.
+```bash
+uv run pytest
+```
 
-**D4. Count before sending, and only let the server tighten the budget.** The
-quota guard counts a request before it goes out and persists the daily count,
-so a crash can only overcount. Remaining quota headers from the server can
-lower our budget but never raise it.
+```bash
+uv run scout --help
+```
 
-**D5. Adapters plus contracts at the boundary.** Each source has one adapter
-that emits canonical tables, and pandera contracts check them (types, ranges,
-uniqueness, and facts like shots on target never exceeding shots). Adding a
-source such as Sportmonks means one new adapter that passes the same contracts.
+The tests run offline on a synthetic sample in `tests/fixtures/`. Building
+the real tables needs the private data bucket or your own API Football key
+and a few days of downloads: see [docs/RUNNING.md](docs/RUNNING.md) and
+[docs/DEPLOY.md](docs/DEPLOY.md).
 
-**D6. Match players on exact date of birth first, then fuzzy names.** Date of
-birth removes almost all wrong candidates, token set name scoring handles
-abbreviated and long legal names, and club similarity breaks ties. Turkish
-letters are mapped explicitly before transliteration. When no name scores
-high enough, a single candidate with the same surname and first initial is
-accepted, which handles nicknames ("Zachary" and "Zak"). Every non match
-carries a reason, and precision is checked by hand on a sample, not only the
-match rate.
+## Data credits and licences
 
-**D7. Data lives in a private S3 bucket, never in git.** `scout sync up`
-copies `data/raw` and `data/processed` to `raw/` and `processed/` in the
-bucket; `scout sync down` restores them, so a new machine or session needs no
-API requests. A file is skipped when size and MD5 match the S3 ETag. The sync
-never deletes, the IAM user has no delete permission, and bucket versioning
-keeps old copies. *Would change if* the bucket used SSE-KMS, where the ETag
-is not the MD5 and every file would be copied each time.
+* Player and match statistics: **API Football** (api-football.com), used
+  under my subscription. Raw responses are cached privately and never
+  published.
+* Market values and transfers: **transfermarkt-datasets** by dcaribou
+  (github.com/dcaribou/transfermarkt-datasets, CC0 1.0), built from
+  Transfermarkt (transfermarkt.com).
+* Event data of the measured greats: **StatsBomb open data**
+  (github.com/statsbomb/open-data), under the StatsBomb Public Data User
+  Agreement. Only results computed from it are published, with the
+  StatsBomb logo.
 
-**D8. Impossible values become missing, not guessed.** The API sometimes
-sends negative counts (EPL 2015 has `lineups: -1` for Matt Jarvis, player
-20439). The adapter stores any negative stat as missing and logs a warning
-naming the player; the raw cache keeps the original response, so the choice
-can be revisited without new requests.
+The code is under the [MIT licence](LICENSE). The licence covers the code
+only, not the data or tables derived from these sources: see
+[DATA_LICENSES.md](DATA_LICENSES.md). This is a non commercial portfolio
+project.
 
-**D9. Season end (30 June) as the main feature date.** Season level totals
-are then enough and cost far fewer requests than match level stats.
-Confirmed by the feasibility check: 99% of regular players from 2015 on have
-a market value at that date. When a season runs past 30 June (2019/20 ended
-on 26 July 2020), the feature date is the day after its last match instead,
-so no row ever uses a match from after its feature date. *Would change if* features at other dates (for
-example before the January window) became a requirement; match level stats
-would then cost about 10,700 requests.
+## More detail
 
-**D10. Two feature tiers instead of imputation.** Rating, shots, passes,
-duels and dribbles only exist from 2015, so models use full features from
-2015 and basic ones (minutes, goals, appearances, cards) back to 2010, and the
-backtest compares the two. Blank counts are read as 0 when the stat is
-recorded that season, because the API leaves zeros blank (see
-`FEASIBILITY.md`). *Would change if* a source with older detailed stats were
-added.
-
-**D11. Fetch match level stats once, while the Ultra plan lasts.** They
-cost 7,898 requests (a day on Ultra, 79 days on the free tier) and allow
-features at any date and recent form from 2015. A season is probed with five
-matches before it is fetched, because the API's coverage flag is wrong for
-EPL 2014. Source errors (missing ids, two players sharing an id) are
-repaired in the adapter and logged, never in the raw cache. *Would change
-if* a later need showed the season level data was enough, in which case the
-match tables simply go unused.
-
-**D12. From 2015, playing time comes from the match data.** The season
-endpoint undercounts Süper Lig minutes (90% within 5% of Transfermarkt,
-against 97% for summed match minutes), worst in 2019/20 after the COVID
-restart. Season totals are used only where no match data exists (2010 to
-2014). *Would change if* a later API correction made the season endpoint
-agree again.
-
-**D13. AWS region eu-central-1 (Frankfurt).** Chosen by the account owner.
-Both buckets live there.
-
-**D14. Data lake first, Feature Store second.** Features are Parquet on S3,
-partitioned by league and season, catalogued in Glue and queried with
-Athena. SageMaker Feature Store comes after, as a feature group over the same
-table, to compare its point in time queries with ours. Point in time
-correctness lives in our code either way. Retired by D20: the stacks are in
-`infra/archive/`, still deployed until the owner removes them.
-
-**D15. Feature Store as a mirror, not the source of truth.** The Parquet
-tables stay the source for training; the feature group holds the same rows,
-keyed by league and player with the feature date as event time, offline
-store only. Its point in time answers were checked against ours: identical
-for every player as of 2023-01-01 (4,426 rows) and 2020-07-15 (3,318 rows,
-inside the COVID season, where the 2019/20 rows must not show yet). Retired
-with the other analysis stacks by D20; the check it made stays recorded here.
-
-**D16. Expanding window backtest, never random folds.** Each season is
-predicted by a model trained on earlier seasons only, with a gap as long as
-the label horizon, training rows purged when their label was observed after
-the test date, and a check on the actual dates before every fold. Random k
-fold would let a model see a player's later seasons and later price levels.
-The simple baseline is reported next to every model. *Would change if* never:
-this is the rule the project's honesty rests on.
-
-**D17. Context features count events by date, not by season.** Cup, national
-team, injury and transfer features count what happened in the 12 months (or
-the career) before the feature date, whichever league or competition it came
-from, and are missing, not 0, where the source does not cover the window.
-*Would change if* a source gained full history, which would only widen the
-covered rows.
-
-**D19. A big move is a new move to a top 20 club by squad value.** The
-top list is recomputed every season from values known then, so it follows
-the market (Brighton and Aston Villa recently) without a hand made list. A
-return to a former club or a loan owner is not a big move. *Would change if*
-a scout cares about a different step, for example top 50 clubs, or moves
-abroad from a given league; both are a parameter of the label.
-
-**D18. Backtest folds follow the feature date.** A row's fold is the
-European season that ended last before its feature date, so a calendar year
-league's season ending in December (feature date January) sits with the
-European season before it. Folding by season number would make every growth
-label of the European rows two seasons back look late and purge them.
-
-**D20. Serve with a weekly job and one static page (decision 9).** A
-GitHub Actions run rebuilds the newest season every Monday and puts the two
-tables and one HTML page, with the data embedded and a little plain
-JavaScript, into a public S3 website bucket; the data bucket stays private.
-Nothing runs between the weekly runs, so nothing costs anything then. Its
-IAM user may read the processed tables and write only `processed/lists/`
-and the site bucket. *Would change if* the tables needed answers between
-runs (a chat over the tables is a version 2 direction) or HTTPS became a
-requirement (CloudFront in front of the same bucket). Revised narrowly by
-D25: one Lambda for the chat.
-
-**D21. Score with stored models; retrain by hand.** The models that score
-the newest season are saved when they are trained (LightGBM's text format
-with the column list, and the ability score's fit), and the weekly run only
-loads them, so a run takes about four minutes, needs 2.5 GB of memory and
-cannot quietly change a model. A full feature build (9 GB) and retraining
-stay manual commands. The weekly path was checked end to end: from the
-tables in S3 it reproduces the registered tables of 21 October 2026 byte for
-byte. *Would change if* new data arrived every week; until a live value
-source exists it does not (Limits).
-
-**D22. Similar players: style with the level taken out, a learned
-embedding only if it wins (decision 10).** Each regular player season
-since 2015 is a vector of per 90 numbers and on pitch shares of the team's
-shots, dribbles, passes and duels, standardised within position group and
-season, with both ability percentiles regressed out of its mean and spread,
-so a top player's neighbours are not simply other top players (their
-ability correlates 0.03 with his, against 0.57 before). A small contrastive
-model (the same player in consecutive seasons as the positive pair) beat
-plain cosine similarity on held out seasons, in every position group, and
-was adopted; a check on real replacements (a club sells and signs the same
-position within 60 days) shows clubs pick a similar style only a little
-more often than chance. Search is a numpy product in memory, no vector
-database. *Would change if* the tests stopped favouring the learned model
-after a retrain (the stored model then holds the baseline), or richer
-event data (FBref) made a better style description possible.
-
-**D23. The measured greats: StatsBomb open data, trusted only as far as it
-was checked (prompt 18b).** StatsBomb's free event data reaches back to
-2004/05 for Barcelona and 2003/04 for Arsenal, which our API data cannot.
-Its events are counted into our own per match table, each measure checked
-against API Football on the 15,434 player matches both sources hold
-(2015/16 to 2020/21): measures below a correlation of 0.7 are left out
-(tackles, interceptions), and the StatsBomb seasons of 2015/16 land next to
-the same player's API Football season 79% of the time. The old seasons are
-measured against Barcelona and its opponents only, a thin and biased peer
-group, and say so on the page; the panel shows the calibrated elite chance
-next to every similarity so a style match is never mistaken for a forecast.
-Prompt 18c settled two of the owner's calls: tackles and interceptions are
-kept (0.63 and 0.68 per match, but with them the thin seasons find the same
-player twice as often; the identity test decided), and a correction for the
-opponents' bias, learned on 2015/16 per measure and position group and
-tested on 2016/17 to 2020/21 (55.1% against 28.6% in the top five), is
-applied to Barcelona's old seasons. *Would change if* a fuller source of
-old seasons appeared, or the correction were learned for the Premier
-League too (Arsenal's 2003/04 stays uncorrected).
-
-**D24. Archetypes from the record, labelled and calibrated (prompt 18c).**
-Legends with no data at all (Cruyff, Gullit, Rio Ferdinand, Maldini,
-Zidane, Ronaldo Nazário, Baresi, Pirlo) are described in the style
-vector's own 18 measures, each a percentile against position peers with a
-reason and sources, in YAML files the owner edits after watching matches;
-they go through the same level free space as a measured season. Before
-trusting the method it was calibrated: six players we can measure were
-drafted the same way, blind, and the drafts landed within 15 points of the
-measurement on half the traits, which is not most, so the page calls the
-archetypes illustrative only and labels every result "archetype from the
-record, not measured". *Would change if* a second blind draft of the
-calibration players (by someone who has not seen the measured table)
-landed within 15 points on most traits.
-
-**D25. A capped chat over the published tables, one Lambda (decision 11,
-prompt 20).** The Ask tab sends a question to one AWS Lambda behind a
-Function URL; Claude Sonnet 5.5 (effort medium) answers with four strict
-tools over the very files the page publishes (search, one player's card with
-his written report, similar players with the "like him at an age" form,
-what a column means and cannot tell), at most six tool calls a turn, and
-the answer carries the tool results it was built from. The system prompt
-gives the data's dates, makes every number come from a tool result, opens
-an unanswerable question with "The tables on this page do not answer that."
-and refuses anything off topic with one fixed sentence; code replaces an
-answer that repeats ten words of the rules. Caps: 20 messages an hour per
-IP (hashed), 1 USD a day and 5 USD a month from the usage fields, 500
-characters, reserved concurrency 2 (held back while the account's Lambda
-limit is 10, which caps it meanwhile), and the Claude Console workspace's
-spend limit as the hard backstop. Decision 9 is revised for the chat only:
-the page stays static and the weekly run is unchanged. Since prompt 20d the
-page opens on the Ask tab, and the chat reaches the legends' archetypes and
-the measured greats by name or nickname, each with its label. *Would change if*
-the evaluation's pass rates fell short (the chat then stays off the page),
-or the visitors' use outgrew the caps.
+* [MODELS.md](MODELS.md): every model, its backtest and its baseline.
+* [FEATURES.md](FEATURES.md): the data dictionary.
+* [docs/DECISIONS.md](docs/DECISIONS.md): the design decisions D1 to D25.
+* [CLAUDE.md](CLAUDE.md): the working notes every coding session starts from.
+* [CONTRIBUTING.md](CONTRIBUTING.md): not taking contributions.

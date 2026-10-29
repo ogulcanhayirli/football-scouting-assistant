@@ -1,0 +1,119 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 1390" width="760" height="1390" font-family="system-ui, -apple-system, Segoe UI, Helvetica, Arial, sans-serif" font-size="17" fill="#111">
+  <title>Football scouting assistant: how the data flows</title>
+  <desc>Three sources feed a byte for byte raw cache and Parquet tables in a private S3 bucket. Models are retrained by hand and stored there. A weekly GitHub Actions run scores the newest season with the stored models, writes the lists and the checked reports, and publishes a static page to a public S3 bucket. A chat Lambda with four tools reads the published files. Two loops check the work: the reports' faithfulness check and the chat's evaluation on 72 questions.</desc>
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#111"/>
+    </marker>
+  </defs>
+  <rect width="760" height="1390" fill="#fff"/>
+  <g stroke="#111" stroke-width="2" fill="none">
+    <!-- sources -->
+    <rect x="20" y="64" width="230" height="84" rx="10"/>
+    <rect x="265" y="64" width="230" height="84" rx="10"/>
+    <rect x="510" y="64" width="230" height="84" rx="10"/>
+    <!-- raw cache -->
+    <rect x="20" y="196" width="720" height="84" rx="10"/>
+    <!-- retraining and data bucket -->
+    <rect x="20" y="328" width="330" height="108" rx="10"/>
+    <rect x="410" y="328" width="330" height="108" rx="10"/>
+    <!-- weekly run -->
+    <rect x="20" y="484" width="720" height="236" rx="10" stroke-width="3"/>
+    <rect x="40" y="600" width="680" height="104" rx="8" stroke-dasharray="7 5"/>
+    <!-- site bucket -->
+    <rect x="20" y="768" width="720" height="84" rx="10"/>
+    <!-- page and chat -->
+    <rect x="20" y="900" width="270" height="130" rx="10"/>
+    <rect x="390" y="900" width="350" height="250" rx="10" stroke-width="3"/>
+    <!-- evaluation loop -->
+    <rect x="20" y="1198" width="720" height="104" rx="8" stroke-dasharray="7 5"/>
+    <!-- registered forecasts -->
+    <rect x="20" y="1070" width="270" height="80" rx="8" stroke-dasharray="7 5"/>
+
+    <!-- arrows -->
+    <path d="M135 148 V192" marker-end="url(#a)"/>
+    <path d="M380 148 V192" marker-end="url(#a)"/>
+    <path d="M625 148 V192" marker-end="url(#a)"/>
+    <path d="M575 280 V324" marker-end="url(#a)"/>
+    <path d="M354 382 H406" marker-end="url(#a)"/>
+    <path d="M185 280 V324" marker-end="url(#a)"/>
+    <path d="M575 436 V480" marker-end="url(#a)"/>
+    <path d="M380 720 V764" marker-end="url(#a)"/>
+    <path d="M155 852 V896" marker-end="url(#a)"/>
+    <path d="M565 852 V896" marker-end="url(#a)"/>
+    <path d="M294 945 H386" marker-end="url(#a)"/>
+    <path d="M386 990 H294" marker-end="url(#a)"/>
+    <path d="M565 1194 V1154" marker-end="url(#a)" stroke-dasharray="7 5"/>
+  </g>
+
+  <text x="20" y="38" font-size="22" font-weight="700">How the data flows</text>
+
+  <g text-anchor="middle">
+    <text x="135" y="98" font-weight="700">API Football</text>
+    <text x="135" y="124">player and match stats</text>
+    <text x="135" y="142" font-size="15">37 leagues, 2010 to 2025</text>
+
+    <text x="380" y="98" font-weight="700">Transfermarkt dataset</text>
+    <text x="380" y="124">(dcaribou) market values</text>
+    <text x="380" y="142" font-size="15">and transfers</text>
+
+    <text x="625" y="98" font-weight="700">StatsBomb open data</text>
+    <text x="625" y="124">event data, old seasons</text>
+    <text x="625" y="142" font-size="15">of the measured greats</text>
+
+    <text x="380" y="228" font-weight="700">Raw cache, byte for byte, never fetched twice</text>
+    <text x="380" y="256">adapters and data contracts turn it into Parquet tables</text>
+
+    <text x="185" y="360" font-weight="700">Retraining, by hand</text>
+    <text x="185" y="386">season by season backtests,</text>
+    <text x="185" y="408">a baseline next to every model;</text>
+    <text x="185" y="428" font-size="15">the models are then stored</text>
+
+    <text x="575" y="360" font-weight="700">Private S3 data bucket</text>
+    <text x="575" y="386">raw cache, tables,</text>
+    <text x="575" y="408">stored models</text>
+
+    <text x="380" y="516" font-weight="700">Weekly GitHub Actions run (Mondays, never trains)</text>
+    <text x="380" y="546">features --current, score, embed, archetypes,</text>
+    <text x="380" y="572">lists, reports, site, publish</text>
+
+    <text x="380" y="628" font-weight="700">Faithfulness loop for the written reports</text>
+    <text x="380" y="654">Claude Haiku 5.5 writes from a fact sheet; code checks</text>
+    <text x="380" y="676">every number and name; 2 retries, else the rule text;</text>
+    <text x="380" y="698">Claude Sonnet 5.5 judges 50 a week</text>
+
+    <text x="380" y="800" font-weight="700">Public S3 site bucket</text>
+    <text x="380" y="828">index.html, candidates, bargains, players, similar.json, reports.json</text>
+
+    <text x="155" y="934" font-weight="700">Static page</text>
+    <text x="155" y="962">in the browser:</text>
+    <text x="155" y="986">tables, search,</text>
+    <text x="155" y="1010">the question box</text>
+
+    <text x="565" y="934" font-weight="700">Chat Lambda</text>
+    <text x="565" y="958">Function URL, Claude Sonnet 5.5,</text>
+    <text x="565" y="980">caps kept in a private bucket;</text>
+    <text x="565" y="1004">reads the published files</text>
+    <text x="565" y="1034" font-weight="700">four tools</text>
+    <text x="565" y="1060" font-family="ui-monospace, Menlo, Consolas, monospace" font-size="16">search_players</text>
+    <text x="565" y="1084" font-family="ui-monospace, Menlo, Consolas, monospace" font-size="16">player_card</text>
+    <text x="565" y="1108" font-family="ui-monospace, Menlo, Consolas, monospace" font-size="16">similar_players</text>
+    <text x="565" y="1132" font-family="ui-monospace, Menlo, Consolas, monospace" font-size="16">how_to_read</text>
+
+    <text x="155" y="1098" font-weight="700">Registered forecasts</text>
+    <text x="155" y="1120" font-size="15">lists frozen in git by date,</text>
+    <text x="155" y="1140" font-size="15">scored two seasons later</text>
+
+    <text x="380" y="1226" font-weight="700">Evaluation loop for the chat</text>
+    <text x="380" y="1252">scout chat-eval asks 72 questions with answers computed</text>
+    <text x="380" y="1274">from the published tables; each failure is traced,</text>
+    <text x="380" y="1296">fixed, redeployed and asked again</text>
+  </g>
+
+  <g font-size="15" fill="#333">
+    <text x="340" y="938" text-anchor="middle">question</text>
+    <text x="340" y="1010" text-anchor="middle">answer</text>
+    <text x="20" y="1340">Solid lines carry data. Dashed boxes are checks and records.</text>
+    <text x="20" y="1362">Only the site bucket and the chat's Function URL are public.</text>
+  </g>
+</svg>

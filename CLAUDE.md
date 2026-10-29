@@ -1,8 +1,12 @@
 # CLAUDE.md
 
-Orientation for a new session. Details live in README.md (decisions D1 to D19),
-FEATURES.md (data dictionary), MODELS.md (models and results), FEASIBILITY.md
-and docs/AWS_SETUP.md. When this file and the code disagree, the code wins;
+Orientation for a new session. Details live in docs/DECISIONS.md (decisions
+D1 to D25, moved out of the README in prompt 21), FEATURES.md (data
+dictionary), MODELS.md (models and results), FEASIBILITY.md and
+docs/AWS_SETUP.md. README.md is the cold reader's overview (prompt 21: under
+250 lines), docs/RUNNING.md the old README's layout and commands,
+docs/HOW_IT_WAS_BUILT.md the prompts and what went wrong, DATA_LICENSES.md
+the sources' terms against what is published. When this file and the code disagree, the code wins;
 fix this file.
 
 ## Goal and owner
@@ -861,8 +865,11 @@ scripts/    feasibility.py, run_extras.py, rebuild_match_seasons.py, run_expansi
             embedding_threshold.py
 tests/      unit, contracts, fixtures (synthetic)
 infra/      CDK app (ScoutSite, ScoutChat with chat_bundle.py and chat/requirements.txt) and its tests; archive/ holds the retired stacks
-docs/       DEPLOY.md (the weekly run, secrets, IAM policy, cost), AWS_SETUP.md
-.github/    workflows/ci.yml (tests on pull requests and pushes to main), weekly.yml
+docs/       DEPLOY.md (the weekly run, secrets, IAM policy, cost), AWS_SETUP.md, DECISIONS.md (D1 to D25),
+            RUNNING.md (layout and commands), HOW_IT_WAS_BUILT.md (the prompts, what went wrong),
+            images/ (architecture.svg, hand written; page-phone.png, the live page at 390 px, 29 October)
+.github/    workflows/ci.yml (tests on pull requests and pushes to main), weekly.yml; CODEOWNERS
+LICENSE     MIT, the code only (prompt 21); DATA_LICENSES.md for the data; CONTRIBUTING.md (not taking contributions)
 ```
 
 ## Decisions
@@ -886,6 +893,29 @@ Owner decisions of 2026-10-16. Each one line; details in the code and docs once 
 
 These are unresolved or inconsistent in the repository as of 2026-10-21.
 Settle them with the owner rather than guessing.
+
+* **Prompt 21 (29 October): fit to open.** Docs only, no behaviour changed:
+  README rewritten for a cold reader, decisions D1 to D25 moved to
+  docs/DECISIONS.md, the diagram and a phone screenshot under docs/images/,
+  docs/HOW_IT_WAS_BUILT.md, LICENSE (MIT, code only), DATA_LICENSES.md,
+  CODEOWNERS, CONTRIBUTING.md. The page was not republished. Found and
+  left for the owner:
+  * The secret scan (gitleaks 8.21.2 over all 125 commits of every branch,
+    and a regex pass over all 807 blobs and every commit message) found no
+    key, token or password. Kept on purpose: the account id 098499087060
+    (public through the site bucket's name), the chat's Function URL
+    (public, the page calls it), the private data bucket's name
+    `football-scout-data-ogulcanhayirli` in docs/ (no access without
+    credentials), the owner's name in pyproject.toml and LICENSE. In the
+    commit messages only: 129 `Claude-Session:` session links (they open
+    for the owner only) and the agents' `Co-Authored-By` trailers; removing
+    them would mean rewriting history, the owner's call, not needed.
+  * dcaribou's transfermarkt-datasets is CC0 1.0, not unlicensed as the old
+    README said; Transfermarkt's own rights over the values are not waived
+    by it (DATA_LICENSES.md). The API Football terms page answered HTTP 403
+    to the session: the owner reads it once signed in.
+  * The 19 `claude/*` branches on the remote are all merged into `main`;
+    the owner may delete them (the session does not).
 
 * The chat (prompt 20) was **deployed on 26 October 2026** with the
   owner's yes (`ScoutChat`; the key as the NoEcho parameter from
@@ -1026,9 +1056,9 @@ Settle them with the owner rather than guessing.
   on one id). When the id's real owner is the minority, his rows go
   (Gabriel Barbosa's 11 Santos matches in Brasileirão 2016). Lineups and
   season totals are not repaired the same way yet.
-* Decision 7 adds FBref, but README.md (Data sources and attribution) says no
+* Decision 7 adds FBref, but DATA_LICENSES.md (Everything else) says no
   site is scraped; FBref's terms and access method need checking first.
-* README.md now describes decision 9 (prompt 15); `docs/AWS_SETUP.md` still
+* docs/DECISIONS.md (D20) describes decision 9 (prompt 15); `docs/AWS_SETUP.md` still
   explains the CDK bootstrap for all `scout-*` stacks, which is still how
   `ScoutSite` deploys.
 * Decision 4 shows contract expiry, which rule 1 keeps out of features because

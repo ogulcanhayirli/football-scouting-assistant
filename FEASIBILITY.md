@@ -188,7 +188,7 @@ counts above slightly and changed nothing else in this document.
 
 ## 6. Decisions this supports
 
-1. **Feature date 30 June (D9 in the README): confirmed.** Season totals give
+1. **Feature date 30 June (D9 in docs/DECISIONS.md): confirmed.** Season totals give
    99% label coverage at that date from 2015 on.
 2. **Two feature tiers.** Full features from 2015, basic features (minutes,
    goals, appearances, cards, age, position, league) back to 2010. The
