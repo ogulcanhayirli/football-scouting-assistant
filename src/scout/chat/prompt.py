@@ -37,9 +37,12 @@ CHANCE_MEANING = "the share of past players in the same band who did it within t
 CAPPED = {
     "rate": "Sorry, you have reached the limit of 20 questions an hour. Please try again later; "
     "the tables on this page are still there to browse.",
+    "rate_day": "Sorry, you have reached the limit of 40 questions a day. Please try again "
+    "tomorrow; the tables on this page are still there to browse.",
     "budget": "Sorry, the chat has used up its budget for now. Please try again tomorrow; the "
     "tables on this page are still there to browse.",
     "length": "Please keep your question under 500 characters.",
+    "request": "Sorry, I could not read that question. Please ask it again.",
     "safety": "Sorry, I cannot help with that. "
     "I can answer questions about the players and numbers in the scouting tables on this page.",
     "error": "Sorry, something went wrong on our side. Please try again in a minute.",

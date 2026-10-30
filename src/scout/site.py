@@ -501,15 +501,18 @@ def chat_block(settings) -> dict:
         "model": settings.chat.model,
         "max_chars": CAPS.max_chars,
         "per_hour": CAPS.messages_per_hour,
+        "per_day": CAPS.messages_per_day,
         "suggested": list(SUGGESTED),
     }
 
 
 def render(data: dict, template: Path = TEMPLATE) -> str:
-    """The page: the template with the data as a JSON script block. ``</`` is
-    escaped so no text in the tables can end the block."""
+    """The page: the template with the data as a JSON script block. Every
+    ``<`` is written as the JSON escape ``\\u003c`` (prompt 22), so no text in
+    the tables can end the block or open a comment, and the block stays
+    valid JSON."""
     payload = json.dumps(data, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
-    payload = payload.replace("</", "<\\/").replace("<!--", "<\\!--")
+    payload = payload.replace("<", "\\u003c")
     html = template.read_text(encoding="utf-8")
     return html.replace("__TITLE__", TITLE).replace("__DATA__", payload)
 

@@ -1308,7 +1308,7 @@ footer p { margin: 0 0 8px; }
     var dates = Object.keys(D.feature_dates).sort();
     $("ask-fine").textContent = "Players as of " + day(dates[dates.length - 1]) +
       (D.so_far_date ? ", clubs and this season to " + day(D.so_far_date) : "") +
-      (on ? " · " + D.chat.max_chars + " characters, " + D.chat.per_hour + " questions an hour" : "");
+      (on ? " · " + D.chat.max_chars + " characters, " + D.chat.per_hour + " questions an hour, " + D.chat.per_day + " a day" : "");
     $("ask-how").textContent = on
       ? "The chat is a prototype: " + D.chat.model + " answers with four lookup tools over the candidates, bargains, every player of the season, similar players and the written reports, and every number it gives comes from what it looked up, shown under each answer (From the tables)."
       : "";

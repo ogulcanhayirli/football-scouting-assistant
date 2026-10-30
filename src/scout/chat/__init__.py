@@ -5,8 +5,8 @@ One AWS Lambda behind a Function URL (``infra/scout_infra/chat_stack.py``)
 runs ``handler.handler``. At cold start it reads the files ``scout publish``
 put in the site bucket (``data``), and every answer is built by Claude
 Sonnet 5.5 from four tools over them (``tools``), under the rules of the
-system prompt (``prompt``). ``guard`` holds the caps (20 messages an hour per
-visitor, 1 USD a day, 5 USD a month) in a small S3 object, and ``agent`` runs
+system prompt (``prompt``). ``guard`` holds the caps (20 messages an hour and
+40 a day per visitor, 1 USD a day, 5 USD a month) in a small S3 object, and ``agent`` runs
 the tool loop (at most six tool calls a turn) and prices every reply from
 its usage fields.
 

@@ -1008,12 +1008,35 @@ def test_twenty_messages_an_hour_per_visitor():
     assert g.admit("1.2.3.4").ok
 
 
+def test_forty_messages_a_day_per_visitor():
+    clock = Clock()
+    g = guard.Guard(guard.MemoryStore(), clock=clock)
+    for _ in range(2):
+        assert all(g.admit("1.2.3.4").ok for _ in range(20))
+        clock.now += timedelta(hours=1)
+    refused = g.admit("1.2.3.4")  # a fresh hour, but 40 today
+    assert (refused.ok, refused.reason) == (False, "rate_day")
+    assert g.admit("5.6.7.8").ok  # another visitor
+    clock.now += timedelta(days=1)
+    assert g.admit("1.2.3.4").ok
+
+
+def test_the_page_warm_counts_like_a_message_and_needs_no_budget():
+    g = guard.Guard(guard.MemoryStore(), clock=Clock())
+    g.record(1.0, {})  # the day's budget spent: a warm calls no model, so it still runs
+    assert all(g.admit_warm("1.2.3.4").ok for _ in range(20))
+    assert g.admit_warm("1.2.3.4").reason == "rate"
+    g.caps = guard.Caps(day_usd=10.0)
+    assert g.admit("1.2.3.4").reason == "rate"
+
+
 def test_the_ip_is_stored_only_as_a_salted_hash():
     store = guard.MemoryStore()
     guard.Guard(store, clock=Clock()).admit("1.2.3.4")
     blob = json.dumps(store.body)
     assert "1.2.3.4" not in blob
     assert len(store.body["visitors"]) == 1
+    assert list(store.body["day_visitors"]) == list(store.body["visitors"])
 
 
 def test_day_and_month_budgets():
@@ -1049,6 +1072,8 @@ def test_eval_token_needs_the_key():
     assert not guard.is_eval(token, "sk-other")
     assert not guard.is_eval(None, "sk-test")
     assert not guard.is_eval(token, "")
+    assert not guard.is_eval("é" * len(token), "sk-test")  # not ASCII: no TypeError
+    assert not guard.is_eval("\udcff", "sk-test")  # not even encodable
 
 
 def test_conflicting_writes_are_retried():
@@ -1364,6 +1389,29 @@ def test_handler_eval_header_skips_the_rate_limit(lambda_env):
     assert store.body["eval_day_usd"] > 0
 
 
+def test_handler_takes_a_header_that_is_not_ascii_as_a_visitor(lambda_env):
+    client, store = lambda_env
+    client.replies.append(reply([block("text", text="ok")]))
+    out = handler.handler(event({"message": "hi"}, headers={"X-Scout-Eval": "évaluation"}))
+    assert json.loads(out["body"])["outcome"] == "answered"
+    assert store.body["day_usd"] > 0
+    assert store.body["eval_day_usd"] == 0.0
+
+
+@pytest.mark.parametrize("history", [{"role": "user"}, "hi", 3, {}])
+def test_handler_refuses_a_history_that_is_not_a_list_politely(lambda_env, history):
+    client, _ = lambda_env
+    out = handler.handler(event({"message": "hi", "history": history}))
+    body = json.loads(out["body"])
+    assert out["statusCode"] == 400
+    assert body["answer"] == prompt.CAPPED["request"]
+    assert body["outcome"] == "request"
+    assert client.calls == []
+    # A missing or null history is no history.
+    assert handler.parse(event({"message": "hi", "history": None})) == ("hi", [])
+    assert handler.parse(event({"message": "hi"})) == ("hi", [])
+
+
 def test_handler_rejects_bad_requests(lambda_env):
     assert handler.handler(event({"message": "hi"}, method="GET"))["statusCode"] == 405
     assert handler.handler(event("not json"))["statusCode"] == 400
@@ -1390,12 +1438,41 @@ def test_the_warm_ping_loads_the_tables_and_calls_no_model(tables, monkeypatch):
     assert len(loads) == 1  # kept in memory
 
 
-def test_the_pages_warm_request_skips_the_caps(lambda_env):
+def test_a_warm_within_a_minute_of_the_last_skips_the_load(tables, monkeypatch):
+    clock, checks = [0.0], []
+    monkeypatch.setattr(handler, "_state", {"s3": object(), "claude": FakeClient([])})
+    monkeypatch.setattr(handler.data, "load", lambda source: tables)
+    monkeypatch.setattr(handler.time, "monotonic", lambda: clock[0])
+    monkeypatch.setenv("SITE_BUCKET", "site")
+    real = handler.assistant
+    monkeypatch.setattr(handler, "assistant", lambda: checks.append(clock[0]) or real())
+    assert json.loads(handler.handler({"warm": True})["body"])["warm"] is True
+    clock[0] = 59.0
+    body = json.loads(handler.handler({"warm": True})["body"])
+    assert body == {"warm": True, "data_built": "2026-10-25"}  # nothing loaded or checked
+    assert checks == [0.0]
+    clock[0] = 61.0
+    handler.handler({"warm": True})
+    assert checks == [0.0, 61.0]  # a minute on, the load (or the hourly check) runs again
+
+
+def test_the_pages_warm_request_counts_against_the_hourly_cap(lambda_env):
     client, store = lambda_env
     out = handler.handler(event({"warm": True}))
     assert json.loads(out["body"])["warm"] is True
     assert client.calls == []
-    assert store.body is None
+    assert store.body["totals"] == {"warm": 1}
+    assert store.body["day_usd"] == 0.0
+    client.replies += [reply([block("text", text="ok")]) for _ in range(19)]
+    for _ in range(19):
+        out = json.loads(handler.handler(event({"message": "hi"}))["body"])
+        assert out["outcome"] == "answered"
+    # The warm took the twentieth place: the next warm and message are both refused.
+    for body in ({"warm": True}, {"message": "hi"}):
+        out = json.loads(handler.handler(event(body))["body"])
+        assert (out["outcome"], out["answer"]) == ("rate", prompt.CAPPED["rate"])
+    assert len(client.calls) == 19
+    assert handler.handler(event({"warm": True}, ip="5.6.7.8"))["statusCode"] == 200
     # A message is never a warm request, nor is a body that is not JSON.
     assert not handler.is_warm(event({"warm": True, "message": "hi"}))
     assert not handler.is_warm(event("not json"))

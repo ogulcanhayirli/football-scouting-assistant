@@ -161,6 +161,27 @@ def test_the_page_embeds_the_data_so_no_text_can_end_the_script():
     assert "cdn" not in html.lower()  # no outside script or stylesheet
 
 
+def test_the_data_block_escapes_every_angle_bracket_as_json():
+    from scout.chat.data import page_meta
+
+    data = _data()
+    name = "Alex <!-- </script><script>alert(1)</script>"
+    data["candidates"]["rows"][0][0] = name
+    html = render(data)
+    block = re.search(r'<script type="application/json" id="data">(.*?)</script>', html, re.S)
+    payload = block.group(1)
+    assert "<" not in payload  # neither the tag nor the comment opener appears raw
+    assert "</script>" not in payload
+    assert "<!--" not in payload
+    assert "\\u003c!--" in payload
+    assert "<\\!--" not in payload
+    assert json.loads(payload)["candidates"]["rows"][0][0] == name
+    assert page_meta(html)["candidates"]["rows"][0][0] == name  # what the chat reads
+    # The page has exactly one data block and its script tags are the template's own.
+    assert html.count('<script type="application/json" id="data">') == 1
+    assert html.count("</script>") == html.count("<script")
+
+
 class FakeS3:
     def __init__(self):
         self.objects, self.args = {}, {}
@@ -344,12 +365,11 @@ def test_the_ask_tab_gets_the_url_and_the_caps_from_the_config():
         "model": "Claude Sonnet 5.5",
         "max_chars": 500,
         "per_hour": 20,
+        "per_day": 40,
         "suggested": list(SUGGESTED),
     }
     html = render({**_data(), "chat": block})
-    payload = json.loads(
-        re.search(r'id="data">(.*?)</script>', html, re.S).group(1).replace("<\\/", "</")
-    )
+    payload = json.loads(re.search(r'id="data">(.*?)</script>', html, re.S).group(1))
     assert payload["chat"]["url"] == url
     # The page posts the question with the last few turns and shows the tool results.
     assert "fetch(D.chat.url" in html
@@ -449,7 +469,10 @@ def test_the_page_is_the_chat_and_everything_else_is_one_click_away():
     # The data dates and the caps in one muted line.
     assert '"Players as of " + day(' in html
     assert '", clubs and this season to " + day(D.so_far_date)' in html
-    assert '" characters, " + D.chat.per_hour + " questions an hour"' in html
+    assert (
+        '" characters, " + D.chat.per_hour + " questions an hour, " + D.chat.per_day + " a day"'
+        in html
+    )
     # The counter shows only from 400 characters on.
     assert '<span id="ask-count" hidden></span>' in body
     assert "var COUNT_FROM = 400;" in html

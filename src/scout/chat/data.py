@@ -138,8 +138,7 @@ def page_meta(html: str) -> dict:
     found = DATA_BLOCK.search(html)
     if not found:
         raise ValueError("the page has no data block")
-    payload = found.group(1).replace("<\\/", "</").replace("<\\!--", "<!--")
-    return json.loads(payload)
+    return json.loads(found.group(1))  # json.loads decodes the page's \u003c
 
 
 def int8(text: str) -> array:

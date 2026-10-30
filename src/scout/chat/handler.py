@@ -11,10 +11,12 @@ in memory; once an hour the handler asks S3 whether the page changed
 (``HEAD index.html``) and reloads if it did. CORS is the Function URL's own
 setting (the site's origin only), so the handler adds no CORS headers.
 
-A warm request loads the clients and the tables and calls no model and no
-caps (prompt 20b): ``{"warm": true}`` as the event itself (the EventBridge
-ping every 5 minutes, ``chat_stack.py``) or as the body of a POST without a
-message (the page sends one when the Ask tab opens). A cold start costs
+A warm request loads the clients and the tables and calls no model (prompt
+20b): ``{"warm": true}`` as the event itself (the EventBridge ping every 5
+minutes, ``chat_stack.py``) or as the body of a POST without a message (the
+page sends one when it opens). Since prompt 22 the page's warm request
+counts against the visitor's hourly and daily caps like a message, and an
+instance warmed less than a minute ago skips the load. A cold start costs
 about 3 seconds of CPU at 1,024 MB (6 at 512 MB), most of it importing the
 Claude SDK; the six S3 reads run while it imports.
 
@@ -44,6 +46,7 @@ log.setLevel(logging.INFO)
 HISTORY_TURNS = 6  # earlier messages kept, user and assistant together
 HISTORY_CHARS = {"user": 500, "assistant": 2000}
 RELOAD_SECONDS = 3600
+WARM_SKIP_SECONDS = 60  # a warm request this soon after the last one loads nothing
 EVAL_HEADER = "x-scout-eval"
 
 _state: dict[str, Any] = {}
@@ -104,16 +107,30 @@ def is_warm(event: dict) -> bool:
     return isinstance(payload, dict) and payload.get("warm") is True and "message" not in payload
 
 
-def warm() -> dict:
-    """Load what a turn needs, call no model and touch no caps."""
+def warm(ip: str | None = None) -> dict:
+    """Load what a turn needs and call no model. The page's request (``ip``
+    given) counts against the visitor's caps; the EventBridge ping has none."""
+    if ip is not None:
+        try:
+            admitted = guard().admit_warm(ip)
+        except Exception:
+            log.exception("chat: state unavailable")
+            return _reply(503, {"warm": False})
+        if not admitted.ok:
+            log.info(json.dumps({"outcome": admitted.reason, "warm": True}))
+            return _fixed(admitted.reason)
     start = time.monotonic()
     cold = "assistant" not in _state
+    if not cold and start - _state.get("warmed", float("-inf")) < WARM_SKIP_SECONDS:
+        log.info(json.dumps({"outcome": "warm", "skipped": True}))
+        return _reply(200, {"warm": True, "data_built": _state["assistant"].tables.built})
     try:
         bot = assistant()
     except Exception as exc:
         log.error("chat: warm load failed: %s", type(exc).__name__)
         return _reply(503, {"warm": False})
-    seconds = round(time.monotonic() - start, 2)
+    _state["warmed"] = time.monotonic()
+    seconds = round(_state["warmed"] - start, 2)
     log.info(json.dumps({"outcome": "warm", "cold": cold, "seconds": seconds}))
     return _reply(200, {"warm": True, "data_built": bot.tables.built, "seconds": seconds})
 
@@ -137,14 +154,24 @@ def _body(event: dict) -> str:
     return body
 
 
+class BadHistoryError(ValueError):
+    """The history is there but is not a list."""
+
+
 def parse(event: dict) -> tuple[str, list[dict]]:
-    """The message and the cleaned history; raises ValueError on a bad body."""
+    """The message and the cleaned history; raises ValueError on a bad body
+    (``BadHistoryError`` when the history is not a list)."""
     payload = json.loads(_body(event))
     message = payload.get("message")
     if not isinstance(message, str) or not message.strip():
         raise ValueError("message must be a non empty string")
+    given = payload.get("history")
+    if given is None:
+        given = []
+    if not isinstance(given, list):
+        raise BadHistoryError("history must be a list")
     history = []
-    for item in (payload.get("history") or [])[-HISTORY_TURNS:]:
+    for item in given[-HISTORY_TURNS:]:
         role, content = item.get("role"), item.get("content")
         if role in HISTORY_CHARS and isinstance(content, str) and content.strip():
             history.append({"role": role, "content": content[: HISTORY_CHARS[role]]})
@@ -166,9 +193,11 @@ def handler(event: dict, context: Any = None) -> dict:
     if http.get("method", "POST") != "POST":
         return _reply(405, {"error": "POST a JSON body"})
     if is_warm(event):
-        return warm()
+        return warm(http.get("sourceIp", "unknown") if "requestContext" in event else None)
     try:
         message, history = parse(event)
+    except BadHistoryError:
+        return _fixed("request", 400)
     except (ValueError, AttributeError, TypeError):
         return _reply(400, {"error": 'send JSON: {"message": "...", "history": [...]}'})
     caps = guard().caps

@@ -94,4 +94,7 @@ Claude API from our own tables.
 The tables describe professional footballers from public match records:
 names, ages, clubs, minutes, matches missed injured, market values. They
 hold no contact details or private data. A player who wants a row removed
-can ask through an issue.
+can ask through an issue. Rows in the registered forecasts (`forecasts/`)
+stay in git history once committed, so removing one there would mean
+rewriting that history, and future registered files will carry the injury
+flag without the count of matches missed.

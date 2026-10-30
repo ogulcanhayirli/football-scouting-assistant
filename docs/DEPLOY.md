@@ -655,7 +655,8 @@ is the runtime's own).
 
 | Cap | Value | What happens |
 |---|---|---|
-| Per visitor | 20 messages an hour by IP (the state keeps a salted hash, for the current hour only) | the fixed reply "Sorry, you have reached the limit of 20 questions an hour..." |
+| Per visitor | 20 messages an hour by IP (the state keeps a salted hash, for the current hour only); the page's warm request counts as one (prompt 22) | the fixed reply "Sorry, you have reached the limit of 20 questions an hour..." |
+| Per visitor a day | 40 messages a day by IP (the same salted hash, for the current day only; prompt 22) | the fixed reply "Sorry, you have reached the limit of 40 questions a day..." |
 | Per day | 1 USD, computed from the usage fields of every reply | the fixed reply "Sorry, the chat has used up its budget for now..." |
 | Per month | 5 USD, the same way | the same reply |
 | Message length | 500 characters | "Please keep your question under 500 characters." (the page stops longer ones first) |
@@ -727,6 +728,10 @@ What prompt 20b changed (deployed 27 October 2026):
 * A warm request: `{"warm": true}` (the event itself, or the body of a POST
   without a message) loads the clients and the tables, calls no model and
   touches no caps; it logs `{"outcome": "warm", "cold": ..., "seconds": ...}`.
+  Since prompt 22 the page's warm request (not the EventBridge ping) counts
+  against the visitor's hourly and daily caps like a message, and a warm
+  request less than a minute after the instance's last skips the load and
+  logs `{"outcome": "warm", "skipped": true}`.
   The page sends one when the Ask tab opens, so the instance is warm by the
   time the question is typed, and while a question has been out for more
   than 5 seconds the status line says "The first answer can take up to 30

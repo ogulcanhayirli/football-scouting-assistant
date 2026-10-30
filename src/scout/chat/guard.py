@@ -1,7 +1,8 @@
 """The chat's caps, kept in one small S3 object (prompt 20).
 
-* **Per visitor**: 20 messages an hour by IP. The IP is never stored; the
-  state keeps a salted hash of it, and only for the current hour.
+* **Per visitor**: 20 messages an hour and 40 a day by IP. The IP is never
+  stored; the state keeps a salted hash of it, and only for the current
+  hour and day. The page's warm request counts like a message (prompt 22).
 * **Budget**: 1 USD a day and 5 USD a month (UTC), computed from the usage
   fields of every reply (``scout.chat.agent.cost_usd``).
 * **Length**: 500 characters a message (checked by the handler).
@@ -41,6 +42,7 @@ TRIES = 6
 @dataclass(frozen=True)
 class Caps:
     messages_per_hour: int = 20
+    messages_per_day: int = 40
     day_usd: float = 1.0
     month_usd: float = 5.0
     eval_day_usd: float = 5.0
@@ -53,7 +55,13 @@ def eval_token(api_key: str) -> str:
 
 
 def is_eval(header: str | None, api_key: str) -> bool:
-    return bool(header) and bool(api_key) and hmac.compare_digest(header, eval_token(api_key))
+    """Bytes are compared, so a header that is not ASCII is simply not the token."""
+    if not header or not api_key:
+        return False
+    try:
+        return hmac.compare_digest(header.encode(), eval_token(api_key).encode())
+    except (AttributeError, TypeError, ValueError):
+        return False
 
 
 class ConflictError(Exception):
@@ -134,8 +142,10 @@ def _fresh(state: dict | None, now: datetime) -> dict:
         s["hour"], s["visitors"] = p["hour"], {}
     if s.get("day") != p["day"]:
         s["day"], s["day_usd"], s["eval_day_usd"] = p["day"], 0.0, 0.0
+        s["day_visitors"] = {}
     if s.get("month") != p["month"]:
         s["month"], s["month_usd"], s["eval_month_usd"] = p["month"], 0.0, 0.0
+    s.setdefault("day_visitors", {})
     s.setdefault("totals", {})
     return s
 
@@ -174,6 +184,33 @@ class Guard:
     def visitor(self, state: dict, ip: str) -> str:
         return hashlib.sha256(f"{state['salt']}|{ip}".encode()).hexdigest()[:16]
 
+    def _count(self, state: dict, ip: str) -> str:
+        """Count one request against the visitor's hour and day; the refusal's
+        reason when either cap is reached (then nothing is counted)."""
+        who, caps = self.visitor(state, ip), self.caps
+        if state["visitors"].get(who, 0) >= caps.messages_per_hour:
+            return "rate"
+        if state["day_visitors"].get(who, 0) >= caps.messages_per_day:
+            return "rate_day"
+        state["visitors"][who] = state["visitors"].get(who, 0) + 1
+        state["day_visitors"][who] = state["day_visitors"].get(who, 0) + 1
+        return ""
+
+    def admit_warm(self, ip: str) -> Admission:
+        """The page's warm request: counted against the visitor like a message,
+        though it calls no model and so needs no budget."""
+
+        def change(state: dict) -> Admission:
+            totals = state["totals"]
+            refused = self._count(state, ip)
+            if refused:
+                totals["refused_rate"] = totals.get("refused_rate", 0) + 1
+                return Admission(False, refused)
+            totals["warm"] = totals.get("warm", 0) + 1
+            return Admission(True)
+
+        return self._update(change)
+
     def admit(self, ip: str, evaluation: bool = False) -> Admission:
         """May this message run? Counts it against the visitor when it may."""
         caps = self.caps
@@ -193,11 +230,10 @@ class Guard:
             ):
                 totals["refused_budget"] = totals.get("refused_budget", 0) + 1
                 return Admission(False, "budget")
-            who = self.visitor(state, ip)
-            if state["visitors"].get(who, 0) >= caps.messages_per_hour:
+            refused = self._count(state, ip)
+            if refused:
                 totals["refused_rate"] = totals.get("refused_rate", 0) + 1
-                return Admission(False, "rate")
-            state["visitors"][who] = state["visitors"].get(who, 0) + 1
+                return Admission(False, refused)
             totals["turns"] = totals.get("turns", 0) + 1
             return Admission(True, day_usd=state["day_usd"], month_usd=state["month_usd"])
 

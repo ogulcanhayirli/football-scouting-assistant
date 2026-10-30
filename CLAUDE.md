@@ -601,11 +601,17 @@ word for bargain yes. "Mbappé" alone reads as Kylian Mbappé (E. Mbappé
 under `also_on_page`). 20f and 20g went out with weekly run 16 (started by
 hand on 28 October with the owner's go, prompt 20h; the live page then
 counted 18,931 players across 36 leagues). Caps (`src/scout/chat/guard.py`): 20
-messages an hour per IP (salted hash), 1 USD a day and 5 USD a month from
-the usage fields, 500 characters, all with a fixed polite reply; the Claude
+messages an hour and 40 a day per IP (one salted hash, an hour key and a
+day key; the 40 since prompt 22), 1 USD a day and 5 USD a month from
+the usage fields, 500 characters, all with a fixed polite reply (a history
+that is not a list gets one too, since prompt 22); the page's line reads
+"500 characters, 20 questions an hour, 40 a day"; the Claude
 Console workspace's spend limit is the hard backstop. Since prompt 20b the
 tab sends `{"warm": true}` when it opens (the Lambda loads the tables and
-calls no model, so the question rarely meets a cold start) and, while a
+calls no model, so the question rarely meets a cold start; since prompt 22
+the page's warm counts against the visitor's hourly and daily caps like a
+message, the EventBridge ping against nothing, and an instance warmed under
+a minute ago skips the load) and, while a
 question has been out more than 5 seconds, says "The first answer can take
 up to 30 seconds."; the strict tools declare their filters in the order the
 model writes them (table, sort, limit, league, position, flags, the ages,
