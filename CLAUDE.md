@@ -900,6 +900,26 @@ Owner decisions of 2026-10-16. Each one line; details in the code and docs once 
 These are unresolved or inconsistent in the repository as of 2026-10-21.
 Settle them with the owner rather than guessing.
 
+* **Prompt 22 (30 October): fixes from the safety audit** of `main` at
+  2d29f60. certifi 2026.10.23 in the root lock; every action pinned to a
+  commit SHA resolved with `git ls-remote` (checkout v4.4.0 11d5960a,
+  setup-uv v6.8.0 d0cc045d, upload-artifact v4.6.2 ea165f8d) and the AWS and
+  API Football secrets given only to the check, pull, update and publish
+  steps of `weekly.yml`; `is_eval` compares bytes in a try (a header that is
+  not ASCII is a visitor); a history that is not a list gets the fixed reply
+  `CAPPED["request"]` (400); the data block writes every `<` as `\u003c`
+  and `page_meta` only calls `json.loads` (the live page of 29 October,
+  with the old escape, still parses); the page's warm request counts
+  against the hourly and the new daily cap of 40 (`rate_day`), and a warm
+  under a minute after the last skips the load. The 72 questions in
+  process on the tables of 29 October: 72 of 72, 0.49 USD (58 tool calls,
+  median 3.6 s, slowest 6.3 s), no asterisk, one number in no tool result.
+  Left open: (1) DATA_LICENSES.md now says future registered files carry
+  the injury flag without the count, but `scout forecast freeze` still
+  writes "injured (N matches missed injured)": the code must change before
+  the next freeze (the window refreeze of 15 December); (2) the redeploy of
+  `ScoutChat` and the publish wait for the owner's go; until both, the live
+  function runs the old handler and the live page shows no day cap.
 * **Prompt 21 (29 October): fit to open.** Docs only, no behaviour changed:
   README rewritten for a cold reader, decisions D1 to D25 moved to
   docs/DECISIONS.md, the diagram and a phone screenshot under docs/images/,
