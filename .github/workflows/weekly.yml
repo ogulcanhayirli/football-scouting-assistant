@@ -31,14 +31,17 @@ jobs:
     # minutes (reports_text.max_run_minutes, prompt 19c); a batch still
     # running then is collected by the next run. Everything else takes about 5.
     timeout-minutes: 60
+    # The secrets are given only to the steps that use them (prompt 22), so
+    # no third party action (checkout, setup-uv, upload-artifact) sees them.
     env:
-      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-      API_FOOTBALL_KEY: ${{ secrets.API_FOOTBALL_KEY }}
       SCOUT_S3_BUCKET: ${{ vars.SCOUT_S3_BUCKET }}
       SCOUT_SITE_BUCKET: ${{ vars.SCOUT_SITE_BUCKET }}
     steps:
       - name: Check secrets and variables
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          API_FOOTBALL_KEY: ${{ secrets.API_FOOTBALL_KEY }}
         run: |
           echo "STARTED=$(date +%s)" >> "$GITHUB_ENV"
           missing=0
@@ -56,9 +59,9 @@ jobs:
           done
           exit $missing
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: astral-sh/setup-uv@v6
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
         with:
           python-version: "3.12"
           enable-cache: true
@@ -67,11 +70,18 @@ jobs:
         run: uv sync --extra aws --no-dev
 
       - name: Pull the processed tables and the Transfermarkt snapshot
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
         run: |
           uv run scout --config "$CONFIG" sync down --only processed --workers 16
           uv run scout --config "$CONFIG" sync down --only transfermarkt
 
       - name: Free tier update
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          API_FOOTBALL_KEY: ${{ secrets.API_FOOTBALL_KEY }}
         run: |
           if [ ! -f "$UPDATE_CONFIG" ]; then
             echo "::notice title=Update skipped::$UPDATE_CONFIG does not exist yet (prompt 4 creates it on 6 November); rebuilding from the tables in S3."
@@ -116,7 +126,7 @@ jobs:
       # agree or disagree with (docs/DEPLOY.md, The scout reports).
       - name: Keep the owner's report of the judged sample
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: scout-reports-judged
           path: |
@@ -129,6 +139,9 @@ jobs:
         run: uv run scout --config "$CONFIG" site
 
       - name: Publish
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
         run: uv run scout --config "$CONFIG" publish | tee publish.txt
 
       - name: Summary
