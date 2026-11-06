@@ -1024,11 +1024,11 @@ added 6 November 2026):
    `processed/current/player_match_stats/` and `processed/current/match_lineups/`,
    which are validated and uploaded.
 
-A normal week has about 450 finished matches in our leagues and cups (37
-leagues of 8 to 15 matches a round, plus the European and South American cup
-matchdays), so about 23 batches: with the 7 day lists, about 30 requests a
-week. A weekly run of 90 therefore keeps every league current; a week with
-international windows or a congested December fits as well.
+Measured on the 2026/27 season so far (the 6 November pull): a week from
+August to early November had 350 finished matches in our leagues and cups at
+the median and 437 at most, so 18 to 22 batches; with the 7 day lists, 25 to
+29 requests a week. A weekly run of 90 therefore keeps every league current
+with room to spare; a congested December week fits as well.
 
 The runner starts empty, so the raw cache lives in S3: `S3BackedRawStore`
 copies a response down from `raw/` before the client would ask the API and
