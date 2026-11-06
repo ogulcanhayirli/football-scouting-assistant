@@ -132,6 +132,7 @@ $C forecast revise forecasts/2026-10-21 --reason "..."  # rewrite a registered f
 $C forecast window-freeze [--refreeze]      # forecasts/window-2027-01 (big move and step up top 50)
 $C forecast window-score                    # reports/window_window-2027-01.md, after the window
 $C sync up | down [--dry-run] [--only raw|processed|reports|transfermarkt]
+uv run scout --config configs/update.free.yaml update   # free tier: last 7 days of matches
 uv run python scripts/run_extras.py          # sidelined, coaches, events (done 17 October)
 uv run python scripts/rebuild_match_seasons.py --from-s3 serie_b:2016  # re-parse partitions offline after an adapter repair
 uv run python scripts/repair_names.py [--dry-run]  # the adapter's name repair on processed partitions built before it (prompt 18b)
@@ -1072,11 +1073,17 @@ Settle them with the owner rather than guessing.
   were uploaded on 23 October with the owner's yes. The 5 USD budget alarm could not be checked or
   created: the session user has no Budgets rights, and `scout-cfn-exec`
   allows no budgets either; the commands are in docs/DEPLOY.md.
-* The free tier update (prompt 4) plugs into the weekly run as
-  `scout update` behind `configs/update.free.yaml`; it must read and write the
-  raw cache in S3 (rule 4: the runner starts empty) and needs IAM rights on
-  `raw/api_football/` and the partitions it writes, which the rule 8
-  exception does not cover.
+* The free tier update (6 November 2026): `scout update` with
+  `configs/update.free.yaml` (inherits `backfill.ultra.yaml` through `base:`)
+  asks `/fixtures?date=` for the last 7 days, then the finished matches of our
+  leagues and cups not yet cached, 20 per request, in `update.priority`
+  order, within 90 requests; the rest waits for the next run. It writes
+  `processed/current/player_match_stats` and `match_lineups`. The raw cache
+  is read and written in S3 (`S3BackedRawStore`). A week needs 25 to 29
+  requests (350 to 437 matches, measured). **Not merged to `main` yet**: the
+  Monday run fails at step 3 until `scout-weekly` gets the IAM rights listed
+  in docs/DEPLOY.md (The free tier update), the owner's decision. Squads,
+  transfers, injuries and season totals are not kept current by it.
 * Shared player ids: the adapter now drops the rows of the minority club when
   one id switches clubs back and forth within a league season (two players
   on one id). When the id's real owner is the minority, his rows go
@@ -1142,9 +1149,12 @@ Settle them with the owner rather than guessing.
   session (the site bucket was outside that approval); the Monday weekly
   run publishes it. The weekly run does not pull (it
   would need about 2,000 requests and the raw cache); the 6 November pull
-  should run `scout current` again, then `features --current`, `lists`,
-  `site` and `sync up`. After 7 November a full pull takes about three
-  weeks on the free tier.
+  ran `scout current` again (4,714 requests: 830 squads and transfer lists,
+  8,875 finished matches of all 61 leagues and competitions, J1 2027
+  included, injuries and, new, the leagues' season totals so far and
+  lineups); raw was synced up. `features --current`, `lists`, `site` and a
+  `processed` sync up were not run in that session (not approved). After 7
+  November a full pull takes about three weeks on the free tier.
 * The `scouting.parquet` in S3 breaks ties between equal market values in a
   different order than the build that made the registered lists: rebuilt on
   24 October, 51 candidates' value ranks swap by one with a neighbour of the
