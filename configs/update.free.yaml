@@ -1,0 +1,73 @@
+# Free tier update (from 7 November 2026, when the Ultra plan ends): 100
+# requests a day, 10 a minute. `scout --config configs/update.free.yaml update`
+# fetches the finished matches of the last `days` match days of every league
+# and competition in backfill.ultra.yaml, in `priority` order, while
+# `max_requests` lasts; the rest waits for the next run, first in line.
+# The weekly GitHub Actions run (.github/workflows/weekly.yml, step 3) calls it.
+# Design and request counts: src/scout/update.py and docs/DEPLOY.md.
+base: backfill.ultra.yaml
+
+api_football:
+  plan: free
+  quota:
+    daily_limit: 100
+    per_minute_limit: 10
+    safety_margin: 5  # a few requests left for a manual check the same day
+
+update:
+  days: 7
+  max_requests: 90
+  s3_raw: true
+  # League strength: the Champions League and the big five first, then the
+  # Europa League and the next European leagues, the other club cups and South
+  # America, then the rest by the Elo strength of their latest season
+  # (processed/elo/league_season_elo.parquet, 6 November 2026), the national
+  # team and youth competitions last. Keys not listed follow in config order.
+  priority:
+    - champions_league
+    - epl
+    - la_liga
+    - bundesliga
+    - serie_a
+    - ligue_1
+    - europa_league
+    - primeira_liga
+    - eredivisie
+    - belgian_pro_league
+    - championship
+    - super_lig
+    - conference_league
+    - copa_libertadores
+    - brasileirao
+    - liga_profesional
+    - copa_sudamericana
+    - danish_superliga
+    - norwegian_eliteserien
+    - segunda_division
+    - polish_ekstraklasa
+    - k_league_1
+    - j1_league
+    - saudi_pro_league
+    - liga_mx
+    - swiss_super_league
+    - bundesliga_2
+    - mls
+    - ligue_2
+    - serie_b
+    - greek_super_league
+    - croatian_hnl
+    - czech_first_league
+    - russian_premier_league
+    - colombian_primera_a
+    - swedish_allsvenskan
+    - austrian_bundesliga
+    - scottish_premiership
+    - uruguayan_primera
+    - serbian_superliga
+    - ukrainian_premier_league
+    - eerste_divisie
+    - nations_league
+    - wc_qual_europe
+    - wc_qual_south_america
+    - euro_qual
+    - uefa_youth_league

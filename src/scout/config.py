@@ -221,6 +221,21 @@ class ChatConfig(BaseModel):
     site_url: str | None = None
 
 
+class UpdateConfig(BaseModel):
+    """The free tier update (``scout update``, from 7 November 2026)."""
+
+    days: int = Field(default=7, ge=1, le=30, description="Match days back from yesterday.")
+    max_requests: int = Field(default=90, ge=1, description="Requests a run may make.")
+    priority: list[str] = Field(
+        default_factory=list,
+        description="League and competition keys in the order their matches are fetched; "
+        "keys not listed follow in config order.",
+    )
+    s3_raw: bool = Field(
+        default=True, description="Read and write the raw cache in S3 ($SCOUT_S3_BUCKET)."
+    )
+
+
 class Settings(BaseModel):
     api_football: ApiFootballConfig
     transfermarkt: TransfermarktConfig = TransfermarktConfig()
@@ -231,6 +246,7 @@ class Settings(BaseModel):
     backfill: BackfillConfig = BackfillConfig()
     reports_text: ReportsConfig = ReportsConfig()
     chat: ChatConfig = ChatConfig()
+    update: UpdateConfig = UpdateConfig()
 
     def league(self, key: str) -> LeagueConfig:
         for league in self.leagues:
@@ -239,7 +255,24 @@ class Settings(BaseModel):
         raise KeyError(f"Unknown league key {key!r}")
 
 
+def _read_yaml(path: Path) -> dict:
+    """A config may name a ``base`` config (relative to itself) and override its
+    top level keys; mappings one level down are merged key by key."""
+    with path.open(encoding="utf-8") as fh:
+        raw = yaml.safe_load(fh) or {}
+    base = raw.pop("base", None)
+    if base is None:
+        return raw
+    merged = (
+        _read_yaml(path.parent / base) if not Path(base).is_absolute() else _read_yaml(Path(base))
+    )
+    for key, value in raw.items():
+        if isinstance(value, dict) and isinstance(merged.get(key), dict):
+            merged[key] = {**merged[key], **value}
+        else:
+            merged[key] = value
+    return merged
+
+
 def load_settings(path: str | Path) -> Settings:
-    with Path(path).open(encoding="utf-8") as fh:
-        raw = yaml.safe_load(fh)
-    return Settings.model_validate(raw)
+    return Settings.model_validate(_read_yaml(Path(path)))

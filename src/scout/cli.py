@@ -32,7 +32,7 @@ def _setup_logging(settings: Settings) -> None:
     logging.getLogger("httpx").setLevel(logging.WARNING)
 
 
-def build_client(settings: Settings) -> ApiFootballClient:
+def build_client(settings: Settings, store=None) -> ApiFootballClient:
     af = settings.api_football
     guard = QuotaGuard(
         daily_limit=af.quota.daily_limit,
@@ -42,7 +42,7 @@ def build_client(settings: Settings) -> ApiFootballClient:
     )
     return ApiFootballClient(
         api_key=api_football_key(),
-        store=LocalRawStore(settings.paths.raw_dir),
+        store=store or LocalRawStore(settings.paths.raw_dir),
         guard=guard,
         base_url=af.base_url,
         timeout=af.timeout_seconds,
@@ -149,6 +149,43 @@ def cmd_current(settings: Settings, args: argparse.Namespace) -> int:
         result.stopped_reason,
     )
     return 0 if result.complete else 2
+
+
+def cmd_update(settings: Settings, args: argparse.Namespace) -> int:
+    import os
+    from datetime import UTC, date, datetime
+
+    from scout.update import run_update, upload_partitions
+
+    log = logging.getLogger(__name__)
+    today = date.fromisoformat(args.today) if args.today else datetime.now(UTC).date()
+    s3 = bucket = None
+    store = None
+    if settings.update.s3_raw:
+        bucket = os.environ.get("SCOUT_S3_BUCKET")
+        if not bucket:
+            log.error("update.s3_raw is on but SCOUT_S3_BUCKET is not set")
+            return 1
+        import boto3
+
+        from scout.storage import S3BackedRawStore
+
+        s3 = boto3.client("s3")
+        store = S3BackedRawStore(LocalRawStore(settings.paths.raw_dir), s3, bucket)
+    with build_client(settings, store=store) as client:
+        result = run_update(settings, client, today, s3=s3, bucket=bucket)
+    uploaded = upload_partitions(settings, result, s3, bucket) if s3 is not None else []
+    print(
+        f"update {result.days[-1]} to {result.days[0]}: {result.in_window} finished matches, "
+        f"{result.already_cached} cached before, {result.fetched} held now, "
+        f"{result.queued} left for the next run; {result.requests_made} requests; "
+        f"stopped: {result.stopped_reason or 'no'}"
+    )
+    for key, row in result.per_league.items():
+        print(f"  {key}: {row['held']}/{row['finished']}")
+    if store is not None:
+        print(f"S3: {len(store.uploaded)} raw files and {len(uploaded)} partitions uploaded")
+    return 0
 
 
 def cmd_transfermarkt(settings: Settings, args: argparse.Namespace) -> int:
@@ -670,6 +707,13 @@ def main(argv: list[str] | None = None) -> int:
 
     coverage = sub.add_parser("coverage", help="Rebuild the coverage report from the cache")
     coverage.set_defaults(func=cmd_coverage)
+
+    upd = sub.add_parser(
+        "update",
+        help="Free tier update: finished matches of the last days, by league priority",
+    )
+    upd.add_argument("--today", help="Day of the run, YYYY-MM-DD (default: today, UTC)")
+    upd.set_defaults(func=cmd_update)
 
     cur = sub.add_parser(
         "current",

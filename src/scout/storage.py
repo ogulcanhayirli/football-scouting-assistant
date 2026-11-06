@@ -103,3 +103,55 @@ class LocalRawStore:
                 params.append((unquote(k), unquote(v)))
             found.append(CacheKey(source, endpoint, tuple(sorted(params))))
         return found
+
+
+class S3BackedRawStore:
+    """The local store in front of the raw cache in S3 (``raw/`` in the bucket).
+
+    For a runner that starts empty (the weekly GitHub Actions run): a key not
+    on disk is looked up in S3 and copied down before the client would ask the
+    API, and every new response is written locally and then uploaded, sidecar
+    first and body last, as on disk. So no request is ever made twice (rule 4).
+    """
+
+    def __init__(self, local: LocalRawStore, s3, bucket: str, prefix: str = "raw/") -> None:
+        self.local, self.s3, self.bucket, self.prefix = local, s3, bucket, prefix
+        self.root = local.root
+        self.uploaded: list[str] = []
+
+    def _s3_key(self, key: CacheKey, suffix: str) -> str:
+        return self.prefix + key.relative_path(suffix).as_posix()
+
+    def exists(self, key: CacheKey) -> bool:
+        if self.local.exists(key):
+            return True
+        from botocore.exceptions import ClientError
+
+        for suffix in (".meta.json", ".json"):  # body last, as on disk
+            path = self.root / key.relative_path(suffix)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = path.with_name(path.name + ".part")
+            try:
+                self.s3.download_file(self.bucket, self._s3_key(key, suffix), str(tmp))
+            except ClientError as exc:
+                if exc.response.get("Error", {}).get("Code") in {"404", "NoSuchKey", "403"}:
+                    return False
+                raise
+            tmp.replace(path)
+        return True
+
+    def get(self, key: CacheKey) -> bytes:
+        return self.local.get(key)
+
+    def get_meta(self, key: CacheKey) -> RawMeta | None:
+        return self.local.get_meta(key)
+
+    def put(self, key: CacheKey, body: bytes, meta: RawMeta) -> None:
+        self.local.put(key, body, meta)
+        for suffix in (".meta.json", ".json"):
+            s3_key = self._s3_key(key, suffix)
+            self.s3.upload_file(str(self.root / key.relative_path(suffix)), self.bucket, s3_key)
+            self.uploaded.append(s3_key)
+
+    def keys(self, source: str, endpoint: str) -> list[CacheKey]:
+        return self.local.keys(source, endpoint)
