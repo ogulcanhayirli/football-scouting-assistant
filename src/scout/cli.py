@@ -177,7 +177,7 @@ def cmd_update(settings: Settings, args: argparse.Namespace) -> int:
     uploaded = upload_partitions(settings, result, s3, bucket) if s3 is not None else []
     print(
         f"update {result.days[-1]} to {result.days[0]}: {result.in_window} finished matches, "
-        f"{result.already_cached} cached before, {result.fetched} held now, "
+        f"{result.already_cached} cached before, {result.fetched} fetched now, "
         f"{result.queued} left for the next run; {result.requests_made} requests; "
         f"stopped: {result.stopped_reason or 'no'}"
     )
