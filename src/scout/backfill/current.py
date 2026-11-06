@@ -15,9 +15,11 @@ Tables, under ``data/processed/current/`` (display only, never a model input):
 * ``current_club.parquet``: one row per player, his club today
 * ``club_leagues.parquet``: team id, name, league key and name of the clubs
   in our leagues' current seasons
-* ``player_match_stats/league=<key>/season=<year>.parquet`` and
-  ``injuries/league=<key>/season=<year>.parquet``: the season in progress,
-  the same columns and contracts as the finished seasons' tables
+* ``player_match_stats/league=<key>/season=<year>.parquet``,
+  ``match_lineups/...``, ``injuries/...`` and, for leagues,
+  ``player_season_stats/...``: the season in progress of every league and
+  competition, the same columns and contracts as the finished seasons' tables
+  (competitions since 6 November 2026; their season pages stay raw only)
 
 Like every backfill it resumes from the raw cache, and it stops cleanly at
 ``max_requests`` or when the quota guard says the day is spent.
@@ -36,12 +38,18 @@ from scout.config import LeagueConfig, Settings
 from scout.contracts import (
     CURRENT_CLUB,
     INJURIES,
+    MATCH_LINEUPS,
     PLAYER_MATCH_STATS,
+    PLAYER_SEASON_STATS,
     SQUADS,
     TRANSFERS,
     validate,
 )
-from scout.providers.api_football.adapter import ApiFootballStatsProvider
+from scout.providers.api_football.adapter import (
+    ApiFootballStatsProvider,
+    parse_players_page,
+    rows_to_frame,
+)
 from scout.providers.api_football.client import SOURCE, QuotaExceededError
 from scout.providers.api_football.current import (
     ApiFootballCurrentProvider,
@@ -53,7 +61,9 @@ from scout.providers.api_football.current import (
 from scout.providers.api_football.extras import chunks
 from scout.providers.api_football.matches import (
     injury_rows_to_frame,
+    lineup_rows_to_frame,
     match_rows_to_frame,
+    parse_fixture_lineups,
     parse_fixture_players,
     parse_injuries,
 )
@@ -211,7 +221,7 @@ def run_current(
     provider: ApiFootballCurrentProvider,
     *,
     max_requests: int | None = None,
-    steps: tuple[str, ...] = ("clubs", "squads", "transfers", "matches", "injuries"),
+    steps: tuple[str, ...] = ("clubs", "squads", "transfers", "matches", "injuries", "pages"),
 ) -> CurrentResult:
     client = provider.client
     result = CurrentResult(as_of=provider.as_of)
@@ -225,6 +235,7 @@ def run_current(
     seasons = current_seasons(seasons_provider, settings.leagues)
     cups = [c for c in settings.competitions if c.kind == "club"]
     cup_seasons = current_seasons(seasons_provider, cups)
+    comp_seasons = current_seasons(seasons_provider, settings.competitions)
     try:
         # Clubs
         club_rows = []
@@ -296,25 +307,39 @@ def run_current(
             current.to_parquet(out / "current_club.parquet", index=False)
             result.tables["current_club"] = len(current)
 
-        # The season in progress
-        for league in settings.leagues:
-            season = seasons.get(league.key)
+        # The season in progress, of every league and competition
+        in_progress = [(lg, seasons.get(lg.key)) for lg in settings.leagues]
+        in_progress += [(c, comp_seasons.get(c.key)) for c in settings.competitions]
+        batches = _cached_batches(client)
+        for league, season in in_progress:
             if season is None:
                 continue
             if "matches" in steps:
                 check_cap()
                 ids = finished_ids(provider.fixtures(league, season))
                 fixtures = []
-                for batch in uncached_chunks(client, ids):
+                for batch in chunks([i for i in ids if i not in batches]):
                     check_cap()
                     fixtures.extend(provider.fixtures_by_id(batch).get("response") or [])
+                    batches.update(dict.fromkeys(batch, None))
                 fixtures.extend(
                     cached_fixtures(client, ids, have={f["fixture"]["id"] for f in fixtures})
                 )
-                rows = []
+                rows, lineup_rows = [], []
                 for fixture in fixtures:
                     players = {"response": fixture.get("players") or []}
                     rows.extend(parse_fixture_players(fixture, players, league))
+                    lineups = {"response": fixture.get("lineups") or []}
+                    lineup_rows.extend(parse_fixture_lineups(fixture, lineups, league))
+                _write_season(
+                    out,
+                    "match_lineups",
+                    league.key,
+                    season,
+                    lineup_rows_to_frame(lineup_rows) if lineup_rows else None,
+                    MATCH_LINEUPS,
+                    result,
+                )
                 result.matches += len(ids)
                 frame = match_rows_to_frame(rows) if rows else None
                 try:
@@ -351,11 +376,25 @@ def run_current(
                 frame = injury_rows_to_frame(
                     parse_injuries(provider.injuries(league, season), league, season)
                 )
-                if len(frame):
-                    validate(INJURIES, frame)
-                    path = out / "injuries" / f"league={league.key}" / f"season={season}.parquet"
-                    path.parent.mkdir(parents=True, exist_ok=True)
-                    frame.to_parquet(path, index=False)
+                _write_season(out, "injuries", league.key, season, frame, INJURIES, result)
+            if "pages" in steps:
+                page_rows, page, total = [], 1, 1
+                while page <= total:
+                    check_cap()
+                    payload = provider.player_page(league, season, page)
+                    total = int((payload.get("paging") or {}).get("total") or 1)
+                    page_rows.extend(parse_players_page(payload, league, season))
+                    page += 1
+                if league in settings.leagues:
+                    _write_season(
+                        out,
+                        "player_season_stats",
+                        league.key,
+                        season,
+                        rows_to_frame(page_rows) if page_rows else None,
+                        PLAYER_SEASON_STATS,
+                        result,
+                    )
     except (DailyQuotaExhaustedError, QuotaExceededError, RequestCapReachedError) as exc:
         result.stopped_reason = f"quota: {exc}"
         log.warning("Stopping: %s. Run the same command again to resume.", exc)
@@ -368,8 +407,23 @@ def run_current(
 # form new batches, so the batches already cached are found by their ids.
 
 
-def _cached_batches(client) -> dict[int, tuple[tuple[str, str], ...]]:
+def _cached_batches(client) -> dict[int, object]:
+    """Fixture id -> the cache key of the batch holding it. On the local store the
+    batch files are globbed directly: the key listing of ``fixtures`` would walk
+    every per match file under it (about a million)."""
+    from scout.storage import CacheKey
+
     found = {}
+    root = getattr(client.store, "root", None)
+    if root is not None:
+        for path in (root / SOURCE / "fixtures").glob("ids=*.json"):
+            if path.name.endswith(".meta.json"):
+                continue
+            value = path.stem.split("=", 1)[1]
+            key = CacheKey(SOURCE, "fixtures", (("ids", value),))
+            for fid in value.split("-"):
+                found[int(fid)] = key
+        return found
     for key in client.store.keys(SOURCE, "fixtures"):
         params = dict(key.params)
         if set(params) != {"ids"}:
@@ -377,6 +431,30 @@ def _cached_batches(client) -> dict[int, tuple[tuple[str, str], ...]]:
         for fid in params["ids"].split("-"):
             found[int(fid)] = key
     return found
+
+
+def _write_season(out, table, key, season, frame, contract, result) -> None:
+    """Validate and write one table of the season in progress; a contract
+    failure is logged and recorded, and the run goes on."""
+    if frame is None or not len(frame):
+        return
+    try:
+        validate(contract, frame)
+    except pandera.errors.SchemaErrors as exc:
+        result.failed.append(f"{table} {key}")
+        log.error(
+            "current %s %s %s failed the contract: %d violations\n%s",
+            table,
+            key,
+            season,
+            len(exc.failure_cases),
+            exc.failure_cases.head(20).to_string(),
+        )
+        return
+    path = out / table / f"league={key}" / f"season={season}.parquet"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    frame.to_parquet(path, index=False)
+    result.tables[table] = result.tables.get(table, 0) + len(frame)
 
 
 def uncached_chunks(client, ids: list[int]) -> list[list[int]]:

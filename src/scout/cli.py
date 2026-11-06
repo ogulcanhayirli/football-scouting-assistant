@@ -132,7 +132,9 @@ def cmd_current(settings: Settings, args: argparse.Namespace) -> int:
             ApiFootballStatsProvider(client),
             ApiFootballCurrentProvider(client, as_of),
             max_requests=args.max_requests,
-            steps=tuple(args.step or ("clubs", "squads", "transfers", "matches", "injuries")),
+            steps=tuple(
+                args.step or ("clubs", "squads", "transfers", "matches", "injuries", "pages")
+            ),
         )
     logging.getLogger(__name__).info(
         "Current %s: %d clubs, %d squads, %d transfer lists, %d finished matches, "
@@ -678,7 +680,7 @@ def main(argv: list[str] | None = None) -> int:
     cur.add_argument(
         "--step",
         action="append",
-        choices=["clubs", "squads", "transfers", "matches", "injuries"],
+        choices=["clubs", "squads", "transfers", "matches", "injuries", "pages"],
         help="repeatable; default all (clubs always run)",
     )
     cur.set_defaults(func=cmd_current)

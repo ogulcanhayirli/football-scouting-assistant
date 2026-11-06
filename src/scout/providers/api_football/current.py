@@ -11,6 +11,8 @@ progress (prompt 16, 23 October 2026).
   ``/fixtures?ids=`` (up to 20) for the finished matches: the full match,
   of which the ``players`` block is the ``/fixtures/players`` answer.
 * ``/injuries?league=&season=`` of the season in progress.
+* ``/players?league=&season=&page=`` of the season in progress: the season
+  totals so far (6 November 2026, before the Ultra plan ended).
 
 Squads, transfers, the fixture list and the injuries of a season in progress
 change from day to day, so they are cached per snapshot day (the ``as_of``
@@ -63,6 +65,10 @@ class ApiFootballCurrentProvider:
 
     def fixtures_by_id(self, fixture_ids: list[int]) -> dict[str, Any]:
         return self.client.get("fixtures", {"ids": joined(fixture_ids)}).payload
+
+    def player_page(self, league: LeagueConfig, season: int, page: int) -> dict[str, Any]:
+        params = {"league": league.api_football_id, "season": season, "page": page}
+        return self.client.get("players", params, snapshot=self.as_of).payload
 
     def injuries(self, league: LeagueConfig, season: int) -> dict[str, Any]:
         params = {"league": league.api_football_id, "season": season}
