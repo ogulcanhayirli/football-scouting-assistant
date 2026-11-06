@@ -1003,29 +1003,73 @@ trained on and the date. If the feature columns change, `scout score` stops
 with a message to retrain rather than score with a model that expects other
 columns.
 
-## The free tier update (for prompt 4)
+## The free tier update
 
-The run's step 3 is a placeholder with a fixed contract:
+From 7 November 2026 the API Football plan is the free tier: 100 requests a
+day, 10 a minute. Step 3 of the run calls
+`scout --config configs/update.free.yaml update` (`src/scout/update.py`,
+added 6 November 2026):
 
-* it runs only when `configs/update.free.yaml` exists, and then calls
-  `scout --config configs/update.free.yaml update`; if the config exists but
-  the command does not, the run fails and says so;
-* the command must read and write the raw cache in S3, so no request is ever
-  made twice (rule 4; the runner starts empty every week), and write back the
-  processed partitions it changes (and the Elo tables, if fixtures change);
-* `scout-weekly` then needs read and write on `raw/api_football/` and write
-  on those partitions. That is beyond the rule 8 exception for this job and
-  is the owner's decision.
+1. `/fixtures?date=` for each of the last 7 match days (yesterday back):
+   every match in the world that day, so a week costs 7 requests whatever
+   the number of leagues. A past day is cached once.
+2. The finished matches of our 37 leagues and 24 competitions that no cached
+   `/fixtures?ids=` batch holds yet, 20 per request, in `update.priority`
+   order (the Champions League and the big five first, the national team and
+   youth competitions last; the list and why are in the config), while the
+   run's budget of 90 requests lasts. Each answer carries the match's player
+   stats, lineups and events. What the budget leaves waits for the next run,
+   first in line.
+3. The new rows go into the season in progress partitions,
+   `processed/current/player_match_stats/` and `processed/current/match_lineups/`,
+   which are validated and uploaded.
 
-`features --current` also rebuilds the season so far block of both tables
-(prompt 16) from `processed/current/`, which the run pulls with the rest of
-`processed/`. The run never calls `scout current` (it spends about 2,000
-requests: squads and transfer lists of 830 clubs, the finished matches), so
-the club today and the season so far stay as of the last pull until a
-session runs `scout current` and syncs `raw/` and `processed/` up. On the
-free tier (100 a day from 7 November) a full pull takes about three weeks;
-a week of new matches alone (37 fixture lists and about 50 new batches of
-20) fits in one day.
+A normal week has about 450 finished matches in our leagues and cups (37
+leagues of 8 to 15 matches a round, plus the European and South American cup
+matchdays), so about 23 batches: with the 7 day lists, about 30 requests a
+week. A weekly run of 90 therefore keeps every league current; a week with
+international windows or a congested December fits as well.
+
+The runner starts empty, so the raw cache lives in S3: `S3BackedRawStore`
+copies a response down from `raw/` before the client would ask the API and
+uploads every new one (sidecar, then body), so no request is ever made twice
+(rule 4). `scout-weekly` therefore needs these rights in addition to its
+policy above. Granting them is the owner's decision (rule 8), and **the
+first Monday run after `configs/update.free.yaml` reaches `main` fails at
+step 3 without them**, so add them before merging:
+
+```json
+{
+  "Sid": "UpdateListBatches",
+  "Effect": "Allow",
+  "Action": "s3:ListBucket",
+  "Resource": "arn:aws:s3:::${DATA}",
+  "Condition": {"StringLike": {"s3:prefix": ["raw/api_football/fixtures/ids=*"]}}
+},
+{
+  "Sid": "UpdateRawCache",
+  "Effect": "Allow",
+  "Action": ["s3:GetObject", "s3:PutObject"],
+  "Resource": [
+    "arn:aws:s3:::${DATA}/raw/api_football/fixtures/date=*",
+    "arn:aws:s3:::${DATA}/raw/api_football/fixtures/ids=*"
+  ]
+},
+{
+  "Sid": "UpdateSeasonInProgress",
+  "Effect": "Allow",
+  "Action": "s3:PutObject",
+  "Resource": "arn:aws:s3:::${DATA}/processed/current/*"
+}
+```
+
+What the free tier does not keep current: squads and transfer lists (830
+clubs each, about 17 days of the whole quota), injuries, the `/players`
+season totals and the fixture lists of the season ahead. `scout current`
+still pulls those (about 2,000 requests on the Ultra plan, so about three
+weeks on the free tier); the run never calls it. `features --current` builds
+the season so far from `processed/current/`, which the run pulls with the
+rest of `processed/`.
 
 A new season in the season stats makes `features --current` build that
 season. Its feature date (30 June 2027) lies more than a year after the last
